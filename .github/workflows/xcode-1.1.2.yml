@@ -1,0 +1,44 @@
+name: iOS Next 1.1.2 Xcode
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xcode:
+    uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@eb7069589755d503cc61c4108ddf284b219722a6
+    with:
+      runs-on: xcode-27
+      xcode-command: |
+        set -euo pipefail
+
+        echo "=== PROVENANCE ==="
+        cat SOURCE_SHA
+
+        echo "=== TOOLCHAIN ==="
+        xcodebuild -version
+        xcrun --sdk iphonesimulator --show-sdk-version
+
+        echo "=== XCODEGEN ==="
+        if ! command -v xcodegen >/dev/null 2>&1; then
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+        fi
+        xcodegen --version
+
+        echo "=== WIREGUARD DEPENDENCY ==="
+        bash Scripts/prepare_wireguard_dependency.sh
+
+        echo "=== GENERATE PROJECT ==="
+        xcodegen generate
+
+        echo "=== BUILD ==="
+        xcodebuild \
+          -project IOSNext.xcodeproj \
+          -scheme IOSNext \
+          -sdk iphonesimulator \
+          -configuration Debug \
+          -destination 'platform=iOS Simulator,OS=27.0,name=iPhone 18 Pro Max' \
+          CODE_SIGNING_ALLOWED=NO \
+          build
