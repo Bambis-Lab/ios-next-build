@@ -1,0 +1,2105 @@
+{
+  "schema_version": 1,
+  "goal_version": "native-ios-visual-matrix-rebuild-phase1-v1",
+  "inventory_source_head": "9bafb7bb818109cdcade6e40f7d6ce2dda38c678",
+  "branch": "auto/ios-ui-acceptance-sim-green-v1",
+  "phase": "phase1-definition-only",
+  "source_of_truth": "current product code at inventory_source_head; legacy matrix/run are reference only",
+  "failure_classes": [
+    "launch_failure",
+    "ready_timeout",
+    "wrong_surface",
+    "selector_contract",
+    "interaction_unhittable",
+    "appearance_mismatch",
+    "orientation_mismatch",
+    "blank_or_flat_capture",
+    "accessibility_state_mismatch",
+    "video_transition_gap",
+    "external_state_leak"
+  ],
+  "scenarios": [
+    {
+      "id": "CLD-001",
+      "category": "cold-launch",
+      "surface": "connection-landing",
+      "entry": "normal app launch; no acceptance arguments",
+      "preconditions": [
+        "clean simulator app/container state",
+        "no stored HA credentials",
+        "system appearance set before launch"
+      ],
+      "action": [
+        "launch app from terminated state"
+      ],
+      "expected_stable_state": [
+        "ConnectionLandingView is visible",
+        "iOS Next title is visible",
+        "Home Assistant verbinden and Verschlüsselten Chat öffnen are visible",
+        "no black/blank intermediary remains after stabilization"
+      ],
+      "evidence_type": [
+        "video",
+        "terminal screenshot"
+      ],
+      "variants": {
+        "appearance": [
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "video_transition_gap"
+        ],
+        "recovery": "relaunch exact scenario; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "external_state_leak",
+        "video_transition_gap",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "SETUP-001",
+      "category": "state",
+      "surface": "connection-setup",
+      "entry": "ConnectionLandingView",
+      "preconditions": [
+        "CLD-001 stable landing"
+      ],
+      "action": [
+        "tap Home Assistant verbinden"
+      ],
+      "expected_stable_state": [
+        "Verbinden sheet visible",
+        "Home-Assistant address field visible",
+        "OAuth button disabled until valid HTTPS input",
+        "no credential entered"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility tree"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": "visual-only; no auth/network action"
+    },
+    {
+      "id": "SHELL-001",
+      "category": "primary-screen",
+      "surface": "home",
+      "entry": "--product-ui-test-screen=home",
+      "preconditions": [
+        "preview product acceptance mode",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact screen and wait current ready marker"
+      ],
+      "expected_stable_state": [
+        "home-header and Zuhause navigation title",
+        "screen responsive and non-blank"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility state"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "ProductAcceptanceRootView",
+        "VisualAcceptanceReadyProbe"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SHELL-002",
+      "category": "primary-screen",
+      "surface": "rooms",
+      "entry": "--product-ui-test-screen=rooms",
+      "preconditions": [
+        "preview product acceptance mode",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact screen and wait current ready marker"
+      ],
+      "expected_stable_state": [
+        "Räume title and Deine Räume section",
+        "screen responsive and non-blank"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility state"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "ProductAcceptanceRootView",
+        "VisualAcceptanceReadyProbe"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SHELL-003",
+      "category": "primary-screen",
+      "surface": "chat",
+      "entry": "--product-ui-test-screen=chat",
+      "preconditions": [
+        "preview product acceptance mode",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact screen and wait current ready marker"
+      ],
+      "expected_stable_state": [
+        "Mika chat title and chat composer surface",
+        "screen responsive and non-blank"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility state"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "ProductAcceptanceRootView",
+        "VisualAcceptanceReadyProbe"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SHELL-004",
+      "category": "primary-screen",
+      "surface": "media",
+      "entry": "--product-ui-test-screen=media",
+      "preconditions": [
+        "preview product acceptance mode",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact screen and wait current ready marker"
+      ],
+      "expected_stable_state": [
+        "Medien title and two preview media cards",
+        "screen responsive and non-blank"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility state"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "ProductAcceptanceRootView",
+        "VisualAcceptanceReadyProbe"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "SHELL-005",
+      "category": "primary-screen",
+      "surface": "system",
+      "entry": "--product-ui-test-screen=system",
+      "preconditions": [
+        "preview product acceptance mode",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact screen and wait current ready marker"
+      ],
+      "expected_stable_state": [
+        "Mehr title and Verwaltung links",
+        "screen responsive and non-blank"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility state"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "ProductAcceptanceRootView",
+        "VisualAcceptanceReadyProbe"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "NAV-001",
+      "category": "navigation",
+      "surface": "rooms-to-room-detail",
+      "entry": "SHELL-002",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Timo Zimmer"
+      ],
+      "expected_stable_state": [
+        "Timo Zimmer detail with verified profile entities"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "NAV-002",
+      "category": "navigation",
+      "surface": "rooms-to-all-entities",
+      "entry": "SHELL-002",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Alle Entitäten"
+      ],
+      "expected_stable_state": [
+        "Alle Entitäten with Name oder Entity-ID search"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "NAV-003",
+      "category": "navigation",
+      "surface": "media-to-fire-tv-detail",
+      "entry": "SHELL-004",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap card whose combined label contains Companion Testfilm"
+      ],
+      "expected_stable_state": [
+        "Fire TV Companion detail with transport and volume controls"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": "NAV-003 must not depend on the XCUI element type of SwiftUI NavigationLink"
+    },
+    {
+      "id": "NAV-004",
+      "category": "navigation",
+      "surface": "system-to-wireguard",
+      "entry": "SHELL-005",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Fernzugriff · WireGuard"
+      ],
+      "expected_stable_state": [
+        "WireGuard safe status/setup surface"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "NAV-005",
+      "category": "navigation",
+      "surface": "system-to-scenes",
+      "entry": "SHELL-005",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Szenen"
+      ],
+      "expected_stable_state": [
+        "Szenen surface with preview scene"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "NAV-006",
+      "category": "navigation",
+      "surface": "system-to-runner",
+      "entry": "SHELL-005",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Runner"
+      ],
+      "expected_stable_state": [
+        "Runner safe configuration entry state"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "NAV-007",
+      "category": "navigation",
+      "surface": "system-to-diagnostics",
+      "entry": "SHELL-005",
+      "preconditions": [
+        "entry surface stable"
+      ],
+      "action": [
+        "tap Diagnose"
+      ],
+      "expected_stable_state": [
+        "Diagnose connection/entity/privacy rows without token values"
+      ],
+      "evidence_type": [
+        "before/after screenshots",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "wrong_surface",
+        "selector_contract",
+        "interaction_unhittable",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "DETAIL-001",
+      "category": "detail",
+      "surface": "light-detail",
+      "entry": "--product-ui-test-screen=light",
+      "preconditions": [
+        "preview light light.hintergrund_fernseher",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact standalone detail"
+      ],
+      "expected_stable_state": [
+        "Hintergrund Fernseher detail visible",
+        "brightness slider and power control exist"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility tree"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "EntityDetailView"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "DETAIL-002",
+      "category": "detail",
+      "surface": "media-detail",
+      "entry": "--product-ui-test-screen=media-detail",
+      "preconditions": [
+        "preview media_player.schlafzimmer",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch exact standalone detail"
+      ],
+      "expected_stable_state": [
+        "Schlafzimmer media detail visible",
+        "transport, position and volume controls exist",
+        "Abendmix metadata visible"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility tree"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "EntityDetailView"
+      ],
+      "notes": ""
+    },
+    {
+      "id": "OWNER-001",
+      "category": "safe-state",
+      "surface": "owner-not-configured",
+      "entry": "--product-ui-test-screen=owner",
+      "preconditions": [
+        "clean simulator owner state",
+        "no owner token/keychain state"
+      ],
+      "action": [
+        "launch owner acceptance screen only"
+      ],
+      "expected_stable_state": [
+        "Control Center nicht eingerichtet visible",
+        "Control Center einrichten available",
+        "no Face ID/admin mutation invoked"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility tree"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "external_state_leak",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "ready_timeout"
+      ],
+      "dependencies": [],
+      "notes": "clean simulator required; Owner state can persist"
+    },
+    {
+      "id": "WG-001",
+      "category": "safe-state",
+      "surface": "wireguard-not-configured",
+      "entry": "--product-ui-test-screen=wireguard",
+      "preconditions": [
+        "clean simulator VPN preferences/keychain state",
+        "no imported .conf"
+      ],
+      "action": [
+        "launch WireGuard acceptance screen only"
+      ],
+      "expected_stable_state": [
+        "WireGuard title and Nicht eingerichtet state visible",
+        "no VPN connect/import/remove action invoked"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "accessibility tree"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "external_state_leak",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "ready_timeout"
+      ],
+      "dependencies": [],
+      "notes": "clean simulator system VPN state required"
+    },
+    {
+      "id": "RUNNER-001",
+      "category": "safe-state",
+      "surface": "control-center-not-configured",
+      "entry": "System > Control Center",
+      "preconditions": [
+        "owner/control-center configuration absent"
+      ],
+      "action": [
+        "navigate to Control Center"
+      ],
+      "expected_stable_state": [
+        "safe Control Center configuration entry visible",
+        "Runner remains inaccessible before Owner authentication",
+        "no health/pause/resume/restart/shutdown invoked"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "navigation assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "CHAT-INT-001",
+      "category": "interaction",
+      "surface": "chat-composer",
+      "entry": "--product-ui-test-screen=chat",
+      "preconditions": [
+        "preview ChatModel online",
+        "chat stable"
+      ],
+      "action": [
+        "focus composer",
+        "type deterministic draft text"
+      ],
+      "expected_stable_state": [
+        "chat-composer-field equals deterministic text",
+        "no send/network action"
+      ],
+      "evidence_type": [
+        "interaction assertion",
+        "post-interaction screenshot"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "selector_contract",
+        "interaction_unhittable",
+        "wrong_surface"
+      ],
+      "dependencies": [],
+      "notes": "sending and attachments excluded"
+    },
+    {
+      "id": "LIGHT-INT-001",
+      "category": "interaction",
+      "surface": "light-brightness-slider",
+      "entry": "--product-ui-test-screen=light",
+      "preconditions": [
+        "preview light detail stable"
+      ],
+      "action": [
+        "bounded scroll until light-brightness-slider hittable",
+        "adjust to deterministic normalized value"
+      ],
+      "expected_stable_state": [
+        "slider value changes",
+        "screen remains stable and non-blank",
+        "no real HA service call required"
+      ],
+      "evidence_type": [
+        "interaction assertion",
+        "post-interaction screenshot"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "interaction_unhittable"
+        ],
+        "recovery": "relaunch exact scenario; bounded scroll-to-visible once; never retry semantic wrong-state failures"
+      },
+      "failure_classification": [
+        "selector_contract",
+        "interaction_unhittable",
+        "wrong_surface"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "A11Y-001",
+      "category": "accessibility",
+      "surface": "dynamic-type-xxxl",
+      "entry": "product acceptance target set",
+      "preconditions": [
+        "dynamic-type-xxxl enabled before launch",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch each target independently",
+        "wait stable ready state"
+      ],
+      "expected_stable_state": [
+        "root accessibility state reports requested setting",
+        "primary content remains readable",
+        "state does not leak into next scenario"
+      ],
+      "evidence_type": [
+        "screenshots",
+        "accessibility-state assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ],
+        "targets": [
+          "home",
+          "chat",
+          "system",
+          "light"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "accessibility_state_mismatch",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "orientation_mismatch"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "A11Y-002",
+      "category": "accessibility",
+      "surface": "reduce-motion",
+      "entry": "product acceptance target set",
+      "preconditions": [
+        "reduce-motion enabled before launch",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch each target independently",
+        "wait stable ready state"
+      ],
+      "expected_stable_state": [
+        "root accessibility state reports requested setting",
+        "primary content remains readable",
+        "state does not leak into next scenario"
+      ],
+      "evidence_type": [
+        "screenshots",
+        "accessibility-state assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ],
+        "targets": [
+          "home",
+          "chat",
+          "media",
+          "light"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "accessibility_state_mismatch",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "orientation_mismatch"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "A11Y-003",
+      "category": "accessibility",
+      "surface": "reduce-transparency",
+      "entry": "product acceptance target set",
+      "preconditions": [
+        "reduce-transparency enabled before launch",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch each target independently",
+        "wait stable ready state"
+      ],
+      "expected_stable_state": [
+        "root accessibility state reports requested setting",
+        "primary content remains readable",
+        "state does not leak into next scenario"
+      ],
+      "evidence_type": [
+        "screenshots",
+        "accessibility-state assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ],
+        "targets": [
+          "home",
+          "system",
+          "owner",
+          "wireguard"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "accessibility_state_mismatch",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "orientation_mismatch"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "A11Y-004",
+      "category": "accessibility",
+      "surface": "increase-contrast",
+      "entry": "product acceptance target set",
+      "preconditions": [
+        "increase-contrast enabled before launch",
+        "fresh ready nonce"
+      ],
+      "action": [
+        "launch each target independently",
+        "wait stable ready state"
+      ],
+      "expected_stable_state": [
+        "root accessibility state reports requested setting",
+        "primary content remains readable",
+        "state does not leak into next scenario"
+      ],
+      "evidence_type": [
+        "screenshots",
+        "accessibility-state assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait",
+          "ipad-landscape"
+        ],
+        "targets": [
+          "home",
+          "rooms",
+          "media",
+          "system",
+          "light"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "accessibility_state_mismatch",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "orientation_mismatch"
+      ],
+      "dependencies": [],
+      "notes": ""
+    },
+    {
+      "id": "CARD-001",
+      "category": "card-catalog",
+      "surface": "live-card-page-0",
+      "entry": "--live-card-test-mode --live-card-page=0",
+      "preconditions": [
+        "test mode only",
+        "fresh page-specific ready nonce"
+      ],
+      "action": [
+        "launch exact page",
+        "verify expected card identifiers",
+        "capture stable page"
+      ],
+      "expected_stable_state": [
+        "correct page header",
+        "all listed card identifiers exist",
+        "page non-blank and stable"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "identifier coverage assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "sections",
+        "grid",
+        "conditional",
+        "template",
+        "entity",
+        "custom:mushroom-title-card",
+        "custom:mushroom-chips-card",
+        "custom:mushroom-template-card"
+      ],
+      "notes": "dependency coverage defined in Phase 1; final card-catalog execution deferred"
+    },
+    {
+      "id": "CARD-002",
+      "category": "card-catalog",
+      "surface": "live-card-page-1",
+      "entry": "--live-card-test-mode --live-card-page=1",
+      "preconditions": [
+        "test mode only",
+        "fresh page-specific ready nonce"
+      ],
+      "action": [
+        "launch exact page",
+        "verify expected card identifiers",
+        "capture stable page"
+      ],
+      "expected_stable_state": [
+        "correct page header",
+        "all listed card identifiers exist",
+        "page non-blank and stable"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "identifier coverage assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "custom:battery-state-card",
+        "custom:ios-light-card"
+      ],
+      "notes": "dependency coverage defined in Phase 1; final card-catalog execution deferred"
+    },
+    {
+      "id": "CARD-003",
+      "category": "card-catalog",
+      "surface": "live-card-page-2",
+      "entry": "--live-card-test-mode --live-card-page=2",
+      "preconditions": [
+        "test mode only",
+        "fresh page-specific ready nonce"
+      ],
+      "action": [
+        "launch exact page",
+        "verify expected card identifiers",
+        "capture stable page"
+      ],
+      "expected_stable_state": [
+        "correct page header",
+        "all listed card identifiers exist",
+        "page non-blank and stable"
+      ],
+      "evidence_type": [
+        "screenshot",
+        "identifier coverage assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max",
+          "ipad-portrait"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "custom:ios-media-player",
+        "custom:navbar-card"
+      ],
+      "notes": "dependency coverage defined in Phase 1; final card-catalog execution deferred"
+    },
+    {
+      "id": "ANIM-001",
+      "category": "animation-stage",
+      "surface": "app-start",
+      "entry": "--animation-acceptance-mode --animation-stage=0",
+      "preconditions": [
+        "animation test mode only",
+        "stage 0 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage app-start visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-0"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-002",
+      "category": "animation-stage",
+      "surface": "navigation",
+      "entry": "--animation-acceptance-mode --animation-stage=1",
+      "preconditions": [
+        "animation test mode only",
+        "stage 1 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage navigation visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-1"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-003",
+      "category": "animation-stage",
+      "surface": "light-toggle",
+      "entry": "--animation-acceptance-mode --animation-stage=2",
+      "preconditions": [
+        "animation test mode only",
+        "stage 2 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage light-toggle visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-2"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-004",
+      "category": "animation-stage",
+      "surface": "conditional",
+      "entry": "--animation-acceptance-mode --animation-stage=3",
+      "preconditions": [
+        "animation test mode only",
+        "stage 3 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage conditional visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-3"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-005",
+      "category": "animation-stage",
+      "surface": "media",
+      "entry": "--animation-acceptance-mode --animation-stage=4",
+      "preconditions": [
+        "animation test mode only",
+        "stage 4 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage media visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-4"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-006",
+      "category": "animation-stage",
+      "surface": "slider",
+      "entry": "--animation-acceptance-mode --animation-stage=5",
+      "preconditions": [
+        "animation test mode only",
+        "stage 5 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage slider visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-5"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-007",
+      "category": "animation-stage",
+      "surface": "chat",
+      "entry": "--animation-acceptance-mode --animation-stage=6",
+      "preconditions": [
+        "animation test mode only",
+        "stage 6 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage chat visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-6"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-008",
+      "category": "animation-stage",
+      "surface": "owner",
+      "entry": "--animation-acceptance-mode --animation-stage=7",
+      "preconditions": [
+        "animation test mode only",
+        "stage 7 requested directly"
+      ],
+      "action": [
+        "launch settled stage directly",
+        "wait stage-specific ready marker"
+      ],
+      "expected_stable_state": [
+        "animation stage owner visible in settled state",
+        "timeline and stage label agree",
+        "no external side effect"
+      ],
+      "evidence_type": [
+        "stage screenshot",
+        "ready-marker assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "launch_failure",
+        "ready_timeout",
+        "wrong_surface",
+        "blank_or_flat_capture"
+      ],
+      "dependencies": [
+        "animation-stage-7"
+      ],
+      "notes": "direct settled-state capture; not a substitute for full-sequence video"
+    },
+    {
+      "id": "ANIM-009",
+      "category": "animation-sequence",
+      "surface": "full-sequence",
+      "entry": "--animation-acceptance-mode without --animation-stage",
+      "preconditions": [
+        "animation test mode only",
+        "Reduce Motion disabled for primary sequence"
+      ],
+      "action": [
+        "record built-in sequence appStart→navigation→lightToggle→conditional→media→slider→chat→owner"
+      ],
+      "expected_stable_state": [
+        "all 8 stages appear in order",
+        "multiple visual fingerprints exist",
+        "no frozen/blank interval invalidates sequence"
+      ],
+      "evidence_type": [
+        "video",
+        "sampled-frame manifest"
+      ],
+      "variants": {
+        "appearance": [
+          "light"
+        ],
+        "devices": [
+          "iphone-18-pro-max"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 2,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "video_transition_gap"
+        ],
+        "recovery": "relaunch exact scenario; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "video_transition_gap",
+        "blank_or_flat_capture",
+        "wrong_surface",
+        "ready_timeout"
+      ],
+      "dependencies": [],
+      "notes": "definition only in Phase 1; final video execution deferred"
+    },
+    {
+      "id": "ORIENT-001",
+      "category": "orientation",
+      "surface": "ipad-shell-orientation",
+      "entry": "primary shell targets home/rooms/media/system",
+      "preconditions": [
+        "iPad simulator",
+        "target stable before rotation"
+      ],
+      "action": [
+        "capture portrait",
+        "rotate landscape",
+        "wait four stable oriented window samples",
+        "capture landscape"
+      ],
+      "expected_stable_state": [
+        "same logical surface persists",
+        "split-view semantics remain valid",
+        "no clipped critical control"
+      ],
+      "evidence_type": [
+        "portrait screenshot",
+        "landscape screenshot",
+        "orientation-state assertion"
+      ],
+      "variants": {
+        "appearance": [
+          "light",
+          "dark"
+        ],
+        "devices": [
+          "ipad-portrait",
+          "ipad-landscape"
+        ],
+        "targets": [
+          "home",
+          "rooms",
+          "media",
+          "system"
+        ]
+      },
+      "retry_policy": {
+        "max_attempts": 3,
+        "retryable": [
+          "ready_timeout",
+          "blank_or_flat_capture",
+          "orientation_mismatch"
+        ],
+        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
+      },
+      "failure_classification": [
+        "orientation_mismatch",
+        "wrong_surface",
+        "blank_or_flat_capture",
+        "ready_timeout"
+      ],
+      "dependencies": [],
+      "notes": ""
+    }
+  ],
+  "legacy_classification": [
+    {
+      "legacy": "testPrimaryProductScreensRenderLightAndDark",
+      "classification": "decomposed",
+      "replacement": [
+        "SHELL-001..005",
+        "DETAIL-001..002",
+        "OWNER-001",
+        "WG-001"
+      ],
+      "reason": "monolithic capture hid per-surface failure ownership"
+    },
+    {
+      "legacy": "testNativeTabNavigationAndMediaDetail",
+      "classification": "decomposed",
+      "replacement": [
+        "NAV-001..007",
+        "DETAIL-002"
+      ],
+      "reason": "mixed navigation/detail assertions and brittle SwiftUI element-type assumptions"
+    },
+    {
+      "legacy": "testChatComposerInteraction",
+      "classification": "retained-concept",
+      "replacement": [
+        "CHAT-INT-001"
+      ],
+      "reason": "safe draft typing retained; send/network side effects excluded"
+    },
+    {
+      "legacy": "testLightSliderInteraction",
+      "classification": "retained-concept",
+      "replacement": [
+        "LIGHT-INT-001"
+      ],
+      "reason": "bounded visibility policy replaces fixed hittability timing"
+    },
+    {
+      "legacy": "testOwnerAndWireGuardSafeEntryStates",
+      "classification": "split",
+      "replacement": [
+        "OWNER-001",
+        "WG-001"
+      ],
+      "reason": "different persistent-state risks need separate ownership"
+    },
+    {
+      "legacy": "testAccessibilityCoreScreenRenders",
+      "classification": "obsolete-aggregate",
+      "replacement": [
+        "A11Y-001..004"
+      ],
+      "reason": "generic aggregate duplicated explicit accessibility scenarios"
+    },
+    {
+      "legacy": "testDynamicTypeAccessibilityState",
+      "classification": "normalized",
+      "replacement": [
+        "A11Y-001"
+      ],
+      "reason": "expanded target set and readability contract"
+    },
+    {
+      "legacy": "testReduceMotionAccessibilityState",
+      "classification": "normalized",
+      "replacement": [
+        "A11Y-002"
+      ],
+      "reason": "explicit motion-sensitive targets"
+    },
+    {
+      "legacy": "testReduceTransparencyAccessibilityState",
+      "classification": "normalized",
+      "replacement": [
+        "A11Y-003"
+      ],
+      "reason": "explicit glass/management/privileged targets"
+    },
+    {
+      "legacy": "testIncreaseContrastAccessibilityState",
+      "classification": "normalized",
+      "replacement": [
+        "A11Y-004"
+      ],
+      "reason": "explicit contrast-sensitive targets"
+    },
+    {
+      "legacy": "testIPadPortraitLandscapeCoreScreens",
+      "classification": "decomposed",
+      "replacement": [
+        "device variants on primary scenarios",
+        "ORIENT-001"
+      ],
+      "reason": "device/orientation is a dimension, not one aggregate case"
+    },
+    {
+      "legacy": "Scripts/run_ui_acceptance_matrix.sh selection order",
+      "classification": "reference-only",
+      "replacement": [
+        "VisualAcceptanceMatrix.json"
+      ],
+      "reason": "legacy execution order must not define inventory"
+    },
+    {
+      "legacy": "run 35295372707",
+      "classification": "reference-evidence-only",
+      "replacement": [],
+      "reason": "historical failure informs failure classes only; it cannot define rebuilt matrix"
+    }
+  ],
+  "explicit_exclusions": [
+    {
+      "scope": "real Home Assistant authentication/network connection",
+      "reason": "live/auth/network gate; clean landing and preview modes only"
+    },
+    {
+      "scope": "real chat send, attachment upload, camera/photo/video transfer",
+      "reason": "external relay/media side effects; composer visual interaction only"
+    },
+    {
+      "scope": "real light/media/cover/lock/scene Home Assistant service calls",
+      "reason": "would mutate external state; render controls but do not execute services"
+    },
+    {
+      "scope": "Owner Face ID unlock/admin actions/token configuration",
+      "reason": "auth/secret/admin mutation gate; safe not-configured state only"
+    },
+    {
+      "scope": "WireGuard import/connect/on-demand/remove",
+      "reason": "device/network/keychain/system VPN mutation gate; safe not-configured state only"
+    },
+    {
+      "scope": "Runner health/pause/resume/restart/shutdown actions",
+      "reason": "runtime/network mutation gate; safe entry state only"
+    },
+    {
+      "scope": "destructive forget-connection action",
+      "reason": "credential/keychain mutation; excluded from visual acceptance"
+    },
+    {
+      "scope": "final simulator wave, final card catalog run, final video acceptance, Library upload",
+      "reason": "explicitly prohibited in Phase 1; matrix definition only"
+    }
+  ]
+}

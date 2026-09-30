@@ -1,0 +1,110 @@
+name: IOSNext
+options:
+  minimumXcodeGenVersion: 2.38.0
+packages:
+  WireGuardKit:
+    path: .build-dependencies/wireguard-apple
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    SWIFT_STRICT_CONCURRENCY: targeted
+    IPHONEOS_DEPLOYMENT_TARGET: 27.0
+    TARGETED_DEVICE_FAMILY: "1,2"
+    PRODUCT_BUNDLE_IDENTIFIER: de.nicofroeba16.iosnext
+targets:
+  IOSNext:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Assets.xcassets
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: 1.1.1
+        CURRENT_PROJECT_VERSION: 14
+        CODE_SIGN_ENTITLEMENTS: Sources/Resources/IOSNext.entitlements
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_CFBundleDisplayName: iOS Next
+        INFOPLIST_KEY_UILaunchStoryboardName: LaunchScreen
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.lifestyle
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: iOS Next connects to your Home Assistant server on the local network.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: iOS Next uses Face ID to confirm critical runner and owner actions.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: iOS Next uses the microphone for voice messages and the locally enabled Jarvis voice mode.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: iOS Next uses on-device iOS speech recognition for the Jarvis wake word and subsequent voice commands when local recognition is available.
+        INFOPLIST_KEY_NSCameraUsageDescription: iOS Next uses the camera for photos encrypted directly from memory.
+        INFOPLIST_KEY_CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - iosnext
+            CFBundleURLName: de.nicofroeba16.iosnext.auth
+    dependencies:
+      - target: IOSNextPacketTunnel
+        embed: true
+        link: false
+    scheme:
+      testTargets:
+        - IOSNextTests
+        - IOSNextUITests
+  WireGuardGoBridgeiOS:
+    type: ""
+    platform: iOS
+    legacy:
+      toolPath: /usr/bin/make
+      arguments: "$(ACTION) GOOS_iphonesimulator=ios"
+      passSettings: true
+      workingDirectory: "$(PROJECT_DIR)/.build-dependencies/wireguard-apple/Sources/WireGuardKitGo"
+    settings:
+      base:
+        SDKROOT: iphoneos
+  IOSNextPacketTunnel:
+    type: app-extension
+    platform: iOS
+    info:
+      path: WireGuard/PacketTunnel-Info.plist
+      properties:
+        CFBundleDisplayName: iOS Next WireGuard
+        IOSNextWireGuardKeychainAccessGroup: "$(AppIdentifierPrefix)de.nicofroeba16.iosnext.shared"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).PacketTunnelProvider"
+    sources:
+      - WireGuard/PacketTunnelProvider.swift
+      - WireGuard/ValidatedWireGuardConfiguration+WireGuardKit.swift
+      - Sources/Core/WireGuardConfigurationValidator.swift
+      - Sources/Core/WireGuardKeychain.swift
+      - Sources/Core/KeychainStore.swift
+    dependencies:
+      - target: WireGuardGoBridgeiOS
+      - package: WireGuardKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.nicofroeba16.iosnext.packet-tunnel
+        CODE_SIGN_ENTITLEMENTS: WireGuard/PacketTunnel.entitlements
+        SKIP_INSTALL: YES
+        ENABLE_BITCODE: NO
+  IOSNextTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: IOSNext
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
+  IOSNextUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: IOSNext
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: de.nicofroeba16.iosnext.uitests
+        TEST_TARGET_NAME: IOSNext

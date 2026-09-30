@@ -1,0 +1,12 @@
+# TEMPLATE ONLY. Never commit a real private key or pre-shared key.
+[Interface]
+PrivateKey = __DEVICE_PRIVATE_KEY_BASE64__
+Address = 10.8.0.2/32
+DNS = 10.8.0.1
+
+[Peer]
+PublicKey = __SERVER_PUBLIC_KEY_BASE64__
+PresharedKey = __OPTIONAL_PRESHARED_KEY_BASE64__
+Endpoint = vpn.example.invalid:51820
+AllowedIPs = 192.168.178.0/24, 10.8.0.0/24
+PersistentKeepalive = 25

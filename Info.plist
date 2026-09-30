@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <string>iOS Next</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>MinimumOSVersion</key>
+    <string>$(IPHONEOS_DEPLOYMENT_TARGET)</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>de.nicofroeba16.iosnext.auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>iosnext</string>
+            </array>
+        </dict>
+    </array>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>iOS Next verbindet sich mit deinem Home-Assistant-Server im lokalen Netzwerk.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>100.64.0.0/10</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+            <key>ts.net</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
+    <key>NSFaceIDUsageDescription</key>
+    <string>iOS Next verwendet Face ID, um kritische Runner- und Owner-Aktionen zu bestätigen.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>iOS Next verwendet das Mikrofon für Sprachnachrichten und den lokal aktivierten Jarvis-Sprachmodus. Audio wird nicht als Wake-Word-Stream an einen Server gesendet.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>iOS Next verwendet die lokale iOS-Spracherkennung für das Wake Word „Jarvis“ und nachfolgende Sprachbefehle, sofern On-Device-Erkennung verfügbar ist.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>iOS Next verwendet die Kamera für Fotos, die direkt im Arbeitsspeicher verschlüsselt werden.</string>
+    <key>IOSNextWireGuardKeychainAccessGroup</key>
+    <string>$(AppIdentifierPrefix)de.nicofroeba16.iosnext.shared</string>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,52 @@
+{
+  "schema_version": 2,
+  "master_fps": 120,
+  "reference_device": "iPhone 18 Pro Max",
+  "reference_os": "iOS 27.0",
+  "sequences": {
+    "startup": {
+      "frame_count": 87,
+      "last_frame": 86,
+      "visible_end_frame": 42,
+      "interactive_frame": 0,
+      "phases": [
+        {"name": "content_reveal", "start": 0, "end": 31},
+        {"name": "settle", "start": 32, "end": 42},
+        {"name": "stability_hold", "start": 43, "end": 86}
+      ],
+      "haptics": [],
+      "sounds": []
+    },
+    "control-center-unlock": {
+      "frame_count": 109,
+      "last_frame": 108,
+      "visible_end_frame": 50,
+      "interactive_frame": 50,
+      "phases": [
+        {"name": "authenticated_handoff", "start": 0, "end": 7},
+        {"name": "content_morph", "start": 8, "end": 31},
+        {"name": "module_settle", "start": 32, "end": 50},
+        {"name": "stability_hold", "start": 51, "end": 108}
+      ],
+      "haptics": [
+        {"name": "unlock_success", "frame": 10}
+      ],
+      "sounds": [
+        {"name": "unlock_tone", "frame": 10, "sample_rate_hz": 48000}
+      ]
+    },
+    "control-center-lock": {
+      "frame_count": 27,
+      "last_frame": 26,
+      "visible_end_frame": 26,
+      "interactive_frame": 26,
+      "phases": [
+        {"name": "content_dim", "start": 0, "end": 4},
+        {"name": "surface_morph", "start": 5, "end": 20},
+        {"name": "locked_settle", "start": 21, "end": 26}
+      ],
+      "haptics": [],
+      "sounds": []
+    }
+  }
+}

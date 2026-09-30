@@ -1,0 +1,1186 @@
+{
+  "schema_version": 1,
+  "master_fps": 120,
+  "frames": {
+    "startup": [
+      {
+        "frame": 0,
+        "time_ms": 0.0,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 1,
+        "time_ms": 8.333,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 2,
+        "time_ms": 16.667,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 3,
+        "time_ms": 25.0,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 4,
+        "time_ms": 33.333,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 5,
+        "time_ms": 41.667,
+        "phase": "launch_hold",
+        "interactive": false
+      },
+      {
+        "frame": 6,
+        "time_ms": 50.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 7,
+        "time_ms": 58.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 8,
+        "time_ms": 66.667,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 9,
+        "time_ms": 75.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 10,
+        "time_ms": 83.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 11,
+        "time_ms": 91.667,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 12,
+        "time_ms": 100.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 13,
+        "time_ms": 108.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 14,
+        "time_ms": 116.667,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 15,
+        "time_ms": 125.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 16,
+        "time_ms": 133.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 17,
+        "time_ms": 141.667,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 18,
+        "time_ms": 150.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 19,
+        "time_ms": 158.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 20,
+        "time_ms": 166.667,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 21,
+        "time_ms": 175.0,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 22,
+        "time_ms": 183.333,
+        "phase": "halo_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 23,
+        "time_ms": 191.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 24,
+        "time_ms": 200.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 25,
+        "time_ms": 208.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 26,
+        "time_ms": 216.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 27,
+        "time_ms": 225.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 28,
+        "time_ms": 233.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 29,
+        "time_ms": 241.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 30,
+        "time_ms": 250.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 31,
+        "time_ms": 258.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 32,
+        "time_ms": 266.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 33,
+        "time_ms": 275.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 34,
+        "time_ms": 283.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 35,
+        "time_ms": 291.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 36,
+        "time_ms": 300.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 37,
+        "time_ms": 308.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 38,
+        "time_ms": 316.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 39,
+        "time_ms": 325.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 40,
+        "time_ms": 333.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 41,
+        "time_ms": 341.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 42,
+        "time_ms": 350.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 43,
+        "time_ms": 358.333,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 44,
+        "time_ms": 366.667,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 45,
+        "time_ms": 375.0,
+        "phase": "logo_glass_transition",
+        "interactive": false
+      },
+      {
+        "frame": 46,
+        "time_ms": 383.333,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 47,
+        "time_ms": 391.667,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 48,
+        "time_ms": 400.0,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 49,
+        "time_ms": 408.333,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 50,
+        "time_ms": 416.667,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 51,
+        "time_ms": 425.0,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 52,
+        "time_ms": 433.333,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 53,
+        "time_ms": 441.667,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 54,
+        "time_ms": 450.0,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 55,
+        "time_ms": 458.333,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 56,
+        "time_ms": 466.667,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 57,
+        "time_ms": 475.0,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 58,
+        "time_ms": 483.333,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 59,
+        "time_ms": 491.667,
+        "phase": "dashboard_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 60,
+        "time_ms": 500.0,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 61,
+        "time_ms": 508.333,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 62,
+        "time_ms": 516.667,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 63,
+        "time_ms": 525.0,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 64,
+        "time_ms": 533.333,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 65,
+        "time_ms": 541.667,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 66,
+        "time_ms": 550.0,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 67,
+        "time_ms": 558.333,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 68,
+        "time_ms": 566.667,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 69,
+        "time_ms": 575.0,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 70,
+        "time_ms": 583.333,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 71,
+        "time_ms": 591.667,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 72,
+        "time_ms": 600.0,
+        "phase": "dashboard_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 73,
+        "time_ms": 608.333,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 74,
+        "time_ms": 616.667,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 75,
+        "time_ms": 625.0,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 76,
+        "time_ms": 633.333,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 77,
+        "time_ms": 641.667,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 78,
+        "time_ms": 650.0,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 79,
+        "time_ms": 658.333,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 80,
+        "time_ms": 666.667,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 81,
+        "time_ms": 675.0,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 82,
+        "time_ms": 683.333,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 83,
+        "time_ms": 691.667,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 84,
+        "time_ms": 700.0,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 85,
+        "time_ms": 708.333,
+        "phase": "settle",
+        "interactive": true
+      },
+      {
+        "frame": 86,
+        "time_ms": 716.667,
+        "phase": "settle",
+        "interactive": true
+      }
+    ],
+    "control-center-unlock": [
+      {
+        "frame": 0,
+        "time_ms": 0.0,
+        "phase": "authenticated",
+        "interactive": false
+      },
+      {
+        "frame": 1,
+        "time_ms": 8.333,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 2,
+        "time_ms": 16.667,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 3,
+        "time_ms": 25.0,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 4,
+        "time_ms": 33.333,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 5,
+        "time_ms": 41.667,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 6,
+        "time_ms": 50.0,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 7,
+        "time_ms": 58.333,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 8,
+        "time_ms": 66.667,
+        "phase": "success_press",
+        "interactive": false
+      },
+      {
+        "frame": 9,
+        "time_ms": 75.0,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 10,
+        "time_ms": 83.333,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 11,
+        "time_ms": 91.667,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 12,
+        "time_ms": 100.0,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 13,
+        "time_ms": 108.333,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 14,
+        "time_ms": 116.667,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 15,
+        "time_ms": 125.0,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 16,
+        "time_ms": 133.333,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 17,
+        "time_ms": 141.667,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 18,
+        "time_ms": 150.0,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 19,
+        "time_ms": 158.333,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 20,
+        "time_ms": 166.667,
+        "phase": "lock_open",
+        "interactive": false
+      },
+      {
+        "frame": 21,
+        "time_ms": 175.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 22,
+        "time_ms": 183.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 23,
+        "time_ms": 191.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 24,
+        "time_ms": 200.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 25,
+        "time_ms": 208.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 26,
+        "time_ms": 216.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 27,
+        "time_ms": 225.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 28,
+        "time_ms": 233.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 29,
+        "time_ms": 241.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 30,
+        "time_ms": 250.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 31,
+        "time_ms": 258.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 32,
+        "time_ms": 266.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 33,
+        "time_ms": 275.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 34,
+        "time_ms": 283.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 35,
+        "time_ms": 291.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 36,
+        "time_ms": 300.0,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 37,
+        "time_ms": 308.333,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 38,
+        "time_ms": 316.667,
+        "phase": "lock_dissolve",
+        "interactive": false
+      },
+      {
+        "frame": 39,
+        "time_ms": 325.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 40,
+        "time_ms": 333.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 41,
+        "time_ms": 341.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 42,
+        "time_ms": 350.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 43,
+        "time_ms": 358.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 44,
+        "time_ms": 366.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 45,
+        "time_ms": 375.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 46,
+        "time_ms": 383.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 47,
+        "time_ms": 391.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 48,
+        "time_ms": 400.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 49,
+        "time_ms": 408.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 50,
+        "time_ms": 416.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 51,
+        "time_ms": 425.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 52,
+        "time_ms": 433.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 53,
+        "time_ms": 441.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 54,
+        "time_ms": 450.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 55,
+        "time_ms": 458.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 56,
+        "time_ms": 466.667,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 57,
+        "time_ms": 475.0,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 58,
+        "time_ms": 483.333,
+        "phase": "glass_expand",
+        "interactive": false
+      },
+      {
+        "frame": 59,
+        "time_ms": 491.667,
+        "phase": "module_reveal",
+        "interactive": false
+      },
+      {
+        "frame": 60,
+        "time_ms": 500.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 61,
+        "time_ms": 508.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 62,
+        "time_ms": 516.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 63,
+        "time_ms": 525.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 64,
+        "time_ms": 533.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 65,
+        "time_ms": 541.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 66,
+        "time_ms": 550.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 67,
+        "time_ms": 558.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 68,
+        "time_ms": 566.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 69,
+        "time_ms": 575.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 70,
+        "time_ms": 583.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 71,
+        "time_ms": 591.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 72,
+        "time_ms": 600.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 73,
+        "time_ms": 608.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 74,
+        "time_ms": 616.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 75,
+        "time_ms": 625.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 76,
+        "time_ms": 633.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 77,
+        "time_ms": 641.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 78,
+        "time_ms": 650.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 79,
+        "time_ms": 658.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 80,
+        "time_ms": 666.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 81,
+        "time_ms": 675.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 82,
+        "time_ms": 683.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 83,
+        "time_ms": 691.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 84,
+        "time_ms": 700.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 85,
+        "time_ms": 708.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 86,
+        "time_ms": 716.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 87,
+        "time_ms": 725.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 88,
+        "time_ms": 733.333,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 89,
+        "time_ms": 741.667,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 90,
+        "time_ms": 750.0,
+        "phase": "module_reveal",
+        "interactive": true
+      },
+      {
+        "frame": 91,
+        "time_ms": 758.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 92,
+        "time_ms": 766.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 93,
+        "time_ms": 775.0,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 94,
+        "time_ms": 783.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 95,
+        "time_ms": 791.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 96,
+        "time_ms": 800.0,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 97,
+        "time_ms": 808.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 98,
+        "time_ms": 816.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 99,
+        "time_ms": 825.0,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 100,
+        "time_ms": 833.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 101,
+        "time_ms": 841.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 102,
+        "time_ms": 850.0,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 103,
+        "time_ms": 858.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 104,
+        "time_ms": 866.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 105,
+        "time_ms": 875.0,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 106,
+        "time_ms": 883.333,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 107,
+        "time_ms": 891.667,
+        "phase": "ready_settle",
+        "interactive": true
+      },
+      {
+        "frame": 108,
+        "time_ms": 900.0,
+        "phase": "ready_settle",
+        "interactive": true
+      }
+    ]
+  }
+}

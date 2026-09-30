@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "master_fps": 120,
+  "reference_device": "iPhone 18 Pro Max",
+  "reference_os": "iOS 27.0",
+  "sequences": {
+    "startup": {
+      "frame_count": 87,
+      "last_frame": 86,
+      "interactive_frame": 60,
+      "phases": [
+        {"name": "launch_hold", "start": 0, "end": 5},
+        {"name": "halo_reveal", "start": 6, "end": 22},
+        {"name": "logo_glass_transition", "start": 23, "end": 45},
+        {"name": "dashboard_reveal", "start": 46, "end": 72},
+        {"name": "settle", "start": 73, "end": 86}
+      ],
+      "haptics": [],
+      "sounds": []
+    },
+    "control-center-unlock": {
+      "frame_count": 109,
+      "last_frame": 108,
+      "interactive_frame": 60,
+      "phases": [
+        {"name": "authenticated", "start": 0, "end": 0},
+        {"name": "success_press", "start": 1, "end": 8},
+        {"name": "lock_open", "start": 9, "end": 20},
+        {"name": "lock_dissolve", "start": 21, "end": 38},
+        {"name": "glass_expand", "start": 39, "end": 58},
+        {"name": "module_reveal", "start": 59, "end": 90},
+        {"name": "ready_settle", "start": 91, "end": 108}
+      ],
+      "haptics": [
+        {"name": "unlock_success", "frame": 2}
+      ],
+      "sounds": [
+        {"name": "unlock_tone", "frame": 5, "sample_rate_hz": 48000}
+      ]
+    }
+  }
+}

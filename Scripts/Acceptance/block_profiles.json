@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "device": "iPhone 18 Pro Max",
+  "os": "27.0",
+  "blocks": {
+    "A": {
+      "title": "Motion Runtime",
+      "fast_unit_selectors": [
+        "IOSNextTests/PhaseAMotionRuntimeTests"
+      ],
+      "full_unit_selectors": [
+        "IOSNextTests/PhaseAMotionRuntimeTests"
+      ],
+      "motion_fast": true,
+      "motion_full": true,
+      "requires_fake_ha": false,
+      "ready": true
+    },
+    "B": {
+      "title": "Fire TV Companion Remote",
+      "fast_unit_selectors": [],
+      "full_unit_selectors": [],
+      "motion_fast": false,
+      "motion_full": false,
+      "requires_fake_ha": true,
+      "ready": false
+    },
+    "C": {
+      "title": "Home Assistant Registry",
+      "fast_unit_selectors": [],
+      "full_unit_selectors": [],
+      "motion_fast": false,
+      "motion_full": false,
+      "requires_fake_ha": true,
+      "ready": false
+    },
+    "D": {
+      "title": "UI Runtime",
+      "fast_unit_selectors": [],
+      "full_unit_selectors": [],
+      "motion_fast": false,
+      "motion_full": false,
+      "requires_fake_ha": true,
+      "ready": false
+    },
+    "E": {
+      "title": "MCP Control Center V3",
+      "fast_unit_selectors": [],
+      "full_unit_selectors": [],
+      "motion_fast": false,
+      "motion_full": false,
+      "requires_fake_ha": false,
+      "ready": false
+    }
+  }
+}
