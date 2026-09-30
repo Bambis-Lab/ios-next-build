@@ -29,7 +29,7 @@ jobs:
 
         bash Scripts/prepare_wireguard_dependency.sh
 
-        export CM_COMMIT="fd1da61e2a85ba2c58b480d6b3f520a794f8d883"
+        export CM_COMMIT="699af170be2a4bb583707d0d9da139563d6f3e05"
         export EXPECTED_VERSION="1.1.2"
         export EXPECTED_BUILD="15"
 

@@ -47,6 +47,18 @@ struct MasterRuntimeSnapshot: Equatable, Sendable {
 @MainActor
 extension RunnerControlModel {
     var masterRuntimeSnapshot: MasterRuntimeSnapshot {
-        MasterRuntimeSnapshot(status: status, liveState: commanderLiveState)
+        let status: RunnerStatus?
+
+        switch state {
+        case let .ready(value):
+            status = value
+        case .notConfigured, .loading, .failed:
+            status = nil
+        }
+
+        return MasterRuntimeSnapshot(
+            status: status,
+            liveState: commanderLiveState
+        )
     }
 }
