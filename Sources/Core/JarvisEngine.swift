@@ -106,6 +106,16 @@ struct JarvisIntentRouter {
     }
 }
 
+struct JarvisRuntimePolicy: Equatable, Sendable {
+    let applicationActive: Bool
+    let wakeRequested: Bool
+    let interrupted: Bool
+
+    var shouldRunMicrophone: Bool {
+        applicationActive && wakeRequested && !interrupted
+    }
+}
+
 @MainActor
 @Observable
 final class JarvisEngine {
@@ -119,6 +129,11 @@ final class JarvisEngine {
     private(set) var wakeEvidenceCount = 0
     private(set) var audioDropCount = 0
     private(set) var onDeviceRecognitionAvailable = false
+    private(set) var wakeListeningRequested = false
+    private(set) var applicationIsActive = true
+    private(set) var audioInterrupted = false
+    private(set) var lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+    private(set) var thermalState = ProcessInfo.processInfo.thermalState
 
     let wakeWord = "Jarvis"
 
@@ -126,12 +141,69 @@ final class JarvisEngine {
     private var recognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var restartTask: Task<Void, Never>?
+    private var notificationTokens: [NSObjectProtocol] = []
     private var lastEvidenceAt: Date?
     private var hasDetectedWake = false
     private var inputTapInstalled = false
 
+    init() {
+        installLifecycleObservers()
+    }
+
+    deinit {
+        restartTask?.cancel()
+        for token in notificationTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
+    var runtimePolicy: JarvisRuntimePolicy {
+        JarvisRuntimePolicy(
+            applicationActive: applicationIsActive,
+            wakeRequested: wakeListeningRequested,
+            interrupted: audioInterrupted
+        )
+    }
+
     func startWakeListening() async {
-        guard !state.isListening else { return }
+        wakeListeningRequested = true
+        guard runtimePolicy.shouldRunMicrophone else {
+            state = .idle
+            return
+        }
+        await startWakeListeningIfAllowed()
+    }
+
+    func stopWakeListening() {
+        wakeListeningRequested = false
+        restartTask?.cancel()
+        restartTask = nil
+        stopAudioSession()
+        resetWakeDetection()
+        state = .idle
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        applicationIsActive = active
+        if !active {
+            restartTask?.cancel()
+            restartTask = nil
+            stopAudioSession()
+            resetWakeDetection()
+            state = .idle
+            return
+        }
+        scheduleRestart(after: 0.15)
+    }
+
+    func clearLastIntent() {
+        latestIntent = nil
+        lastTranscript = nil
+    }
+
+    private func startWakeListeningIfAllowed() async {
+        guard runtimePolicy.shouldRunMicrophone, !state.isListening else { return }
         state = .requestingPermission
 
         guard await requestMicrophonePermission() else {
@@ -157,22 +229,11 @@ final class JarvisEngine {
             try startRecognitionSession(using: recognizer)
             state = .listeningForWakeWord
         } catch {
+            audioDropCount += 1
             stopAudioSession()
             state = .error("Jarvis Audio: \(error.localizedDescription)")
+            scheduleRestart(after: restartDelay)
         }
-    }
-
-    func stopWakeListening() {
-        stopAudioSession()
-        state = .idle
-        wakeEvidenceCount = 0
-        lastEvidenceAt = nil
-        hasDetectedWake = false
-    }
-
-    func clearLastIntent() {
-        latestIntent = nil
-        lastTranscript = nil
     }
 
     private func startRecognitionSession(using recognizer: SFSpeechRecognizer) throws {
@@ -190,7 +251,8 @@ final class JarvisEngine {
 
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
+        let bufferSize: AVAudioFrameCount = lowPowerModeEnabled ? 2_048 : 1_024
+        input.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak request] buffer, _ in
             request?.append(buffer)
         }
         inputTapInstalled = true
@@ -260,16 +322,125 @@ final class JarvisEngine {
         guard isFinal else { return }
         latestIntent = JarvisIntentRouter.route(command)
         stopAudioSession()
+        resetWakeDetection()
         state = .idle
-        hasDetectedWake = false
-        wakeEvidenceCount = 0
-        lastEvidenceAt = nil
+        scheduleRestart(after: 0.35)
     }
 
     private func handleRecognitionError(_ error: Error) {
-        guard state.isListening else { return }
+        guard wakeListeningRequested else { return }
+        audioDropCount += 1
         stopAudioSession()
+        resetWakeDetection()
         state = .error("Lokale Spracherkennung: \(error.localizedDescription)")
+        scheduleRestart(after: restartDelay)
+    }
+
+    private var restartDelay: TimeInterval {
+        switch thermalState {
+        case .critical: 3.0
+        case .serious: 1.5
+        default: lowPowerModeEnabled ? 0.9 : 0.45
+        }
+    }
+
+    private func scheduleRestart(after delay: TimeInterval) {
+        guard runtimePolicy.shouldRunMicrophone else { return }
+        restartTask?.cancel()
+        restartTask = Task { @MainActor [weak self] in
+            let nanos = UInt64(max(0.05, delay) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanos)
+            guard !Task.isCancelled, let self, self.runtimePolicy.shouldRunMicrophone else { return }
+            await self.startWakeListeningIfAllowed()
+        }
+    }
+
+    private func installLifecycleObservers() {
+        let center = NotificationCenter.default
+        notificationTokens.append(center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleAudioInterruption(notification) }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in self?.handleRouteChange(notification) }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.stopAudioSession()
+                self.resetWakeDetection()
+                self.scheduleRestart(after: 0.5)
+            }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: ProcessInfo.powerStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
+                if self.state.isListening {
+                    self.stopAudioSession()
+                    self.resetWakeDetection()
+                    self.scheduleRestart(after: 0.25)
+                }
+            }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.thermalState = ProcessInfo.processInfo.thermalState
+            }
+        })
+    }
+
+    private func handleAudioInterruption(_ notification: Notification) {
+        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            audioInterrupted = true
+            stopAudioSession()
+            resetWakeDetection()
+        case .ended:
+            audioInterrupted = false
+            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
+            if options.contains(.shouldResume) || wakeListeningRequested {
+                scheduleRestart(after: 0.25)
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(_ notification: Notification) {
+        guard wakeListeningRequested, applicationIsActive else { return }
+        let raw = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        guard let reason = AVAudioSession.RouteChangeReason(rawValue: raw) else { return }
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .categoryChange, .routeConfigurationChange:
+            stopAudioSession()
+            resetWakeDetection()
+            scheduleRestart(after: 0.2)
+        default:
+            break
+        }
     }
 
     private func commandAfterWakeWord(in text: String) -> String {
@@ -283,6 +454,12 @@ final class JarvisEngine {
 
     private func normalized(_ text: String) -> String {
         text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
+    }
+
+    private func resetWakeDetection() {
+        wakeEvidenceCount = 0
+        lastEvidenceAt = nil
+        hasDetectedWake = false
     }
 
     private func stopAudioSession() {
