@@ -151,13 +151,6 @@ final class JarvisEngine {
         installLifecycleObservers()
     }
 
-    deinit {
-        restartTask?.cancel()
-        for token in notificationTokens {
-            NotificationCenter.default.removeObserver(token)
-        }
-    }
-
     var runtimePolicy: JarvisRuntimePolicy {
         JarvisRuntimePolicy(
             applicationActive: applicationIsActive,
@@ -358,11 +351,18 @@ final class JarvisEngine {
     private func installLifecycleObservers() {
         let center = NotificationCenter.default
         notificationTokens.append(center.addObserver(
-            forName: AVAudioSession.interruptionNotification,
+            forName: AVAudioSession.didBecomeInactiveNotification,
             object: nil,
             queue: .main
-        ) { [weak self] notification in
-            Task { @MainActor in self?.handleAudioInterruption(notification) }
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleAudioBecameInactive() }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: AVAudioSession.resumptionRecommendationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.handleAudioResumptionRecommendation() }
         })
         notificationTokens.append(center.addObserver(
             forName: AVAudioSession.routeChangeNotification,
@@ -384,8 +384,8 @@ final class JarvisEngine {
             }
         })
         notificationTokens.append(center.addObserver(
-            forName: ProcessInfo.powerStateDidChangeNotification,
-            object: nil,
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: ProcessInfo.processInfo,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
@@ -400,7 +400,7 @@ final class JarvisEngine {
         })
         notificationTokens.append(center.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification,
-            object: nil,
+            object: ProcessInfo.processInfo,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
@@ -409,23 +409,16 @@ final class JarvisEngine {
         })
     }
 
-    private func handleAudioInterruption(_ notification: Notification) {
-        guard let raw = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        switch type {
-        case .began:
-            audioInterrupted = true
-            stopAudioSession()
-            resetWakeDetection()
-        case .ended:
-            audioInterrupted = false
-            let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
-            if options.contains(.shouldResume) || wakeListeningRequested {
-                scheduleRestart(after: 0.25)
-            }
-        @unknown default:
-            break
+    private func handleAudioBecameInactive() {
+        audioInterrupted = true
+        stopAudioSession()
+        resetWakeDetection()
+    }
+
+    private func handleAudioResumptionRecommendation() {
+        audioInterrupted = false
+        if wakeListeningRequested {
+            scheduleRestart(after: 0.25)
         }
     }
 
@@ -478,11 +471,7 @@ final class JarvisEngine {
     }
 
     private func requestMicrophonePermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
+        await AVAudioApplication.requestRecordPermission()
     }
 
     private func requestSpeechPermission() async -> Bool {
