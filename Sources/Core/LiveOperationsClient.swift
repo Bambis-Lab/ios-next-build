@@ -64,7 +64,7 @@ actor LiveOperationsClient {
         lastMCPSequence: Int64?,
         lastSentinelSequence: Int64?
     ) -> URL? {
-        let endpoint = configuration.baseURL.appending(path: "v1/live")
+        let endpoint = configuration.baseURL.appending(path: "v1/operations")
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return nil }
         switch components.scheme?.lowercased() {
         case "https": components.scheme = "wss"
@@ -208,11 +208,18 @@ final class LiveOperationsModel {
     var isConfigured: Bool { configuration != nil }
 
     var activeOperations: [LiveOperation] {
-        Array(mcpState.activeOperations.values).sorted { $0.startedAt < $1.startedAt }
+        let operations = Array(mcpState.activeOperations.values) + Array(sentinelXState.activeOperations.values)
+        return operations.sorted { $0.startedAt < $1.startedAt }
     }
 
     var recentOperations: [LiveOperation] {
-        Array(mcpState.recentOperations.sorted { $0.updatedAt > $1.updatedAt }.prefix(50))
+        Array((mcpState.recentOperations + sentinelXState.recentOperations)
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(50))
+    }
+
+    var lastEventAt: Date? {
+        [mcpState.lastEventAt, sentinelXState.lastEventAt].compactMap { $0 }.max()
     }
 
     /// Refreshes Live from the existing Runner/Master connection. No second endpoint or token is stored.
@@ -245,6 +252,7 @@ final class LiveOperationsModel {
         configuration = LiveOperationsConfiguration(baseURL: url, token: token)
         connectionState = .offline
         isPresentingConfiguration = false
+        lastError = nil
         startIfNeeded()
     }
 
@@ -253,6 +261,7 @@ final class LiveOperationsModel {
         configuration = nil
         connectionState = .unconfigured
         isPresentingConfiguration = false
+        lastError = nil
     }
 
     func startIfNeeded() {
@@ -282,19 +291,27 @@ final class LiveOperationsModel {
                 let stream = try await client.stream(
                     configuration: configuration,
                     lastMCPSequence: mcpState.needsFullResync ? nil : mcpState.lastSequence,
-                    lastSentinelSequence: nil
+                    lastSentinelSequence: sentinelXState.needsFullResync ? nil : sentinelXState.lastSequence
                 )
                 connectionState = .syncing
                 for try await event in stream {
                     if Task.isCancelled { return }
-                    guard event.source == .mcp else { continue }
-                    let result = mcpState.apply(event)
+                    let result: LiveOperationsApplyResult
+                    switch event.source {
+                    case .mcp:
+                        result = mcpState.apply(event)
+                    case .sentinelX:
+                        result = sentinelXState.apply(event)
+                    }
                     if result == .resyncRequired {
                         connectionState = .degraded
                         break
                     }
-                    connectionState = .live
-                    reconnectAttempt = 0
+                    if result == .applied || result == .duplicate {
+                        lastError = nil
+                        connectionState = .live
+                        reconnectAttempt = 0
+                    }
                 }
                 if Task.isCancelled { return }
                 throw LiveOperationsError.disconnected
