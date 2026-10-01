@@ -45,4 +45,16 @@ final class JarvisTests: XCTestCase {
         XCTAssertGreaterThan(JarvisSensitivity.low.minimumConfidence, JarvisSensitivity.normal.minimumConfidence)
         XCTAssertGreaterThan(JarvisSensitivity.normal.minimumConfidence, JarvisSensitivity.high.minimumConfidence)
     }
+
+    func testRuntimePolicyRunsOnlyWhenActiveRequestedAndNotInterrupted() {
+        XCTAssertTrue(JarvisRuntimePolicy(applicationActive: true, wakeRequested: true, interrupted: false).shouldRunMicrophone)
+        XCTAssertFalse(JarvisRuntimePolicy(applicationActive: false, wakeRequested: true, interrupted: false).shouldRunMicrophone)
+        XCTAssertFalse(JarvisRuntimePolicy(applicationActive: true, wakeRequested: false, interrupted: false).shouldRunMicrophone)
+        XCTAssertFalse(JarvisRuntimePolicy(applicationActive: true, wakeRequested: true, interrupted: true).shouldRunMicrophone)
+    }
+
+    func testRuntimePolicyNeverUsesBackgroundMicrophoneAsFallback() {
+        let policy = JarvisRuntimePolicy(applicationActive: false, wakeRequested: true, interrupted: false)
+        XCTAssertFalse(policy.shouldRunMicrophone)
+    }
 }
