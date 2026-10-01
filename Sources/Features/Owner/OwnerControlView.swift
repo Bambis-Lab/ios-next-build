@@ -234,6 +234,18 @@ private struct ControlCenterView: View {
     private var ownerSection: some View {
         VStack(alignment: .leading, spacing: IOSNextLayout.sectionSpacing) {
             IOSNextSectionHeader(title: "Owner Control", subtitle: "Projekte, Betrieb, Infrastruktur und Sicherheit", symbol: "person.badge.key.fill")
+            NavigationLink {
+                MasterPlatformView(model: ownerModel, runnerModel: runnerModel)
+            } label: {
+                OwnerStatusRow(
+                    title: "Master Platform",
+                    detail: "Data Plane, CI, Runner, Governance, Diagnostics und Owner Actions",
+                    symbol: "square.3.layers.3d",
+                    value: "1.4",
+                    tint: .indigo
+                )
+            }
+            .buttonStyle(.plain)
             ownerLink(.projects) { OwnerProjectsView(model: ownerModel, capabilities: capabilities) }
             ownerLink(.operations) { OwnerOperationsView(model: ownerModel, capabilities: capabilities) }
             ownerLink(.systems) { OwnerSystemsView(model: ownerModel, capabilities: capabilities, appModel: appModel) }
