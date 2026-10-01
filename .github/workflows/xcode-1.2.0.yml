@@ -1,0 +1,65 @@
+name: iOS Next 1.2.0 SideStore Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xcode:
+    uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
+    with:
+      runs-on: xcode-27
+      artifact-name: IOSNext-1.2.0-build16
+      artifact-path: build/IOSNext.ipa
+      xcode-command: |
+        set -euo pipefail
+
+        echo "=== PROVENANCE ==="
+        cat SOURCE_SHA
+
+        echo "=== TOOLCHAIN ==="
+        xcodebuild -version
+        xcrun --sdk iphoneos --show-sdk-version
+
+        if ! command -v xcodegen >/dev/null 2>&1; then
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+        fi
+
+        bash Scripts/prepare_wireguard_dependency.sh
+
+        export CM_COMMIT="d7bedacca95d33833b5272d0a87e42d198075690"
+        export EXPECTED_VERSION="1.2.0"
+        export EXPECTED_BUILD="16"
+
+        bash Scripts/prepare_free_sideload_project.sh
+
+        rm -rf build
+        mkdir -p build/Payload
+
+        xcodebuild \
+          -project IOSNext.xcodeproj \
+          -scheme IOSNext \
+          -configuration Release \
+          -sdk iphoneos \
+          -derivedDataPath build/DerivedData \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          build
+
+        APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/IOSNext.app"
+        test -d "$APP_PATH"
+
+        cp -R "$APP_PATH" build/Payload/IOSNext.app
+
+        cd build
+        /usr/bin/zip -qry IOSNext.ipa Payload
+        cd ..
+
+        test -s build/IOSNext.ipa
+
+        echo "=== IPA ==="
+        ls -lh build/IOSNext.ipa
+        shasum -a 256 build/IOSNext.ipa
