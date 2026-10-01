@@ -105,13 +105,17 @@ struct OwnerReleasesView: View {
     }
 
     private func releaseDetail(_ release: AdminReleaseItemV2) -> String {
-        var parts = ["Installiert \(release.installedVersion)"]
-        if let available = release.availableVersion, available != release.installedVersion {
+        let installed = release.id == "ios-next" ? appVersion : release.installedVersion
+        var parts = ["Installiert \(installed)"]
+        if let available = release.availableVersion, available != installed, available != release.installedVersion {
             parts.append("verfügbar \(available)")
         }
         if release.rollbackAvailable { parts.append("Rollback vorhanden") }
         if release.testsPassing == true { parts.append("Tests grün") }
         if release.testsPassing == false { parts.append("Tests fehlgeschlagen") }
+        if release.id == "ios-next", release.installedVersion != installed {
+            parts.append("Backend-Inventar abweichend")
+        }
         return parts.joined(separator: " · ")
     }
 }
