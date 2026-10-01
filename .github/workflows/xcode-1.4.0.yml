@@ -1,9 +1,6 @@
 name: iOS Next 1.4.0 Final Acceptance Build
 
 on:
-  push:
-    branches:
-      - build/ios-next-1.4.0-xcode27
   workflow_dispatch:
 
 permissions:
@@ -21,7 +18,7 @@ jobs:
 
         echo "=== PROVENANCE ==="
         cat SOURCE_SHA
-        grep -q 'canonical_sha=c63e2320ee962b2d921fab890abb0461f0b09fdd' SOURCE_SHA
+        grep -q 'canonical_sha=5f0506971ab1887f02f547aafa49284434d18a3a' SOURCE_SHA
 
         echo "=== TOOLCHAIN ==="
         xcodebuild -version
@@ -33,7 +30,7 @@ jobs:
 
         bash Scripts/prepare_wireguard_dependency.sh
 
-        export CM_COMMIT="c63e2320ee962b2d921fab890abb0461f0b09fdd"
+        export CM_COMMIT="5f0506971ab1887f02f547aafa49284434d18a3a"
         export EXPECTED_VERSION="1.4.0"
         export EXPECTED_BUILD="20"
 
@@ -47,6 +44,8 @@ jobs:
         grep -q 'ProcessInfo.powerStateDidChangeNotification' Sources/Core/JarvisEngine.swift
         grep -q 'ProcessInfo.thermalStateDidChangeNotification' Sources/Core/JarvisEngine.swift
         grep -q 'JarvisEngine.shared.setApplicationActive(active)' Sources/App/IOSNextApp.swift
+        grep -q 'IOSNextAppShortcuts.updateAppShortcutParameters()' Sources/App/IOSNextApp.swift
+        grep -q 'OpenJarvisIntent: AppIntent' Sources/Core/JarvisAppIntents.swift
 
         rm -rf build
         mkdir -p build/Payload
