@@ -7,37 +7,25 @@ struct CommanderLiveSummaryCard: View {
         state.effectiveSnapshot
     }
 
-    private var title: String {
-        "Master Runtime"
-    }
+    private var title: String { "Master Runtime" }
 
     private var statusText: String {
         switch state.connection {
-        case .live:
-            return "Live"
-        case .syncing, .connecting:
-            return "Verbinden"
-        case .reconnecting:
-            return "Neu verbinden"
-        case .degraded:
-            return "Eingeschränkt"
-        case .disconnected:
-            return snapshot == nil ? "Offline" : "Letzter Stand"
-        case .unconfigured:
-            return "Nicht konfiguriert"
+        case .live: "Live"
+        case .syncing, .connecting: "Verbinden"
+        case .reconnecting: "Neu verbinden"
+        case .degraded: "Eingeschränkt"
+        case .disconnected: snapshot == nil ? "Offline" : "Letzter Stand"
+        case .unconfigured: "Nicht konfiguriert"
         }
     }
 
     private var tint: Color {
         switch state.connection {
-        case .live:
-            return .green
-        case .syncing, .connecting, .reconnecting:
-            return .blue
-        case .degraded:
-            return .orange
-        case .disconnected, .unconfigured:
-            return .secondary
+        case .live: .green
+        case .syncing, .connecting, .reconnecting: .blue
+        case .degraded: .orange
+        case .disconnected, .unconfigured: .secondary
         }
     }
 
@@ -49,19 +37,34 @@ struct CommanderLiveSummaryCard: View {
                 .frame(width: 44, height: 44)
                 .background(tint.opacity(0.12), in: Circle())
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    Text(title).font(.headline)
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
+                }
 
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 if let snapshot {
-                    Text("\(snapshot.activeCount) Vorgänge · CPU \(Int((snapshot.cpuPercent ?? 0).rounded())) % · RAM \(Int((snapshot.memoryPercent ?? 0).rounded())) %")
+                    HStack(spacing: 6) {
+                        Text("\(snapshot.activeCount) Vorgänge")
+                        Text("·")
+                        Text("CPU \(Int((snapshot.cpuPercent ?? 0).rounded())) %")
+                        Text("·")
+                        Text("RAM \(Int((snapshot.memoryPercent ?? 0).rounded())) %")
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                } else {
+                    Text("Warte auf Runtime-Daten")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(.tertiary)
                 }
             }
 
@@ -73,5 +76,6 @@ struct CommanderLiveSummaryCard: View {
         }
         .padding(16)
         .ios27ContentSurface(radius: 24, elevated: true)
+        .accessibilityElement(children: .combine)
     }
 }

@@ -5,6 +5,8 @@ actor ChatRelayClient {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
+    nonisolated static let tailscaleRelayPort = 8444
+
     init() {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
@@ -17,6 +19,24 @@ actor ChatRelayClient {
         session = URLSession(configuration: configuration)
         encoder = JSONEncoder()
         decoder = JSONDecoder()
+    }
+
+    nonisolated static func transportBaseURL(for logicalURL: URL) -> URL {
+        guard let host = logicalURL.host?.lowercased(),
+              host.hasPrefix("iosnext-chat."),
+              host.hasSuffix(".ts.net") else {
+            return logicalURL
+        }
+
+        let labels = host.split(separator: ".")
+        guard labels.count >= 3 else { return logicalURL }
+        let tailnet = labels.dropFirst().joined(separator: ".")
+
+        var components = URLComponents(url: logicalURL, resolvingAgainstBaseURL: false)
+        components?.scheme = "https"
+        components?.host = "runner.\(tailnet)"
+        components?.port = tailscaleRelayPort
+        return components?.url ?? logicalURL
     }
 
     func bootstrap(
@@ -42,7 +62,8 @@ actor ChatRelayClient {
         accessToken: String,
         configuration: ChatConfiguration
     ) async throws -> ChatContact {
-        guard let url = URL(string: "v1/chat/link-home-assistant", relativeTo: configuration.baseURL)?.absoluteURL else {
+        let baseURL = Self.transportBaseURL(for: configuration.baseURL)
+        guard let url = URL(string: "v1/chat/link-home-assistant", relativeTo: baseURL)?.absoluteURL else {
             throw ChatError.invalidConfiguration
         }
         var request = URLRequest(url: url)
@@ -152,7 +173,8 @@ actor ChatRelayClient {
         baseURL: URL,
         bearerToken: String
     ) async throws -> Response {
-        guard let url = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+        let transportBaseURL = Self.transportBaseURL(for: baseURL)
+        guard let url = URL(string: path, relativeTo: transportBaseURL)?.absoluteURL else {
             throw ChatError.invalidConfiguration
         }
         var request = URLRequest(url: url)
