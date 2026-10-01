@@ -2,6 +2,9 @@ name: iOS Next 1.2.0 SideStore Build
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - build/ios-next-1.2.0-xcode27
 
 permissions:
   contents: read
