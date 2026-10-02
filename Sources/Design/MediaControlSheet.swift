@@ -152,18 +152,29 @@ private struct MediaVolumeControl: View {
     let setVolume: (Double) -> Void
     let toggleMute: () -> Void
 
+    @State private var draftVolume = 0.0
+    @State private var isEditingVolume = false
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             if canSetVolume, let volume {
-                Slider(
-                    value: Binding(get: { volume }, set: setVolume),
-                    in: 0...1
-                )
+                Slider(value: $draftVolume, in: 0...1) { editing in
+                    isEditingVolume = editing
+                    if !editing {
+                        setVolume(draftVolume)
+                    }
+                }
+                .onAppear { draftVolume = min(max(volume, 0), 1) }
+                .onChange(of: volume) { _, value in
+                    if !isEditingVolume {
+                        draftVolume = min(max(value, 0), 1)
+                    }
+                }
                 .accessibilityLabel("Lautstärke")
-                .accessibilityValue("\(Int(volume * 100)) Prozent")
+                .accessibilityValue("\(Int(draftVolume * 100)) Prozent")
             }
             if canMute {
                 Button(action: toggleMute) {
@@ -175,6 +186,31 @@ private struct MediaVolumeControl: View {
         }
         .padding(16)
         .ios27ContentSurface(radius: 22)
+    }
+}
+
+private struct MediaSeekControl: View {
+    let position: Double
+    let duration: Double
+    let seek: (Double) -> Void
+
+    @State private var draftPosition = 0.0
+    @State private var isEditing = false
+
+    var body: some View {
+        Slider(value: $draftPosition, in: 0...duration) { editing in
+            isEditing = editing
+            if !editing {
+                seek(draftPosition)
+            }
+        }
+        .onAppear { draftPosition = min(max(position, 0), duration) }
+        .onChange(of: position) { _, value in
+            if !isEditing {
+                draftPosition = min(max(value, 0), duration)
+            }
+        }
+        .accessibilityLabel("Wiedergabeposition")
     }
 }
 
@@ -292,14 +328,11 @@ struct MediaControlSheet: View {
            let duration = player.mediaDuration,
            duration > 0 {
             VStack(alignment: .leading, spacing: 8) {
-                Slider(
-                    value: Binding(
-                        get: { min(max(player.mediaPosition ?? 0, 0), duration) },
-                        set: { value in Task { await appModel.seek(to: value, for: player) } }
-                    ),
-                    in: 0...duration
+                MediaSeekControl(
+                    position: player.mediaPosition ?? 0,
+                    duration: duration,
+                    seek: { value in Task { await appModel.seek(to: value, for: player) } }
                 )
-                .accessibilityLabel("Wiedergabeposition")
 
                 HStack {
                     Text(formatTime(player.mediaPosition ?? 0))
