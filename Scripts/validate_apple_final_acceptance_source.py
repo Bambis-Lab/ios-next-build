@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import os
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,8 +18,11 @@ app = read("Sources/App/IOSNextApp.swift")
 plist = read("Info.plist")
 project = read("project.yml")
 
-require("MARKETING_VERSION: 1.4.0" in project, "marketing version is not 1.4.0")
-require("CURRENT_PROJECT_VERSION: 20" in project, "build version is not 20")
+expected_version = os.environ.get("EXPECTED_VERSION", "1.4.0")
+expected_build = os.environ.get("EXPECTED_BUILD", "20")
+
+require(f"MARKETING_VERSION: {expected_version}" in project, f"marketing version is not {expected_version}")
+require(f"CURRENT_PROJECT_VERSION: {expected_build}" in project, f"build version is not {expected_build}")
 
 for key in (
     "NSMicrophoneUsageDescription",
