@@ -68,7 +68,7 @@ final class IOSNextFeedbackCenter {
     private func soundProfile(for event: IOSNextFeedbackEvent) -> SoundProfile? {
         switch event {
         case .controlCenterUnlock:
-            SoundProfile(duration: 0.22, primaryFrequency: 438, secondaryFrequency: 657, secondaryMix: 0.34, attack: 0.008, level: 0.16, silenceLead: 0.024)
+            nil
         case .success, .jarvisReady:
             SoundProfile(duration: 0.15, primaryFrequency: 523.25, secondaryFrequency: 783.99, secondaryMix: 0.24, attack: 0.006, level: 0.12, silenceLead: 0.008)
         case .warning:
