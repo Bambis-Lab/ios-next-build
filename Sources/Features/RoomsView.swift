@@ -872,6 +872,8 @@ private struct NicoRoomDashboardContent: View {
 
 private struct NicoPrimaryLightTile: View {
     @State private var showControls = false
+    @State private var draftBrightness = 0.0
+    @State private var isEditingBrightness = false
     let entity: HomeAssistantEntity
     let appModel: AppModel
 
@@ -905,12 +907,20 @@ private struct NicoPrimaryLightTile: View {
             }
 
             if let brightness = entity.brightness {
-                Slider(value: Binding(
-                    get: { min(max(brightness, 0), 1) },
-                    set: { value in Task { await appModel.setBrightness(value, for: entity) } }
-                ))
+                Slider(value: $draftBrightness, in: 0...1) { editing in
+                    isEditingBrightness = editing
+                    if !editing {
+                        Task { await appModel.setBrightness(draftBrightness, for: entity) }
+                    }
+                }
+                .onAppear { draftBrightness = min(max(brightness, 0), 1) }
+                .onChange(of: brightness) { _, value in
+                    if !isEditingBrightness {
+                        draftBrightness = min(max(value, 0), 1)
+                    }
+                }
                 .accessibilityLabel("Helligkeit \(entity.displayName)")
-                .accessibilityValue("\(Int((brightness) * 100)) Prozent")
+                .accessibilityValue("\(Int(draftBrightness * 100)) Prozent")
             }
         }
         .padding(16)
@@ -931,39 +941,58 @@ private struct NicoCompactControlTile: View {
     let entity: HomeAssistantEntity
     let appModel: AppModel
 
+    private var hasExtendedLightControls: Bool {
+        entity.domain == "light" && (entity.supportsColor || entity.supportsColorTemperature || entity.supportsBrightness)
+    }
+
     var body: some View {
-        Button {
-            Task { await appModel.toggle(entity) }
-        } label: {
-            HStack(spacing: 11) {
-                Image(systemName: entity.domain == "light" ? "lightbulb.fill" : "lamp.desk.fill")
-                    .foregroundStyle(entity.ios27LightTint)
-                    .frame(width: 34, height: 34)
-                    .background(entity.ios27LightTint.opacity(0.12), in: Circle())
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entity.displayName).font(.subheadline.weight(.semibold))
-                    Text(entity.isOn ? "Ein" : "Aus").font(.caption2).foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Button {
+                Task { await appModel.toggle(entity) }
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: entity.domain == "light" ? "lightbulb.fill" : "lamp.desk.fill")
+                        .foregroundStyle(entity.ios27LightTint)
+                        .frame(width: 34, height: 34)
+                        .background(entity.ios27LightTint.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entity.displayName).font(.subheadline.weight(.semibold))
+                        Text(entity.isOn ? "Ein" : "Aus").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .padding(14)
+                .ios27ContentSurface(radius: 20)
             }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .padding(14)
-            .ios27ContentSurface(radius: 20)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(entity.displayName)
-        .accessibilityValue(entity.isOn ? "Ein" : "Aus")
-        .accessibilityHint("Schaltet \(entity.displayName) um")
-        .ios27HoldAction {
-            guard entity.domain == "light" else { return }
-            showControls = true
+            .buttonStyle(.plain)
+            .accessibilityLabel(entity.displayName)
+            .accessibilityValue(entity.isOn ? "Ein" : "Aus")
+            .accessibilityHint("Schaltet \(entity.displayName) um")
+            .ios27HoldAction {
+                guard entity.domain == "light" else { return }
+                showControls = true
+            }
+
+            if hasExtendedLightControls {
+                Button {
+                    showControls = true
+                } label: {
+                    Image(systemName: entity.supportsColor ? "paintpalette.fill" : "slider.horizontal.3")
+                        .font(.headline)
+                        .frame(width: 44, height: 44)
+                }
+                .ios27GlassButton()
+                .tint(entity.ios27LightTint)
+                .accessibilityLabel("Lichtsteuerung \(entity.displayName)")
+                .accessibilityHint(entity.supportsColor ? "Öffnet Farbe, Helligkeit und Farbtemperatur" : "Öffnet die erweiterten Lichtregler")
+            }
         }
         .sheet(isPresented: $showControls) {
             LightControlSheet(entityID: entity.entityID, appModel: appModel)
         }
     }
 }
-
 
 private struct DeviceCollectionView: View {
     let title: String
