@@ -13,6 +13,8 @@ struct NicoRoomVisualAcceptanceView: View {
             RoomDetailView(area: area, appModel: appModel)
         }
         .task { seedOfflineFixture() }
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("--nico-dark-acceptance") ? .dark : .light)
+        .dynamicTypeSize(ProcessInfo.processInfo.arguments.contains("--nico-large-type-acceptance") ? .accessibility2 : .large)
         .accessibilityIdentifier("nico-room-visual-acceptance")
     }
 
