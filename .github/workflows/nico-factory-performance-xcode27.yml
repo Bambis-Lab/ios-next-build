@@ -32,7 +32,7 @@ jobs:
           python3 Scripts/Acceptance/validate_factory_workspace.py
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
           python3 Scripts/Acceptance/validate_opt_foundation.py
-          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py
+          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
   # Manual dispatch is the normal entry point. The exact one-off acceptance branch
@@ -61,21 +61,11 @@ jobs:
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build
 
-      - name: Boot iPhone 18 Pro Max (strict watchdog)
+      - name: Boot iPhone 18 Pro Max (all simulator commands bounded)
         shell: bash
         run: |
           set -euo pipefail
-          SIM_ID="$(xcrun simctl list devices available -j | python3 -c '
-          import json,sys
-          ds=json.load(sys.stdin)["devices"]
-          m=[d["udid"] for runtime,devices in ds.items() if "iOS-27-0" in runtime
-             for d in devices if d["name"]=="iPhone 18 Pro Max" and d.get("isAvailable",True)]
-          assert m,"iOS 27 iPhone 18 Pro Max simulator required"
-          print(m[0])
-          ')"
-          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          xcrun simctl boot "$SIM_ID" || true
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 105 -- xcrun simctl bootstatus "$SIM_ID" -b
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0"
 
       - name: Compile once without UI tests (bounded)
         shell: bash
