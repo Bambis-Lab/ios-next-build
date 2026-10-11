@@ -91,6 +91,9 @@ final class FactoryMCPService {
     private var clientID: String?
     private var expiresAt: Date?
     private var mcpSessionID: String?
+    private var cachedToolNames: Set<String>?
+    private var toolDiscoveryExpiresAt: Date?
+    private var sessionOpeningTask: Task<Set<String>, Error>?
     private var endpoint: URL?
 
     init(
@@ -292,6 +295,7 @@ final class FactoryMCPService {
     }
 
     func clear() {
+        invalidateMCPSession()
         accessToken = nil
         refreshToken = nil
         tokenEndpoint = nil
@@ -380,36 +384,67 @@ final class FactoryMCPService {
         return result
     }
 
-    private func openSession() async throws -> Set<String> {
-        mcpSessionID = nil
-        let hello = try await rpc(method: "initialize", params: [
-            "protocolVersion": protocolVersion,
-            "capabilities": [:],
-            "clientInfo": ["name": "iOS Next Factory", "version": "1.6.2"]
-        ])
-        guard hello["protocolVersion"] as? String == protocolVersion else {
-            throw FactoryConnectionError.invalidProtocol
+    private func openSession(forceRefresh: Bool = false) async throws -> Set<String> {
+        if !forceRefresh,
+           let cachedToolNames,
+           let expiresAt = toolDiscoveryExpiresAt,
+           Date() < expiresAt {
+            return cachedToolNames
         }
-        _ = try await rpc(method: "notifications/initialized", params: [:], notification: true)
-        var names = Set<String>()
-        var cursors = Set<String>()
-        var cursor: String?
-        for _ in 0..<maxPaginationPages {
-            var p: [String: Any] = [:]
-            if let cursor { p["cursor"] = cursor }
-            let result = try await rpc(method: "tools/list", params: p)
-            for tool in (result["tools"] as? [[String: Any]]) ?? [] {
-                if let name = tool["name"] as? String { names.insert(name) }
-            }
-            guard let next = result["nextCursor"] as? String, !next.isEmpty else {
-                return names
-            }
-            guard cursors.insert(next).inserted else {
+        if let sessionOpeningTask {
+            return try await sessionOpeningTask.value
+        }
+        let task = Task { @MainActor [weak self] () throws -> Set<String> in
+            guard let self else { throw FactoryConnectionError.missingCredentials }
+            self.mcpSessionID = nil
+            let hello = try await self.rpc(method: "initialize", params: [
+                "protocolVersion": self.protocolVersion,
+                "capabilities": [:],
+                "clientInfo": ["name": "iOS Next Factory", "version": "1.6.2"]
+            ])
+            guard hello["protocolVersion"] as? String == self.protocolVersion else {
                 throw FactoryConnectionError.invalidProtocol
             }
-            cursor = next
+            _ = try await self.rpc(method: "notifications/initialized", params: [:], notification: true)
+            var names = Set<String>()
+            var cursors = Set<String>()
+            var cursor: String?
+            for _ in 0..<self.maxPaginationPages {
+                var p: [String: Any] = [:]
+                if let cursor { p["cursor"] = cursor }
+                let result = try await self.rpc(method: "tools/list", params: p)
+                for tool in (result["tools"] as? [[String: Any]]) ?? [] {
+                    if let name = tool["name"] as? String { names.insert(name) }
+                }
+                guard let next = result["nextCursor"] as? String, !next.isEmpty else {
+                    self.cachedToolNames = names
+                    self.toolDiscoveryExpiresAt = Date().addingTimeInterval(30)
+                    return names
+                }
+                guard cursors.insert(next).inserted else {
+                    throw FactoryConnectionError.invalidProtocol
+                }
+                cursor = next
+            }
+            throw FactoryConnectionError.invalidProtocol
         }
-        throw FactoryConnectionError.invalidProtocol
+        sessionOpeningTask = task
+        defer { sessionOpeningTask = nil }
+        do {
+            return try await task.value
+        } catch {
+            cachedToolNames = nil
+            toolDiscoveryExpiresAt = nil
+            throw error
+        }
+    }
+
+    private func invalidateMCPSession() {
+        mcpSessionID = nil
+        cachedToolNames = nil
+        toolDiscoveryExpiresAt = nil
+        sessionOpeningTask?.cancel()
+        sessionOpeningTask = nil
     }
 
     private func call(_ name: String, arguments: [String: Any] = [:]) async throws -> String {
