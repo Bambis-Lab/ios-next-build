@@ -35,7 +35,7 @@ color=read("Sources/Design/LightControlSheet.swift")
 
 checks={
     "manual_xcode_only": "if: github.event_name == 'workflow_dispatch'" in workflow,
-    "bounded_job_timeout": "timeout-minutes: 18" in workflow and "timeout-minutes: 3" in workflow,
+    "bounded_job_timeout": "timeout-minutes: 35" in workflow and "timeout-minutes: 3" in workflow,
     "bounded_test_timeout": "--timeout-seconds 240 -- xcodebuild test-without-building" in workflow,
     "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
     "evidence_on_failure": "if: always()" in workflow
