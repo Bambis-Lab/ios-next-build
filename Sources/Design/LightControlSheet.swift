@@ -8,6 +8,11 @@ private enum LightColorCommand: Sendable {
     case effect(String)
 }
 
+private struct QueuedLightColorCommand: Sendable {
+    let generation: UInt64
+    let command: LightColorCommand
+}
+
 struct LightControlSheet: View {
     @Environment(\.dismiss) private var dismiss
     let entityID: String
@@ -20,7 +25,7 @@ struct LightControlSheet: View {
     @State private var colorTemperature = 3000.0
     @State private var favorites: [LightColorFavorite] = []
     @State private var selectedSegments: Set<Int> = []
-    @State private var colorCommandQueue = LatestValueCommandQueue<LightColorCommand>()
+    @State private var colorCommandQueue = LatestValueCommandQueue<QueuedLightColorCommand>()
     @State private var ignoredSynchronizedColor: HomeAssistantLightColor?
 
     private var entity: HomeAssistantEntity? {
@@ -295,9 +300,11 @@ struct LightControlSheet: View {
         // All color, white, temperature and effect choices share the SAME
         // serial latest-value lane. White can no longer be overwritten by
         // an RGB pick left waiting in a separate queue.
-        colorCommandQueue.submit(desired) { command in
-            guard let live = appModel.entity(withID: entityID), live.isAvailable else { return }
-            switch command {
+        let generation = appModel.commandGenerationToken
+        colorCommandQueue.submit(QueuedLightColorCommand(generation: generation, command: desired)) { queued in
+            guard appModel.isCurrentCommandGeneration(queued.generation),
+                  let live = appModel.entity(withID: entityID), live.isAvailable else { return }
+            switch queued.command {
             case let .rgb(rgb, segments, level):
                 if !segments.isEmpty {
                     let color = Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
