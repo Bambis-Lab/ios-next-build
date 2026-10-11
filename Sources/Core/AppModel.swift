@@ -71,6 +71,14 @@ final class AppModel {
         }
     }
 
+    /// Captured by delayed UI commands so a value queued for an old connection
+    /// can never be sent after disconnect or reconnect.
+    var commandGenerationToken: UInt64 { connectionGeneration }
+
+    func isCurrentCommandGeneration(_ token: UInt64) -> Bool {
+        token == connectionGeneration
+    }
+
     var profileDefinition: ProfileDefinition {
         ProfileCatalog.definition(for: selectedProfile)
     }
@@ -640,9 +648,15 @@ final class AppModel {
                 enqueue(change)
             }
             guard !Task.isCancelled else { return }
+            connectionGeneration &+= 1
+            deviceCommands.invalidatePending()
+            entityStateRevisions.removeAll()
+            stateFlushTask?.cancel()
+            stateFlushTask = nil
+            pendingStateChanges.removeAll()
             connectionState = .connecting
-            // An established session drop gets one immediate retry. If that
-            // attempt fails, scheduleReconnect() applies exponential backoff.
+            // An established session drop invalidates outstanding writes before
+            // reconnecting. Their server-side outcome may remain unknown.
             scheduleReconnect(immediate: true)
         }
     }
@@ -758,7 +772,18 @@ final class AppModel {
         } else {
             reconnectTask?.cancel()
             reconnectTask = nil
-            guard shouldReconnect, currentConfiguration != nil else { return }
+            connectionGeneration &+= 1
+            deviceCommands.invalidatePending()
+            entityStateRevisions.removeAll()
+            stateFlushTask?.cancel()
+            stateFlushTask = nil
+            pendingStateChanges.removeAll()
+            eventTask?.cancel()
+            eventTask = nil
+            guard shouldReconnect, currentConfiguration != nil else {
+                Task { await client.disconnect() }
+                return
+            }
             connectionState = .connecting
             Task { await client.disconnect() }
         }
