@@ -27,8 +27,12 @@ final class AppModel {
     var entities: [HomeAssistantEntity] = []
     var floors: [HomeAssistantFloor] = []
     var areas: [HomeAssistantArea] = []
-    var devices: [HomeAssistantDevice] = []
-    var entityRegistry: [HomeAssistantRegistryEntity] = []
+    var devices: [HomeAssistantDevice] = [] {
+        didSet { invalidateHomeAssistantLookupIndex() }
+    }
+    var entityRegistry: [HomeAssistantRegistryEntity] = [] {
+        didSet { invalidateHomeAssistantLookupIndex() }
+    }
     var isPresentingConnection = false
     var activeActionEntityIDs: Set<String> = []
     var lastActionError: String?
@@ -45,6 +49,7 @@ final class AppModel {
     private var shouldReconnect = false
     private var reconnectAttempt = 0
     private var entityIndexByID: [String: Int] = [:]
+    @ObservationIgnored var registryIndexCache: HomeAssistantLookupIndex?
     private var pendingStateChanges: [String: HomeAssistantStateChange] = [:]
     private var stateFlushTask: Task<Void, Never>?
     @ObservationIgnored private let deviceCommands = EntityCommandPipeline()
@@ -496,7 +501,7 @@ final class AppModel {
     }
 
     func isFireTVCompanion(_ entity: HomeAssistantEntity) -> Bool {
-        if let registry = entityRegistry.first(where: { $0.entityID == entity.entityID }),
+        if let registry = indexedRegistryEntity(for: entity.entityID),
            registry.platform?.localizedCaseInsensitiveCompare("firetv_companion") == .orderedSame {
             return true
         }
@@ -510,7 +515,7 @@ final class AppModel {
         let shadowPlatforms: Set<String> = ["androidtv", "androidtv_remote", "homekit_controller"]
         return candidates.filter { entity in
             if isFireTVCompanion(entity) { return true }
-            let platform = entityRegistry.first(where: { $0.entityID == entity.entityID })?.platform?.lowercased()
+            let platform = indexedRegistryEntity(for: entity.entityID)?.platform?.lowercased()
             return platform.map { !shadowPlatforms.contains($0) } ?? true
         }
     }
@@ -526,10 +531,7 @@ final class AppModel {
     }
 
     func resolvedAreaID(for entityID: String) -> String? {
-        guard let registry = entityRegistry.first(where: { $0.entityID == entityID }) else { return nil }
-        if let areaID = registry.areaID, !areaID.isEmpty { return areaID }
-        guard let deviceID = registry.deviceID else { return nil }
-        return devices.first(where: { $0.id == deviceID })?.areaID
+        indexedResolvedAreaID(for: entityID)
     }
 
     private func areaID(for entity: HomeAssistantEntity) -> String? {
@@ -547,15 +549,7 @@ final class AppModel {
     }
 
     func devices(inArea areaID: String) -> [HomeAssistantDevice] {
-        var ids = Set(devices.filter { $0.areaID == areaID }.map(\.id))
-        for registry in entityRegistry where resolvedAreaID(for: registry.entityID) == areaID {
-            if let deviceID = registry.deviceID { ids.insert(deviceID) }
-        }
-        return devices.filter { ids.contains($0.id) }
-            .sorted { lhs, rhs in
-                let order = lhs.name.localizedStandardCompare(rhs.name)
-                return order == .orderedSame ? lhs.id < rhs.id : order == .orderedAscending
-            }
+        indexedDevices(inArea: areaID)
     }
 
     var unassignedDevices: [HomeAssistantDevice] {
@@ -588,8 +582,8 @@ final class AppModel {
     }
 
     func entities(forDevice deviceID: String) -> [HomeAssistantEntity] {
-        let entityIDs = Set(entityRegistry.filter { $0.deviceID == deviceID }.map(\.entityID))
-        return entities.filter { entityIDs.contains($0.entityID) }
+        homeAssistantLookupIndex.entityIDsByDeviceID[deviceID, default: []]
+            .compactMap(entity(withID:))
             .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
