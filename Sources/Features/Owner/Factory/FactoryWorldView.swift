@@ -90,6 +90,7 @@ struct FactoryWorldView: View {
         }
         .padding(16)
         .ios27ContentSurface(radius: 28)
+        .accessibilityIdentifier("factory-world-static-root")
         .sheet(item: $selectedBuilding) { choice in
             NavigationStack {
                 VStack(alignment: .leading, spacing: 14) {
