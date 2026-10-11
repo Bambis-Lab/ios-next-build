@@ -100,7 +100,7 @@ struct MediaView: View {
     }
 
     private func entity(_ id: String) -> HomeAssistantEntity? {
-        appModel.entities.first { $0.entityID == id }
+        appModel.entity(withID: id)
     }
 }
 
@@ -108,7 +108,7 @@ struct MediaDetailView: View {
     let playerID: String
     let appModel: AppModel
 
-    private var player: HomeAssistantEntity? { appModel.entities.first { $0.entityID == playerID } }
+    private var player: HomeAssistantEntity? { appModel.entity(withID: playerID) }
 
     var body: some View {
         ScrollView {
