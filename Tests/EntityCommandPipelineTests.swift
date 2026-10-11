@@ -52,9 +52,12 @@ final class EntityCommandPipelineTests: XCTestCase {
                 return .executed
             }
         }
-        XCTAssertEqual(awaitValue(first), .executed)
-        XCTAssertEqual(awaitValue(obsolete), .superseded)
-        XCTAssertEqual(awaitValue(white), .executed)
+        let firstResult = await first.value
+        let obsoleteResult = await obsolete.value
+        let whiteResult = await white.value
+        XCTAssertEqual(firstResult, .executed)
+        XCTAssertEqual(obsoleteResult, .superseded)
+        XCTAssertEqual(whiteResult, .executed)
         XCTAssertEqual(applied, [1, 3])
     }
 
@@ -98,12 +101,11 @@ final class EntityCommandPipelineTests: XCTestCase {
         }
         try await Task.sleep(for: .milliseconds(12))
         pipeline.invalidatePending()
-        XCTAssertEqual(awaitValue(running), .executed)
-        XCTAssertEqual(awaitValue(pending), .cancelled)
+        let runningResult = await running.value
+        let pendingResult = await pending.value
+        XCTAssertEqual(runningResult, .executed)
+        XCTAssertEqual(pendingResult, .cancelled)
         XCTAssertEqual(applied, [1])
     }
 
-    private func awaitValue(_ task: Task<DeviceCommandResult, Never>) async -> DeviceCommandResult {
-        await task.value
-    }
 }
