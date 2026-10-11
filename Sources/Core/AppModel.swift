@@ -848,6 +848,8 @@ final class AppModel {
         let entityID = entity.entityID
         let generation = connectionGeneration
         let key = Self.coalescingKey(domain: domain, service: service, data: data)
+        let commandTrace = IOSNextPerformance.begin("HA.DeviceCommand")
+        defer { IOSNextPerformance.end("HA.DeviceCommand", commandTrace) }
         let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true else { return .cancelled }
