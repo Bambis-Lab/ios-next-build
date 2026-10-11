@@ -32,9 +32,10 @@ final class AppAudioCoordinator {
     }
 
     func end(_ id: UUID?) {
-        guard let id, activities.removeValue(forKey: id) != nil else { return }
-        busyChanged(isBusy)
-        lastPublishedBusy = isBusy
+        guard let id else { return }
+        let wasBusy = isBusy
+        guard activities.removeValue(forKey: id) != nil else { return }
+        publishIfNeeded(previouslyBusy: wasBusy)
     }
 
     func endAll(_ activity: AppAudioActivity) {
