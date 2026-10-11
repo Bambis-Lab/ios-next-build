@@ -9,7 +9,9 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            if isMotionAcceptanceMode {
+            if ProcessInfo.processInfo.arguments.contains("--nico-room-layout-acceptance") {
+                NicoRoomVisualAcceptanceView()
+            } else if isMotionAcceptanceMode {
                 MotionAcceptanceView()
             } else if isProductAcceptanceMode {
                 ProductAcceptanceRootView()
@@ -113,6 +115,7 @@ struct AppRootView: View {
         isLiveCardTestMode || isAnimationAcceptanceMode || isProductAcceptanceMode
             || isMotionAcceptanceMode || ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance")
             || ProcessInfo.processInfo.arguments.contains("--factory-workspace-acceptance")
+            || ProcessInfo.processInfo.arguments.contains("--nico-room-layout-acceptance")
     }
 
     private var isMotionAcceptanceMode: Bool {
