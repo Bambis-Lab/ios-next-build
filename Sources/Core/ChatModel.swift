@@ -69,7 +69,18 @@ final class ChatModel {
 
     func start(using appModel: AppModel) async {
         if let startupTask {
+            let observedToken = startupToken
             await startupTask.value
+            if startupToken == observedToken {
+                startupTask = nil
+                startupToken = nil
+            }
+            if receiveTask != nil { return }
+            // A bare start() can finish without configuration. If the HA
+            // bootstrap context is ready, let this caller own the bootstrap.
+            if configuration == nil, appModel.chatBootstrapContext() != nil {
+                await start(using: appModel)
+            }
             return
         }
         guard receiveTask == nil else { return }
@@ -224,6 +235,8 @@ final class ChatModel {
         startupToken = nil
         receiveTask?.cancel()
         receiveTask = nil
+        // Decrypted previews must not outlive an app/chat lifecycle stop.
+        ChatMediaThumbnailCache.shared.clear()
         if configuration != nil { state = .offline("Empfang pausiert") }
     }
 
