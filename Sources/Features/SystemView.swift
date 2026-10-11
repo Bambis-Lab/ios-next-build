@@ -4,7 +4,6 @@ import UIKit
 
 struct SystemView: View {
     let appModel: AppModel
-    @State private var isPresentingControlCenter = false
 
     var body: some View {
         List {
@@ -58,29 +57,11 @@ struct SystemView: View {
                     }
                 }
                 NavigationLink {
-                    LiveOperationsView()
+                    FactoryStandaloneView(appModel: appModel)
                 } label: {
-                    Label("Master Runtime Live", systemImage: "waveform.path.ecg")
+                    Label("Factory", systemImage: "network")
                 }
-                .accessibilityIdentifier("system-live-operations")
-                NavigationLink {
-                    MasterCapabilitiesView()
-                } label: {
-                    Label("Master Zugriff", systemImage: "checkmark.shield.fill")
-                }
-                .accessibilityIdentifier("system-master-capabilities")
-                Button {
-                    isPresentingControlCenter = true
-                } label: {
-                    HStack {
-                        Label("Control Center", systemImage: "slider.horizontal.3")
-                        Spacer()
-                        Image(systemName: "chevron.forward")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .buttonStyle(.plain)
+                .accessibilityIdentifier("system-factory-workspace")
                 NavigationLink {
                     PermissionsCenterView(appModel: appModel)
                 } label: {
@@ -110,9 +91,6 @@ struct SystemView: View {
         .listStyle(.insetGrouped)
         .iosNextManagementBackground()
         .navigationTitle("Mehr")
-        .fullScreenCover(isPresented: $isPresentingControlCenter) {
-            AdminAreaView(appModel: appModel)
-        }
     }
 }
 

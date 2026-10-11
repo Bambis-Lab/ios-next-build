@@ -53,6 +53,7 @@ struct FactoryConnectionView: View {
                 if model.hasRestorableSession {
                     Button("Verbindung entfernen", role: .destructive) {
                         model.disconnect()
+                        IOSNextRuntime.shared.factoryWorkspace.invalidateAfterDisconnect()
                         dismiss()
                     }
                 }

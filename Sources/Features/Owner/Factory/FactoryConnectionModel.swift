@@ -49,7 +49,7 @@ final class FactoryConnectionModel {
             // Screenshot harness MUST NOT touch the unsigned simulator Keychain.
             // This is compiled out of the release build and never reports a live session.
             let arguments = ProcessInfo.processInfo.arguments
-            if arguments.contains("--preconnect-ui-acceptance") {
+            if arguments.contains("--preconnect-ui-acceptance") || arguments.contains("--factory-workspace-acceptance") {
                 service = FactoryMCPService(credentials: FactoryCredentialStore(
                     read: {
                         if arguments.contains("--visual-factory-keychain-error") {
@@ -146,6 +146,15 @@ final class FactoryConnectionModel {
             phase = .failed(error.localizedDescription)
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Preserve the authenticated MCP session owned by this model.
+    /// Discovery and the read-only allowlist remain enforced by the service.
+    func readWorkspaceTool(_ name: String, arguments: [String: Any] = [:]) async throws -> String {
+        guard hasRestorableSession, phase == .connected else {
+            throw FactoryConnectionError.missingCredentials
+        }
+        return try await service.readWorkspaceTool(name, arguments: arguments)
     }
 
     func disconnect() {

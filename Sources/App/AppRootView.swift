@@ -112,6 +112,7 @@ struct AppRootView: View {
     private var isTestHarnessMode: Bool {
         isLiveCardTestMode || isAnimationAcceptanceMode || isProductAcceptanceMode
             || isMotionAcceptanceMode || ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance")
+            || ProcessInfo.processInfo.arguments.contains("--factory-workspace-acceptance")
     }
 
     private var isMotionAcceptanceMode: Bool {
@@ -163,7 +164,7 @@ private struct ConnectionLandingView: View {
                 }
                 .padding(.top, 30)
 
-                Text("Richte jeden Bereich einzeln ein. Chat Relay, Control Center, Runner und Factory sind bereits vor der Home-Assistant-Verbindung erreichbar.")
+                Text("Chat Relay und Factory sind bereits vor der Home-Assistant-Verbindung erreichbar. Owner, Runner und Live-Vorgänge findest du im Factory Workspace.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -197,11 +198,15 @@ private struct ConnectionLandingView: View {
                         .foregroundStyle(.secondary)
                     service("Chat Relay", detail: "Verschlüsselter Chat · eigener Zugang",
                             symbol: "message.badge.shield.fill", route: .chat)
-                    service("Control Center", detail: "Owner-Zugang · sichere Einrichtung",
-                            symbol: "slider.horizontal.3", route: .controlCenter)
-                    service("Runner", detail: "Runner-Dienst · Ressourcen und Steuerung",
-                            symbol: "server.rack", route: .runner)
-                    service("Master Factory", detail: "Custom UI · MCP und Governance",
+                    // Legacy screenshots exercise these historical routes without network access.
+                    // Production exposes a single admin entry; no Owner or Runner entitlement is merged.
+                    if ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance") {
+                        service("Control Center", detail: "Owner-Zugang · sichere Einrichtung",
+                                symbol: "slider.horizontal.3", route: .controlCenter)
+                        service("Runner", detail: "Runner-Dienst · Ressourcen und Steuerung",
+                                symbol: "server.rack", route: .runner)
+                    }
+                    service("Factory", detail: "Owner · Runner · Live · MCP und Governance",
                             symbol: "network", route: .factory)
                 }
 

@@ -7,7 +7,8 @@ struct FactoryOverviewView: View {
     let runnerModel: RunnerControlModel
 
     @State private var lastRefresh: Date?
-    @State private var factoryConnection = FactoryConnectionModel()
+    @State private var runtime = IOSNextRuntime.shared
+    private var factoryConnection: FactoryConnectionModel { runtime.factoryWorkspace.connection }
 
     private var runnerStatus: RunnerStatus? {
         if case let .ready(status) = runnerModel.state { return status }
@@ -239,9 +240,9 @@ struct FactoryOverviewView: View {
                 item("Runner & Infrastruktur", detail: "CPU, RAM, Speicher, Dienste und Steuerung", icon: "server.rack")
             }
             NavigationLink {
-                MasterPlatformView(model: ownerModel, runnerModel: runnerModel)
+                FactoryWorkspaceSourcesView()
             } label: {
-                item("Master Platform", detail: "Bestandsansicht für CI und Datenherkunft", icon: "square.3.layers.3d")
+                item("Factory Workspace", detail: "Datenherkunft, Authentifizierung und gemeinsame Werkzeuge", icon: "square.3.layers.3d")
             }
             NavigationLink {
                 FactoryGovernanceView(ownerModel: ownerModel)
@@ -288,7 +289,7 @@ struct FactoryOverviewView: View {
         await ownerModel.refreshStatusV2()
         await runnerModel.refresh()
         if factoryConnection.phase != .disconnected {
-            await factoryConnection.refresh()
+            await runtime.factoryWorkspace.refresh()
         }
         lastRefresh = Date()
     }

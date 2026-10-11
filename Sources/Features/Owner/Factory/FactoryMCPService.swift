@@ -412,9 +412,13 @@ final class FactoryMCPService {
         throw FactoryConnectionError.invalidProtocol
     }
 
-    private func call(_ name: String) async throws -> String {
-        guard allowedTools.contains(name) else { throw FactoryConnectionError.toolNotAvailable(name) }
-        let result = try await rpc(method: "tools/call", params: ["name": name, "arguments": [:]])
+    private func call(_ name: String, arguments: [String: Any] = [:]) async throws -> String {
+        guard FactoryWorkspaceToolCatalog.isPermittedRead(name) else {
+            throw FactoryConnectionError.toolNotAvailable(name)
+        }
+        let result = try await rpc(method: "tools/call", params: [
+            "name": name, "arguments": arguments
+        ])
         if result["isError"] as? Bool == true {
             throw FactoryConnectionError.rpcError("Tool \(name) meldet einen Fehler.")
         }
@@ -425,6 +429,19 @@ final class FactoryMCPService {
         }
         let blocks = result["content"] as? [[String: Any]] ?? []
         return blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    /// Invokes a separately allowlisted, discovered read-only workspace tool.
+    /// Does not authorize arbitrary tool names, commands or mutation methods.
+    func readWorkspaceTool(_ name: String, arguments: [String: Any] = [:]) async throws -> String {
+        guard FactoryWorkspaceToolCatalog.workspaceRead.contains(name) else {
+            throw FactoryConnectionError.toolNotAvailable(name)
+        }
+        let available = try await openSession()
+        guard available.contains(name) else {
+            throw FactoryConnectionError.toolNotAvailable(name)
+        }
+        return try await call(name, arguments: arguments)
     }
 
     func snapshot() async throws -> FactorySnapshot {
