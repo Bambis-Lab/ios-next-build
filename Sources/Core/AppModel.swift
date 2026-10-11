@@ -75,6 +75,11 @@ final class AppModel {
     /// can never be sent after disconnect or reconnect.
     var commandGenerationToken: UInt64 { connectionGeneration }
 
+    private var acceptsDeviceCommands: Bool {
+        if case .connected = connectionState { return true }
+        return false
+    }
+
     func isCurrentCommandGeneration(_ token: UInt64) -> Bool {
         token == connectionGeneration
     }
@@ -361,7 +366,7 @@ final class AppModel {
         brightness: Double,
         for light: HomeAssistantEntity
     ) async {
-        guard light.isAvailable,
+        guard acceptsDeviceCommands, light.isAvailable,
               let bridge = lightSegmentBridge(for: light),
               bridge.isReady,
               !indices.isEmpty
@@ -841,7 +846,10 @@ final class AppModel {
         optimisticState: String? = nil,
         feedback: IOSNextFeedbackEvent? = nil
     ) async {
-        guard entity.isAvailable else { return }
+        guard acceptsDeviceCommands, entity.isAvailable else {
+            lastActionError = "Home Assistant ist nicht verbunden oder das Gerät ist nicht verfügbar."
+            return
+        }
         let entityID = entity.entityID
         let generation = connectionGeneration
         let key = Self.coalescingKey(domain: domain, service: service, data: data)
