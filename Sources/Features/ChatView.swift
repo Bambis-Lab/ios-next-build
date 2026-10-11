@@ -448,7 +448,9 @@ private struct ChatBubble: View {
             Text(message.text ?? "")
                 .textSelection(.enabled)
         case .image:
-            if let image = UIImage(data: message.data) {
+            if let image = ChatMediaThumbnailCache.shared.thumbnail(
+                messageID: message.id, encryptedSessionImageBytes: message.data
+            ) {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
