@@ -11,16 +11,18 @@ final class EntityCommandPipelineTests: XCTestCase {
                 events.append("start-A")
                 try? await Task.sleep(for: .milliseconds(65))
                 events.append("end-A")
+                return .executed
             }
         }
         try await Task.sleep(for: .milliseconds(20))
         let second = Task {
-            await pipeline.execute(entityID: "light.schrank") { events.append("B") }
+            await pipeline.execute(entityID: "light.schrank") {
+                events.append("B")
+                return .executed
+            }
         }
-        let firstResult = await first.value
-        let secondResult = await second.value
-        XCTAssertTrue(firstResult)
-        XCTAssertTrue(secondResult)
+        XCTAssertEqual(awaitValue(first), .executed)
+        XCTAssertEqual(awaitValue(second), .executed)
         XCTAssertEqual(events, ["start-A", "end-A", "B"])
     }
 
@@ -31,34 +33,48 @@ final class EntityCommandPipelineTests: XCTestCase {
             await pipeline.execute(entityID: "light.schrank", coalescingKey: "light.appearance") {
                 applied.append(1)
                 try? await Task.sleep(for: .milliseconds(80))
+                return .executed
             }
         }
         try await Task.sleep(for: .milliseconds(20))
         let obsolete = Task {
             await pipeline.execute(entityID: "light.schrank", coalescingKey: "light.appearance") {
                 applied.append(2)
+                return .executed
             }
         }
         try await Task.sleep(for: .milliseconds(12))
         let white = Task {
             await pipeline.execute(entityID: "light.schrank", coalescingKey: "light.appearance") {
                 applied.append(3)
+                return .executed
             }
         }
-        let firstResult = await first.value
-        let obsoleteResult = await obsolete.value
-        let whiteResult = await white.value
-        XCTAssertTrue(firstResult)
-        XCTAssertFalse(obsoleteResult)
-        XCTAssertTrue(whiteResult)
+        XCTAssertEqual(awaitValue(first), .executed)
+        XCTAssertEqual(awaitValue(obsolete), .superseded)
+        XCTAssertEqual(awaitValue(white), .executed)
         XCTAssertEqual(applied, [1, 3])
+    }
+
+    func testOperationMayReportCancelledOrUnknownOutcome() async {
+        let pipeline = EntityCommandPipeline()
+        let cancelled = await pipeline.execute(entityID: "light.test") { .cancelled }
+        let unknown = await pipeline.execute(entityID: "light.test") { .outcomeUnknown("transport closed") }
+        let failed = await pipeline.execute(entityID: "light.test") { .failed("service rejected") }
+        XCTAssertEqual(cancelled, .cancelled)
+        XCTAssertEqual(unknown, .outcomeUnknown("transport closed"))
+        XCTAssertEqual(failed, .failed("service rejected"))
     }
 
     func testOrderOnlyActionsNeverCoalesce() async throws {
         let pipeline = EntityCommandPipeline()
         var applied: [String] = []
-        let a = Task { await pipeline.execute(entityID: "switch.test") { applied.append("off") } }
-        let b = Task { await pipeline.execute(entityID: "switch.test") { applied.append("on") } }
+        let a = Task {
+            await pipeline.execute(entityID: "switch.test") { applied.append("off"); return .executed }
+        }
+        let b = Task {
+            await pipeline.execute(entityID: "switch.test") { applied.append("on"); return .executed }
+        }
         _ = await (a.value, b.value)
         XCTAssertEqual(applied.count, 2)
         XCTAssertEqual(Set(applied), ["off", "on"])
@@ -71,18 +87,21 @@ final class EntityCommandPipelineTests: XCTestCase {
             await pipeline.execute(entityID: "light.schrank") {
                 applied.append(1)
                 try? await Task.sleep(for: .milliseconds(65))
+                return .executed
             }
         }
         try await Task.sleep(for: .milliseconds(15))
         let pending = Task {
-            await pipeline.execute(entityID: "light.schrank") { applied.append(2) }
+            await pipeline.execute(entityID: "light.schrank") { applied.append(2); return .executed }
         }
         try await Task.sleep(for: .milliseconds(12))
         pipeline.invalidatePending()
-        let runningResult = await running.value
-        let pendingResult = await pending.value
-        XCTAssertTrue(runningResult)
-        XCTAssertFalse(pendingResult)
+        XCTAssertEqual(awaitValue(running), .executed)
+        XCTAssertEqual(awaitValue(pending), .cancelled)
         XCTAssertEqual(applied, [1])
+    }
+
+    private func awaitValue(_ task: Task<DeviceCommandResult, Never>) async -> DeviceCommandResult {
+        await task.value
     }
 }
