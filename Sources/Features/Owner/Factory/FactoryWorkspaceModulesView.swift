@@ -17,6 +17,20 @@ struct FactoryWorkspaceModulesView: View {
             } label: {
                 module("Daten & Schnittstellen", "Factory MCP, Verfügbarkeit und Herkunft", "network")
             }
+            if runtime.factoryWorkspace.discoveredTools.contains("repositories_list") {
+                NavigationLink {
+                    FactoryWorkspaceCollectionView(title: "Repositories", toolName: "repositories_list")
+                } label: {
+                    module("Repositories", "Kanonische Factory-Registry · versionierter Vertrag", "folder.badge.gearshape")
+                }
+            }
+            if runtime.factoryWorkspace.discoveredTools.contains("ci_runs_list") {
+                NavigationLink {
+                    FactoryWorkspaceCollectionView(title: "CI-Runs", toolName: "ci_runs_list")
+                } label: {
+                    module("CI & Workflows", "Factory-CI-Läufe mit Provenienz und Pagination", "gearshape.2.fill")
+                }
+            }
             NavigationLink {
                 RunnerDashboardView(model: runtime.runnerModel)
             } label: {
