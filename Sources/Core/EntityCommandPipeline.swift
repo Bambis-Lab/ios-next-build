@@ -1,8 +1,6 @@
 import Foundation
 
-/// One serial lane per HA entity. It never retries a service action on its own.
-/// Non-idempotent commands stay FIFO; rapidly changing absolute setpoints may
-/// replace only queued (not in-flight) commands from the same control family.
+/// Explicit, user-visible result of an asynchronous device command.
 enum DeviceCommandResult: Equatable {
     case executed
     case superseded
@@ -11,24 +9,30 @@ enum DeviceCommandResult: Equatable {
     case outcomeUnknown(String)
 }
 
+/// One serial lane per HA entity. There is no automatic retry. Safe absolute
+/// setpoints can replace queued values, but never replace an in-flight command.
+/// On disconnect an in-flight caller is released immediately as outcomeUnknown;
+/// the lane is kept occupied until its transport task actually unwinds so a new
+/// command cannot race an older request that may already have reached HA.
 @MainActor
 final class EntityCommandPipeline {
     private struct Item {
+        let id: UUID
         let coalescingKey: String?
         let operation: @MainActor () async -> DeviceCommandResult
         let continuation: CheckedContinuation<DeviceCommandResult, Never>
     }
 
     private struct Lane {
-        var running = false
+        var active: Item?
+        var activeResultDelivered = false
         var pending: [Item] = []
     }
 
     private var lanes: [String: Lane] = [:]
+    private var drainTasks: [String: Task<Void, Never>] = [:]
+    private var activeOperationTasks: [String: Task<DeviceCommandResult, Never>] = [:]
 
-    /// Returns an explicit execution result. An enqueued operation cannot be
-    /// called successful simply because its closure ran: preflight and server
-    /// failures are surfaced distinctly.
     func execute(
         entityID: String,
         coalescingKey: String? = nil,
@@ -44,42 +48,94 @@ final class EntityCommandPipeline {
                 }
             }
             lane.pending.append(Item(
+                id: UUID(),
                 coalescingKey: coalescingKey,
                 operation: operation,
                 continuation: continuation
             ))
-            let shouldStart = !lane.running
-            if shouldStart { lane.running = true }
             lanes[entityID] = lane
-            if shouldStart {
-                Task { [self] in await drain(entityID) }
+
+            if drainTasks[entityID] == nil {
+                drainTasks[entityID] = Task { [self] in
+                    await drain(entityID)
+                }
             }
         }
     }
 
     private func drain(_ entityID: String) async {
-        while var lane = lanes[entityID] {
-            guard !lane.pending.isEmpty else {
-                lanes.removeValue(forKey: entityID)
+        while true {
+            guard var lane = lanes[entityID] else {
+                drainTasks[entityID] = nil
+                activeOperationTasks[entityID] = nil
                 return
             }
+
+            guard lane.active == nil else {
+                // There is already a live request being unwound after invalidation.
+                // Do not launch another command for this entity yet.
+                await Task.yield()
+                continue
+            }
+
+            guard !lane.pending.isEmpty else {
+                lanes.removeValue(forKey: entityID)
+                drainTasks[entityID] = nil
+                activeOperationTasks[entityID] = nil
+                return
+            }
+
             let next = lane.pending.removeFirst()
+            lane.active = next
+            lane.activeResultDelivered = false
             lanes[entityID] = lane
-            let result = await next.operation()
-            next.continuation.resume(returning: result)
+
+            // Separate unstructured operation task: cancelling a request does
+            // not cancel the drain worker, so newer-generation queued commands
+            // can still run after the old transport operation has unwound.
+            let operationTask = Task { @MainActor in
+                await next.operation()
+            }
+            activeOperationTasks[entityID] = operationTask
+            let result = await operationTask.value
+            activeOperationTasks[entityID] = nil
+
+            guard var latest = lanes[entityID],
+                  latest.active?.id == next.id else {
+                // A lane is not removed while an active operation is unwinding;
+                // keep this guard defensive so no continuation is resumed twice.
+                continue
+            }
+            if !latest.activeResultDelivered {
+                next.continuation.resume(returning: result)
+            }
+            latest.active = nil
+            latest.activeResultDelivered = false
+            lanes[entityID] = latest
         }
     }
 
-    /// Invalidates queued commands on HA disconnect or authenticated user switch.
-    /// Already-running requests terminate via the underlying HA transport.
+    /// Supersedes queued work as cancelled and releases active callers
+    /// immediately. An already-sent server side effect cannot be rolled back;
+    /// that caller receives outcomeUnknown and the transport task is cancelled.
     func invalidatePending() {
-        for lane in lanes.values {
+        for entityID in Array(lanes.keys) {
+            guard var lane = lanes[entityID] else { continue }
             for item in lane.pending {
                 item.continuation.resume(returning: .cancelled)
             }
-        }
-        for entityID in Array(lanes.keys) {
-            lanes[entityID]?.pending.removeAll()
+            lane.pending.removeAll()
+
+            if let active = lane.active, !lane.activeResultDelivered {
+                lane.activeResultDelivered = true
+                active.continuation.resume(returning: .outcomeUnknown(
+                    "Die Verbindung änderte sich während der Aktion. Der tatsächliche Geräte-Zustand muss neu synchronisiert werden."
+                ))
+                lanes[entityID] = lane
+                activeOperationTasks[entityID]?.cancel()
+            } else {
+                lanes[entityID] = lane
+            }
         }
     }
 }
