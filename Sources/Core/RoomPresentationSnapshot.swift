@@ -31,8 +31,11 @@ extension AppModel {
     ) -> RoomPresentationSnapshot {
         let entityIDs = index.entityIDs(inArea: areaID)
         let deviceIDs = index.deviceIDs(inArea: areaID)
-        let areaEntities = entities.filter { entityIDs.contains($0.entityID) }
-        let areaDevices = devices.filter { deviceIDs.contains($0.id) }
+        let areaEntities = entityIDs.compactMap(entity(withID:)).sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+        }
+        let areaDevices = deviceIDs.compactMap { index.deviceByID[$0] }
             .sorted { lhs, rhs in
                 let order = lhs.name.localizedStandardCompare(rhs.name)
                 return order == .orderedSame ? lhs.id < rhs.id : order == .orderedAscending
