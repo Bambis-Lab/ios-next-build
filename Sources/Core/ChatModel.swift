@@ -92,7 +92,7 @@ final class ChatModel {
         if let context = appModel.chatBootstrapContext() {
             let boundHAUser = UserDefaults.standard.string(forKey: haUserKey)
             if let boundHAUser, boundHAUser != context.homeAssistantUserID {
-                forgetConfiguration()
+                forgetConfiguration(preservingStartup: true)
                 guard epoch == startupEpoch, !Task.isCancelled else { return }
             }
             if configuration == nil {
@@ -117,7 +117,7 @@ final class ChatModel {
                         UserDefaults.standard.set(context.homeAssistantUserID, forKey: haUserKey)
                     }
                 } else {
-                    forgetConfiguration()
+                    forgetConfiguration(preservingStartup: true)
                     guard epoch == startupEpoch, !Task.isCancelled else { return }
                     do {
                         try await automaticConfigure(using: context)
@@ -227,8 +227,13 @@ final class ChatModel {
         if configuration != nil { state = .offline("Empfang pausiert") }
     }
 
-    func forgetConfiguration() {
-        stop()
+    func forgetConfiguration(preservingStartup: Bool = false) {
+        if preservingStartup {
+            receiveTask?.cancel()
+            receiveTask = nil
+        } else {
+            stop()
+        }
         messages.removeAll(keepingCapacity: false)
         ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
