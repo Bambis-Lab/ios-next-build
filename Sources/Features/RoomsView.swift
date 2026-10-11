@@ -920,7 +920,7 @@ private struct NicoMicroActionTile: View {
                     .foregroundStyle(tint)
                     .frame(width: 39, height: 39)
                     .background(tint.opacity(0.14), in: Circle())
-                Text(title)
+                Text(title == "Schreibtischlampe" ? "Schreibtisch-\nlampe" : title)
                     .font(.caption2.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
