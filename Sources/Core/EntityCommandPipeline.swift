@@ -3,12 +3,20 @@ import Foundation
 /// One serial lane per HA entity. It never retries a service action on its own.
 /// Non-idempotent commands stay FIFO; rapidly changing absolute setpoints may
 /// replace only queued (not in-flight) commands from the same control family.
+enum DeviceCommandResult: Equatable {
+    case executed
+    case superseded
+    case cancelled
+    case failed(String)
+    case outcomeUnknown(String)
+}
+
 @MainActor
 final class EntityCommandPipeline {
     private struct Item {
         let coalescingKey: String?
-        let operation: @MainActor () async -> Void
-        let continuation: CheckedContinuation<Bool, Never>
+        let operation: @MainActor () async -> DeviceCommandResult
+        let continuation: CheckedContinuation<DeviceCommandResult, Never>
     }
 
     private struct Lane {
@@ -18,19 +26,20 @@ final class EntityCommandPipeline {
 
     private var lanes: [String: Lane] = [:]
 
-    /// Returns false when this pending value was superseded or invalidated.
-    /// The operation reports its own server failure separately.
+    /// Returns an explicit execution result. An enqueued operation cannot be
+    /// called successful simply because its closure ran: preflight and server
+    /// failures are surfaced distinctly.
     func execute(
         entityID: String,
         coalescingKey: String? = nil,
-        operation: @escaping @MainActor () async -> Void
-    ) async -> Bool {
+        operation: @escaping @MainActor () async -> DeviceCommandResult
+    ) async -> DeviceCommandResult {
         await withCheckedContinuation { continuation in
             var lane = lanes[entityID] ?? Lane()
             if let coalescingKey {
                 lane.pending.removeAll { item in
                     guard item.coalescingKey == coalescingKey else { return false }
-                    item.continuation.resume(returning: false)
+                    item.continuation.resume(returning: .superseded)
                     return true
                 }
             }
@@ -56,8 +65,8 @@ final class EntityCommandPipeline {
             }
             let next = lane.pending.removeFirst()
             lanes[entityID] = lane
-            await next.operation()
-            next.continuation.resume(returning: true)
+            let result = await next.operation()
+            next.continuation.resume(returning: result)
         }
     }
 
@@ -66,7 +75,7 @@ final class EntityCommandPipeline {
     func invalidatePending() {
         for lane in lanes.values {
             for item in lane.pending {
-                item.continuation.resume(returning: false)
+                item.continuation.resume(returning: .cancelled)
             }
         }
         for entityID in Array(lanes.keys) {
