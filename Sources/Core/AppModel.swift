@@ -376,6 +376,8 @@ final class AppModel {
 
         let generation = connectionGeneration
         let entityID = light.entityID
+        let commandTrace = IOSNextPerformance.begin("HA.SegmentCommand")
+        defer { IOSNextPerformance.end("HA.SegmentCommand", commandTrace) }
         let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true,
