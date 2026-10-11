@@ -10,6 +10,7 @@ final class FactoryConnectionModel {
         case loading
         case connected
         case failed(String)
+        case credentialUnavailable
 
         var title: String {
             switch self {
@@ -18,6 +19,7 @@ final class FactoryConnectionModel {
             case .loading: "Synchronisiere …"
             case .connected: "Verbunden"
             case .failed: "Verbindung gestört"
+            case .credentialUnavailable: "Schlüsselbund nicht verfügbar"
             }
         }
     }
@@ -33,15 +35,49 @@ final class FactoryConnectionModel {
         didSet { UserDefaults.standard.set(registeredClientID, forKey: "factory.mcp.clientID") }
     }
 
-    private let service = FactoryMCPService()
+    private let service: FactoryMCPService
     private var isRefreshing = false
+    private(set) var hasRestorableSession = false
 
-    init() {
+    var canRefresh: Bool { hasRestorableSession && phase != .loading }
+
+    init(service suppliedService: FactoryMCPService? = nil) {
+        if let suppliedService {
+            service = suppliedService
+        } else {
+#if DEBUG
+            // Screenshot harness MUST NOT touch the unsigned simulator Keychain.
+            // This is compiled out of the release build and never reports a live session.
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--preconnect-ui-acceptance") {
+                service = FactoryMCPService(credentials: FactoryCredentialStore(
+                    read: {
+                        if arguments.contains("--visual-factory-keychain-error") {
+                            throw KeychainError.unexpectedStatus(-34018)
+                        }
+                        return nil
+                    },
+                    write: { _ in },
+                    delete: {}
+                ))
+            } else {
+                service = FactoryMCPService()
+            }
+#else
+            service = FactoryMCPService()
+#endif
+        }
         endpoint = UserDefaults.standard.string(forKey: "factory.mcp.endpoint")
             ?? "https://master-appliance-build.tailff745a.ts.net/mcp"
         registeredClientID = UserDefaults.standard.string(forKey: "factory.mcp.clientID") ?? ""
         do {
-            if try service.restore() { phase = .readyForRefresh }
+            if try service.restore() {
+                hasRestorableSession = true
+                phase = .readyForRefresh
+            }
+        } catch let error as KeychainError {
+            phase = .credentialUnavailable
+            errorMessage = error.localizedDescription
         } catch {
             phase = .failed("Gespeicherte Factory-Sitzung ist ungültig.")
             errorMessage = error.localizedDescription
@@ -66,12 +102,24 @@ final class FactoryConnectionModel {
     /// A cancelled browser prompt must not leave the connection spinning.
     func cancelAuthorization() {
         errorMessage = nil
-        phase = ((try? service.restore()) == true) ? .readyForRefresh : .disconnected
+        do {
+            hasRestorableSession = try service.restore()
+            phase = hasRestorableSession ? .readyForRefresh : .disconnected
+        } catch let error as KeychainError {
+            hasRestorableSession = false
+            phase = .credentialUnavailable
+            errorMessage = error.localizedDescription
+        } catch {
+            hasRestorableSession = false
+            phase = .failed("Gespeicherte Factory-Sitzung ist ungültig.")
+            errorMessage = error.localizedDescription
+        }
     }
 
     func finishAuthorization(callback: URL, original: FactoryAuthorization) async throws {
         do {
             try await service.completeAuthorization(callback, original: original)
+            hasRestorableSession = true
             phase = .readyForRefresh
             await refresh()
         } catch {
@@ -82,7 +130,7 @@ final class FactoryConnectionModel {
     }
 
     func refresh() async {
-        if isRefreshing || phase == .disconnected { return }
+        guard hasRestorableSession, !isRefreshing else { return }
         isRefreshing = true
         phase = .loading
         defer { isRefreshing = false }
@@ -102,6 +150,7 @@ final class FactoryConnectionModel {
 
     func disconnect() {
         service.clear()
+        hasRestorableSession = false
         snapshot = nil
         lastRefresh = nil
         errorMessage = nil

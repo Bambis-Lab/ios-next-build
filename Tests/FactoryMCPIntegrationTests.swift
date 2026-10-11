@@ -25,6 +25,27 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         testCredentials.data = nil
     }
 
+    func testFactoryConnectionMissingCredentialsIsNotAnError() {
+        let model = FactoryConnectionModel(service: service())
+        XCTAssertEqual(model.phase, .disconnected)
+        XCTAssertFalse(model.hasRestorableSession)
+        XCTAssertFalse(model.canRefresh)
+        XCTAssertNil(model.errorMessage)
+    }
+
+    func testFactoryConnectionKeychainErrorIsNotMisreportedAsNetworkFailure() {
+        let credential = FactoryCredentialStore(
+            read: { throw KeychainError.unexpectedStatus(-34018) },
+            write: { _ in },
+            delete: {}
+        )
+        let model = FactoryConnectionModel(service: FactoryMCPService(credentials: credential))
+        XCTAssertEqual(model.phase, .credentialUnavailable)
+        XCTAssertFalse(model.hasRestorableSession)
+        XCTAssertFalse(model.canRefresh)
+        XCTAssertNotNil(model.errorMessage)
+    }
+
     func testDynamicOAuthPKCECredentialRestoreAndReadOnlyMCP() async throws {
         FactoryMockProtocol.configure(expiresIn: 3600, useSSE: true)
         let client = service()

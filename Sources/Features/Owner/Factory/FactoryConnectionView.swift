@@ -50,7 +50,7 @@ struct FactoryConnectionView: View {
                 }
                 .disabled(authenticating)
                 .accessibilityIdentifier("factory-connect")
-                if model.phase != .disconnected {
+                if model.hasRestorableSession {
                     Button("Verbindung entfernen", role: .destructive) {
                         model.disconnect()
                         dismiss()

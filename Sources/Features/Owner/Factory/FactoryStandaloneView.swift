@@ -33,6 +33,7 @@ struct FactoryStandaloneView: View {
                                 .font(.headline)
                             Text(factory.phase.title)
                                 .font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("factory-connection-status")
                         }
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -52,11 +53,11 @@ struct FactoryStandaloneView: View {
                 if let error = factory.errorMessage {
                     IOSNextErrorBanner(message: error)
                 }
-                if factory.phase != .disconnected {
+                if factory.hasRestorableSession {
                     Button("Factory-Daten aktualisieren", systemImage: "arrow.clockwise") {
                         Task { await factory.refresh() }
                     }
-                    .disabled(factory.phase == .loading)
+                    .disabled(!factory.canRefresh)
                 }
 
                 if let snapshot = factory.snapshot {

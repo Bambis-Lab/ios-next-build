@@ -30,14 +30,14 @@ final class WireGuardTunnelController {
     }
 
     var state: State = .notConfigured
-    var isOnDemandEnabled = true
+    var isOnDemandEnabled = false
     private var manager: NETunnelProviderManager?
     private let providerBundleIdentifier = "de.nicofroeba16.iosnext.packet-tunnel"
 
     func refresh() async {
         do {
             manager = try await installedManager()
-            if let manager { isOnDemandEnabled = manager.isOnDemandEnabled }
+            isOnDemandEnabled = manager?.isOnDemandEnabled ?? false
             updateState()
         } catch {
             state = .failed(error.localizedDescription)
@@ -120,6 +120,7 @@ final class WireGuardTunnelController {
             }
             WireGuardKeychain.deleteConfiguration()
             manager = nil
+            isOnDemandEnabled = false
             state = .notConfigured
         } catch {
             state = .failed(error.localizedDescription)

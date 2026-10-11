@@ -37,6 +37,13 @@ struct WireGuardView: View {
 
             Section {
                 Toggle("Automatisch verbinden", isOn: Bindable(controller).isOnDemandEnabled)
+                    .disabled(controller.state == .notConfigured || controller.state == .unavailable)
+                    .accessibilityIdentifier("wireguard-on-demand")
+                if controller.state == .notConfigured {
+                    Text("Erst nach dem Import eines WireGuard-Profils verfügbar.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Button("WireGuard-Konfiguration importieren", systemImage: "square.and.arrow.down") {
                     isImporting = true
                 }
