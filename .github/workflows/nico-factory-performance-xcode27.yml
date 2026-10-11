@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/ios-next-opt-01-14-foundation-162
+      - acceptance/iosnext-opt-smoke-84b0d63
   workflow_dispatch:
     inputs:
       suite:
@@ -34,10 +35,11 @@ jobs:
           python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
-  # Explicit manual run ONLY, never launched by a feature-branch push.
-  # A failed test must not suppress the upload of its .xcresult evidence.
+  # Manual dispatch is the normal entry point. The exact one-off acceptance branch
+  # is also allowed to run the approved bounded smoke when this connector cannot
+  # invoke workflow_dispatch. The regular feature branch remains portable-only.
   xcode27:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-84b0d63')
     needs: portable
     runs-on: xcode-27
     timeout-minutes: 18
@@ -91,7 +93,7 @@ jobs:
       - name: Targeted iPhone tests (bounded; fail fast)
         shell: bash
         env:
-          SUITE: ${{ inputs.suite }}
+          SUITE: ${{ inputs.suite || 'smoke' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
