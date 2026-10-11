@@ -73,6 +73,15 @@ def main():
     udid = device["udid"]
     print(f"SIMULATOR_SELECTED runtime={runtime} name={device_name} udid={udid}", flush=True)
 
+    # Expose the selected destination before any boot attempt. Compile-only
+    # gates can build against a shutdown simulator; Xcode owns test-time boot.
+    if env_file:
+        with open(env_file, "a", encoding="utf-8") as stream:
+            stream.write(f"SIM_ID={udid}\n")
+    if "--resolve-only" in sys.argv[3:]:
+        print(f"SIMULATOR_DESTINATION_RESOLVED udid={udid}", flush=True)
+        return 0
+
     try:
         run_bounded(["xcrun", "simctl", "boot", udid], timeout=30)
     except RuntimeError as exc:
@@ -85,9 +94,6 @@ def main():
             raise exc
 
     run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=90)
-    if env_file:
-        with open(env_file, "a", encoding="utf-8") as stream:
-            stream.write(f"SIM_ID={udid}\n")
     print(f"SIMULATOR_READY udid={udid} elapsed={time.monotonic()-started:.1f}s", flush=True)
     return 0
 
