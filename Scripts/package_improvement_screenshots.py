@@ -8,15 +8,59 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import re
 from pathlib import Path
 
 root = Path("build/screenshots")
+expected_labels = {
+    "01-independent-services-hub", "02-chat-relay-standalone",
+    "03-chat-relay-configuration", "04-chat-security",
+    "05-control-center-background-entry", "06-control-center-setup",
+    "07-factory-custom-preview", "08-factory-preview-sections",
+    "09-runner-standalone-background", "10-runner-configuration",
+    "11-factory-command-deck-topology", "12-factory-oauth-connect",
+    "13-factory-oauth-security", "14-product-home", "15-product-rooms",
+    "16-product-chat", "17-product-media", "18-product-system",
+    "19-product-light", "20-product-media-detail", "21-product-owner",
+    "22-product-wireguard", "23-factory-no-session-detail",
+    "24-control-center-setup-security", "25-factory-keychain-error",
+    "26-runner-offline", "27-factory-oauth-rejection",
+    "28-wireguard-offline-security",
+}
 groups = []
 all_files = []
 for appearance in ("light", "dark"):
     directory = root / appearance
-    files = sorted(p for p in directory.rglob("*")
-                   if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".heic"))
+    raw_manifest = directory / "manifest.json"
+    if not raw_manifest.is_file():
+        raise SystemExit(f"SCREENSHOT_MANIFEST_MISSING appearance={appearance}")
+    tests = json.loads(raw_manifest.read_text(encoding="utf-8"))
+    found = set()
+    for test in tests:
+        for attachment in test.get("attachments", []):
+            name = attachment.get("suggestedHumanReadableName", "")
+            match = re.fullmatch(
+                rf"iosnext-162-{appearance}-(\\d{{2}}-[a-z0-9-]+)_\\d+_[0-9A-Fa-f-]+\\.png",
+                name,
+            )
+            if match is None:
+                raise SystemExit(f"SCREENSHOT_UNRECOGNIZED_ATTACHMENT appearance={appearance}: {name}")
+            if attachment.get("isAssociatedWithFailure"):
+                raise SystemExit(f"SCREENSHOT_FAILURE_ATTACHMENT: {name}")
+            label = match.group(1)
+            if label not in expected_labels or label in found:
+                raise SystemExit(f"SCREENSHOT_MISSING_OR_DUPLICATE_LABEL: {label}")
+            found.add(label)
+            original = directory / attachment["exportedFileName"]
+            target = directory / (label + ".png")
+            if not original.is_file() or target.exists():
+                raise SystemExit(f"SCREENSHOT_FILE_MISSING_OR_COLLISION: {label}")
+            original.rename(target)
+            attachment["exportedFileName"] = target.name
+    raw_manifest.write_text(json.dumps(tests, indent=2, ensure_ascii=False), encoding="utf-8")
+    if found != expected_labels:
+        raise SystemExit(f"SCREENSHOT_EXPECTED_LABELS_MISMATCH appearance={appearance} missing={sorted(expected_labels-found)}")
+    files = sorted(directory.glob("[0-9][0-9]-*.png"))
     groups.append((appearance, files))
     all_files.extend(files)
     print(f"SCREENSHOTS_{appearance.upper()}={len(files)}")
