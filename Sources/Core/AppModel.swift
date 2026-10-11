@@ -363,7 +363,7 @@ final class AppModel {
         _ = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true,
-                  lightSegmentBridge(for: light)?.isReady == true else { return }
+                  lightSegmentBridge(for: entity)?.isReady == true else { return .cancelled }
             activeActionEntityIDs.insert(entityID)
             lastActionError = nil
             defer { activeActionEntityIDs.remove(entityID) }
@@ -379,11 +379,14 @@ final class AppModel {
                         "brightness": .number(min(max(brightness, 0), 100))
                     ]
                 )
+                return generation == connectionGeneration ? .executed : .outcomeUnknown("Verbindung wechselte während der Segmentaktion.")
             } catch {
                 if generation == connectionGeneration {
                     lastActionError = error.localizedDescription
                     IOSNextFeedbackCenter.shared.play(.error)
+                    return .outcomeUnknown(error.localizedDescription)
                 }
+                return .outcomeUnknown("Verbindung wechselte während der Segmentaktion.")
             }
         }
     }
@@ -775,7 +778,7 @@ final class AppModel {
         let key = Self.coalescingKey(domain: domain, service: service, data: data)
         _ = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
             guard generation == connectionGeneration,
-                  entity(withID: entityID)?.isAvailable == true else { return }
+                  entity(withID: entityID)?.isAvailable == true else { return .cancelled }
             activeActionEntityIDs.insert(entityID)
             lastActionError = nil
             defer { activeActionEntityIDs.remove(entityID) }
@@ -786,24 +789,28 @@ final class AppModel {
                     domain: domain, service: service, targetEntityID: entityID,
                     serviceData: data
                 )
+                guard generation == connectionGeneration else {
+                    return .outcomeUnknown("Verbindung wechselte nach dem Senden; Zustand wird neu synchronisiert.")
+                }
                 // Never put attributes from the old button/tile snapshot back
                 // over a newer HA WebSocket state change.
                 if let optimisticState,
-                   generation == connectionGeneration,
                    entityStateRevisions[entityID, default: 0] == revisionAtDispatch,
                    let index = entityIndexByID[entityID],
                    entities.indices.contains(index),
                    entities[index].entityID == entityID {
                     entities[index] = entities[index].updating(state: optimisticState)
                 }
-                if generation == connectionGeneration, let feedback {
-                    IOSNextFeedbackCenter.shared.play(feedback)
-                }
+                if let feedback { IOSNextFeedbackCenter.shared.play(feedback) }
+                return .executed
             } catch {
                 if generation == connectionGeneration {
                     lastActionError = error.localizedDescription
                     IOSNextFeedbackCenter.shared.play(.error)
+                    // A transport error does not prove the backend did not act.
+                    return .outcomeUnknown(error.localizedDescription)
                 }
+                return .outcomeUnknown("Verbindung wechselte während der Aktion.")
             }
         }
     }
