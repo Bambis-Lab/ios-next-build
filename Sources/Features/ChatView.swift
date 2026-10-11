@@ -60,8 +60,8 @@ struct ChatView: View {
                 .accessibilityLabel("Chatoptionen")
             }
         }
-        .task { await chatModel.start(using: appModel) }
-        .onDisappear { chatModel.stop() }
+        .task { await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel) }
+        .onDisappear { IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared() }
         .sheet(isPresented: $isPresentingConfiguration) {
             ChatConfigurationView(chatModel: chatModel)
         }
