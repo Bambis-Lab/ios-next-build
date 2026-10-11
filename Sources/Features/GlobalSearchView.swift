@@ -12,6 +12,7 @@ struct GlobalSearchView: View {
     let appModel: AppModel
     @State private var query = ""
     @State private var results = GlobalSearchResults.empty
+    @State private var searchIndex = GlobalSearchIndex()
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
@@ -119,37 +120,20 @@ struct GlobalSearchView: View {
             let trace = IOSNextPerformance.begin("Search.Query")
             defer { IOSNextPerformance.end("Search.Query", trace) }
 
-            // Snapshot references are read only on MainActor. Debouncing avoids
-            // sorting every collection for every intermediate keystroke.
-            let areas = appModel.areas.filter {
-                Self.matches($0.name, query) || Self.matches($0.appDisplayName, query)
-            }.sorted {
-                $0.appDisplayName.localizedStandardCompare($1.appDisplayName) == .orderedAscending
-            }
-            let floors = appModel.floors.filter {
-                Self.matches($0.name, query)
-            }.sorted {
-                $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
-            let entities = appModel.entities.filter {
-                Self.matches($0.displayName, query)
-                    || Self.matches($0.entityID, query)
-                    || Self.matches($0.secondaryStateText, query)
-            }.sorted {
-                $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-            }
+            // Rebuild after debounce, so a burst of HA websocket events or
+            // keystrokes pays the locale-normalization cost once.
+            searchIndex.rebuild(
+                areas: appModel.areas,
+                floors: appModel.floors,
+                entities: appModel.entities,
+                revision: appModel.searchRevision
+            )
+            let found = searchIndex.results(for: query)
             guard !Task.isCancelled, query == normalizedQuery else { return }
-            results = GlobalSearchResults(query: query, areas: areas, floors: floors, entities: entities)
+            results = GlobalSearchResults(
+                query: query, areas: found.areas, floors: found.floors, entities: found.entities
+            )
         }
     }
 
-    private static func normalize(_ value: String) -> String {
-        value.trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-    }
-
-    private static func matches(_ value: String, _ query: String) -> Bool {
-        normalize(value).contains(query)
-    }
 }
