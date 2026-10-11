@@ -16,6 +16,8 @@ struct MediaPresentationSnapshot {
 
     @MainActor
     static func build(from appModel: AppModel) -> Self {
+        let trace = IOSNextPerformance.begin("Media.PresentationSnapshot")
+        defer { IOSNextPerformance.end("Media.PresentationSnapshot", trace) }
         let players = appModel.entities(inDomain: "media_player")
         let nicoIDs: Set<String> = [
             "media_player.nico_zimmer_untergeschoss_apple_tv",
