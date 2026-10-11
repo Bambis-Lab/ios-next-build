@@ -33,10 +33,19 @@ jobs:
         allowed={
           ".github/workflows/xcode-improvements-screenshots.yml",
           "UITests/ImprovementsGalleryUITests.swift",
-          "Scripts/package_improvement_screenshots.py"
+          "Scripts/package_improvement_screenshots.py",
+          "Tests/FactoryMCPIntegrationTests.swift",
+          "Sources/Features/AdminAreaView.swift",
+          "Sources/Features/RunnerDashboardView.swift",
+          "Sources/Features/Owner/Factory/FactoryCommandDeck.swift",
+          "Sources/Features/Owner/Factory/FactoryStandaloneView.swift",
+          "Sources/Features/Owner/Factory/FactoryConnectionModel.swift",
+          "Sources/Features/Owner/Factory/FactoryConnectionView.swift",
+          "Sources/Core/WireGuardTunnelController.swift",
+          "Sources/Features/WireGuardView.swift"
         }
         assert changed == allowed, f"UNAUTHORIZED_SCREENSHOT_CHANGES: {changed ^ allowed}"
-        print("IMPROVEMENTS_VISUAL_SCOPE=PASS files=3")
+        print("IMPROVEMENTS_VISUAL_SCOPE=PASS files=12")
         PY
 
         xcodebuild -version
@@ -67,6 +76,10 @@ jobs:
         fi
         xcrun simctl bootstatus "$SIM_ID" -b
 
+        echo "=== FACTORY CREDENTIAL REGRESSION ==="
+        xcodebuild           -project IOSNext.xcodeproj           -scheme IOSNext           -configuration Debug           -sdk iphonesimulator           -destination "platform=iOS Simulator,id=$SIM_ID"           -parallel-testing-enabled NO           -only-testing:IOSNextTests/FactoryMCPIntegrationTests           -derivedDataPath build/VisualDerivedData           -resultBundlePath build/Improvements-Factory-Regression.xcresult           CODE_SIGNING_ALLOWED=NO           CODE_SIGNING_REQUIRED=NO           CODE_SIGN_IDENTITY=""           test
+        echo "FACTORY_CREDENTIAL_REGRESSION=PASS"
+
         for APPEARANCE in light dark; do
           echo "=== VISUAL_SCREENSHOTS $APPEARANCE ==="
           xcrun simctl ui "$SIM_ID" appearance "$APPEARANCE"
@@ -74,9 +87,11 @@ jobs:
           if [ "$APPEARANCE" = light ]; then
             SELECT_A="testLightIndependentServices"
             SELECT_B="testLightProductBackgrounds"
+            SELECT_C="testLightAdditionalStates"
           else
             SELECT_A="testDarkIndependentServices"
             SELECT_B="testDarkProductBackgrounds"
+            SELECT_C="testDarkAdditionalStates"
           fi
           xcodebuild \
             -project IOSNext.xcodeproj \
@@ -86,7 +101,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO \
             "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_A" \
-            "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_B" \
+            "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_B"             "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_C" \
             -derivedDataPath build/VisualDerivedData \
             -resultBundlePath "$RESULT" \
             CODE_SIGNING_ALLOWED=NO \

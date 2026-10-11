@@ -5,6 +5,7 @@ No credentials, secrets, untrusted logs or live backend payloads are included.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 from pathlib import Path
@@ -19,10 +20,22 @@ for appearance in ("light", "dark"):
     groups.append((appearance, files))
     all_files.extend(files)
     print(f"SCREENSHOTS_{appearance.upper()}={len(files)}")
-    if len(files) < 20:
-        raise SystemExit(f"SCREENSHOT_EVIDENCE_INCOMPLETE appearance={appearance} count={len(files)}")
-if len(all_files) < 40:
-    raise SystemExit("SCREENSHOT_EVIDENCE_INCOMPLETE total less than 40")
+    if len(files) != 28:
+        raise SystemExit(f"SCREENSHOT_EVIDENCE_INCOMPLETE appearance={appearance} count={len(files)} expected=28")
+if len(all_files) != 56:
+    raise SystemExit("SCREENSHOT_EVIDENCE_INCOMPLETE total expected=56")
+
+# An inadvertent duplicate view cannot satisfy the visual gate merely by
+# producing 56 image files. Cryptographic equality is a hard failure.
+digests = {}
+for path in all_files:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest in digests:
+        raise SystemExit(
+            f"SCREENSHOT_DUPLICATE: {path} equals {digests[digest]}"
+        )
+    digests[digest] = path
+print("SCREENSHOT_DUPLICATE_CHECK=PASS")
 
 sections = []
 manifest = {
@@ -30,7 +43,7 @@ manifest = {
     "build": 25,
     "device": "iPhone 18 Pro Max · iOS 27.0 Simulator",
     "source": "Bambis-Lab/ios-next-build",
-    "purpose": "UI evidence only; not a live factory login",
+    "purpose": "UI evidence only; simulator states are explicitly simulated; no live backend authentication",
     "images": []
 }
 for appearance, images in groups:
