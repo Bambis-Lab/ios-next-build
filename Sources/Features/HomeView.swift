@@ -126,11 +126,11 @@ struct HomeView: View {
             DashboardPreferencesView(options: dashboardPreferenceOptions, store: dashboardPreferences)
         }
         .task {
-            dashboardPreferences.ensureKnownIDs(featuredItems.map(\\.id))
+            dashboardPreferences.ensureKnownIDs(featuredItems.map(\.id))
         }
         .onChange(of: appModel.selectedProfile) { _, profile in
             dashboardPreferences = DashboardPreferencesStore(profileID: String(describing: profile))
-            dashboardPreferences.ensureKnownIDs(featuredItems.map(\\.id))
+            dashboardPreferences.ensureKnownIDs(featuredItems.map(\.id))
         }
     }
 
