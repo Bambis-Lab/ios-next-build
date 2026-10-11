@@ -173,6 +173,7 @@ final class ChatModel {
     func forgetConfiguration() {
         stop()
         messages.removeAll(keepingCapacity: false)
+        ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
