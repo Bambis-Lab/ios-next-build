@@ -17,31 +17,30 @@ enum IOSNextMotion {
 
 struct IOSNextBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
+        let isDark = colorScheme == .dark
         ZStack {
-            Color("LaunchBackground")
-
-            LinearGradient(
-                colors: [
-                    Color.accentColor.opacity(colorScheme == .dark ? 0.20 : 0.105),
-                    Color.indigo.opacity(colorScheme == .dark ? 0.105 : 0.045),
-                    Color.cyan.opacity(colorScheme == .dark ? 0.085 : 0.030),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            RadialGradient(
-                colors: [
-                    Color.accentColor.opacity(colorScheme == .dark ? 0.105 : 0.035),
-                    Color.clear
-                ],
-                center: .bottomTrailing,
-                startRadius: 24,
-                endRadius: 520
-            )
+            Color(.systemGroupedBackground)
+            if !reduceTransparency {
+                LinearGradient(
+                    colors: [
+                        Color.accentColor.opacity(isDark ? 0.13 : 0.055),
+                        Color.indigo.opacity(isDark ? 0.075 : 0.035),
+                        Color.cyan.opacity(isDark ? 0.045 : 0.02),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                RadialGradient(
+                    colors: [Color.accentColor.opacity(isDark ? 0.075 : 0.025), .clear],
+                    center: .bottomTrailing,
+                    startRadius: 32,
+                    endRadius: 520
+                )
+            }
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)

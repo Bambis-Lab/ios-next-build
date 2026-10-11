@@ -15,7 +15,11 @@ allowed = {
     "Sources/Features/Owner/Shared/OwnerAppearance.swift",
     "Sources/Features/RunnerDashboardView.swift",
     "project.yml",
+    "Info.plist",
+    "Sources/Design/IOS27HomeComponents.swift",
+    "Sources/Design/IOSNextComponents.swift",
     "Docs/Releases/1.5.0.md",
+    "Docs/Releases/1.6.0.md",
     ".github/workflows/xcode-factory-1.5.0.yml",
     "Scripts/validate_factory_scope.py",
 }
@@ -34,7 +38,11 @@ runner = (root / "Sources/Features/RunnerDashboardView.swift").read_text()
 factory = (root / "Sources/Features/Owner/Factory/FactoryOverviewView.swift").read_text()
 assert "FactoryOverviewView(ownerModel: ownerModel, runnerModel: runnerModel)" in owner
 assert "FactoryAmbientBackground(kind: .runner)" in runner
-assert "Factory-MCP-Registry" in factory and "Nicht angebunden" in factory
+assert "Factory-MCP-Registry" in factory and "FactoryCommandDeck" in factory
 assert "func perform(" not in factory and "URLSession" not in factory
+gateway = (root / "Sources/Features/Owner/Factory/FactoryMCPService.swift").read_text()
+assert 'allowedTools:' in gateway and 'tools/call' in gateway and 'factory_status' in gateway
+assert 'KeychainStore.save' in gateway and 'code_challenge_method' in gateway
+assert 'SOURCE_WRITE' not in gateway and 'LIVE_WRITE' not in gateway
 print("FACTORY_SCOPE=PASS", "files=" + str(len(changed)))
 print("FACTORY_SOURCE_LOCK=" + base)

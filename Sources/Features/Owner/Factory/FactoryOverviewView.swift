@@ -7,6 +7,7 @@ struct FactoryOverviewView: View {
     let runnerModel: RunnerControlModel
 
     @State private var lastRefresh: Date?
+    @State private var factoryConnection = FactoryConnectionModel()
 
     private var runnerStatus: RunnerStatus? {
         if case let .ready(status) = runnerModel.state { return status }
@@ -17,8 +18,18 @@ struct FactoryOverviewView: View {
         OwnerPage {
             LazyVStack(alignment: .leading, spacing: 22) {
                 hero
+                FactoryCommandDeck(
+                    factoryConnected: factoryConnection.phase == .connected,
+                    ownerConnected: ownerModel.backendStatus?.healthy == true,
+                    runnerConnected: runnerStatus?.vmOnline == true,
+                    reportedSources: factoryConnection.snapshot?.rows.count ?? 0
+                )
+                factoryLink
                 summary
                 sourceState
+                if let snapshot = factoryConnection.snapshot {
+                    factoryTelemetry(snapshot)
+                }
                 navigation
                 provenance
             }
@@ -26,6 +37,15 @@ struct FactoryOverviewView: View {
         .background(FactoryAmbientBackground(kind: .factory))
         .navigationTitle("Master Factory")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    FactoryConnectionView(model: factoryConnection)
+                } label: {
+                    Label("Factory-Verbindung", systemImage: "network.badge.shield.half.filled")
+                }
+            }
+        }
         .refreshable { await refresh() }
         .task { await refresh() }
     }
@@ -38,7 +58,7 @@ struct FactoryOverviewView: View {
             Text("Deine Factory.\nEin Überblick.")
                 .font(.largeTitle.weight(.bold))
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Echte Daten aus den bereits autorisierten Owner- und Runner-Diensten. Neue Factory-Schreibaktionen sind nicht enthalten.")
+            Text("Owner, Runner und Factory MCP an einem Ort. Alles bereits vor der Anmeldung sichtbar, Livewerte erst nach autorisierter Verbindung.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Label("Read-only Erweiterung", systemImage: "lock.shield.fill")
@@ -101,11 +121,93 @@ struct FactoryOverviewView: View {
             )
             OwnerStatusRow(
                 title: "Factory-MCP-Registry",
-                detail: "Kein separater OAuth-Mobile-Adapter konfiguriert. Keine erfundenen Registry-Daten.",
+                detail: factoryConnection.lastRefresh.map { "Letzte MCP-Abfrage · \($0.formatted(date: .omitted, time: .shortened))" } ?? "OAuth 2.1 + PKCE S256 · nur lesende Tools",
                 symbol: "network",
-                value: "Nicht angebunden",
-                tint: .secondary
+                value: factoryConnection.phase.title,
+                tint: factoryConnection.phase == .connected ? .green : .secondary
             )
+        }
+    }
+
+    private var factoryLink: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Factory Gateway").font(.headline)
+                    Text(factoryConnection.phase.title)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: factoryConnection.phase == .connected ?
+                      "checkmark.shield.fill" : "network.badge.shield.half.filled")
+                    .font(.title3)
+                    .foregroundStyle(factoryConnection.phase == .connected ? .green : .indigo)
+            }
+            if let error = factoryConnection.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            HStack(spacing: 10) {
+                NavigationLink {
+                    FactoryConnectionView(model: factoryConnection)
+                } label: {
+                    Label(factoryConnection.phase == .disconnected ? "Verbinden" : "Verwalten",
+                          systemImage: "lock.shield")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .accessibilityIdentifier("factory-connect-entry")
+                if factoryConnection.phase != .disconnected {
+                    Button {
+                        Task { await factoryConnection.refresh() }
+                    } label: {
+                        Label("Aktualisieren", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(factoryConnection.phase == .loading)
+                }
+            }
+            .controlSize(.regular)
+        }
+        .padding(18)
+        .ios27ContentSurface(radius: 24)
+    }
+
+    @ViewBuilder
+    private func factoryTelemetry(_ snapshot: FactorySnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            IOSNextSectionHeader(
+                title: "Factory MCP",
+                subtitle: "Letzte erfolgreiche Abfrage · \(snapshot.observedAt.formatted(date: .abbreviated, time: .shortened))",
+                symbol: "network"
+            )
+            if snapshot.rows.isEmpty {
+                OwnerStatusRow(
+                    title: "Keine kompatiblen lesenden Tools",
+                    detail: "Die Verbindung steht, aber der Server bietet keine bekannten Read-only-Funktionen an.",
+                    symbol: "lock.shield", value: "0", tint: .secondary
+                )
+            } else {
+                ForEach(snapshot.rows) { row in
+                    OwnerStatusRow(
+                        title: row.title,
+                        detail: row.detail,
+                        symbol: "point.3.connected.trianglepath.dotted",
+                        value: row.status,
+                        tint: row.status.lowercased().contains("ready") ||
+                              row.status.lowercased() == "ok" ? .green : .indigo
+                    )
+                }
+                NavigationLink {
+                    FactoryMCPDetailsView(snapshot: snapshot)
+                } label: {
+                    item("MCP-Funktionsinventar",
+                         detail: "Verfügbare Schnittstellen und sichere Telemetrie",
+                         icon: "list.bullet.rectangle")
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -172,7 +274,7 @@ struct FactoryOverviewView: View {
     private var provenance: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Datenherkunft").font(.caption.weight(.semibold))
-            Text("Owner-Backend / Runner-Control. Kein direkter Factory-MCP-Zugriff und keine hostweiten Schreibrechte.")
+            Text("Owner-Backend, Runner-Control und optional Factory MCP. Die einzelnen Quellen melden ihren Datenstand unabhängig. Keine neuen Schreibaktionen.")
             if let lastRefresh {
                 Text("Zuletzt abgefragt: \(lastRefresh.formatted(date: .abbreviated, time: .standard))")
             }
@@ -185,6 +287,9 @@ struct FactoryOverviewView: View {
     @MainActor private func refresh() async {
         await ownerModel.refreshStatusV2()
         await runnerModel.refresh()
+        if factoryConnection.phase != .disconnected {
+            await factoryConnection.refresh()
+        }
         lastRefresh = Date()
     }
 }

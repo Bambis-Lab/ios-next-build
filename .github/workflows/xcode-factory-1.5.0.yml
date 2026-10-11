@@ -1,16 +1,16 @@
-name: iOS Next 1.5.0 Factory Control Center IPA
+name: iOS Next 1.6.0 Factory Command Deck IPA
 
 on:
   push:
     branches:
-      - feature/ios-next-factory-1.5.0-xcode27
+      - feature/ios-next-factory-1.6.0-xcode27
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-next-factory-1.5.0-xcode27
+  group: ios-next-factory-1.6.0-xcode27
   cancel-in-progress: false
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
     with:
       runs-on: xcode-27
-      artifact-name: IOSNext-1.5.0-Factory-build22-unsigned
+      artifact-name: IOSNext-1.6.0-Factory-build23-unsigned
       artifact-path: build/IOSNext.ipa
       xcode-command: |
         set -euo pipefail
@@ -38,13 +38,16 @@ jobs:
         bash Scripts/prepare_wireguard_dependency.sh
 
         export CM_COMMIT="$(git rev-parse HEAD)"
-        export EXPECTED_VERSION="1.5.0"
-        export EXPECTED_BUILD="22"
+        export EXPECTED_VERSION="1.6.0"
+        export EXPECTED_BUILD="23"
 
         bash Scripts/prepare_free_sideload_project.sh
         python3 Scripts/validate_apple_final_acceptance_source.py
         grep -q 'FactoryOverviewView(ownerModel: ownerModel, runnerModel: runnerModel)' Sources/Features/Owner/OwnerControlView.swift
         grep -q 'FactoryAmbientBackground(kind: .runner)' Sources/Features/RunnerDashboardView.swift
+        grep -q 'FactoryCommandDeck(' Sources/Features/Owner/Factory/FactoryOverviewView.swift
+        grep -q 'code_challenge_method' Sources/Features/Owner/Factory/FactoryMCPService.swift
+        test "$(grep -c '<key>UIUserInterfaceStyle</key>' Info.plist)" = "0"
 
         echo "=== UNSIGNED DEVICE IPA BUILD ==="
         rm -rf build
@@ -63,8 +66,8 @@ jobs:
 
         APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/IOSNext.app"
         test -d "$APP_PATH"
-        /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" | grep -qx '1.5.0'
-        /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx '22'
+        /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" | grep -qx '1.6.0'
+        /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx '23'
         /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist" | grep -qx 'de.nicofroeba16.iosnext'
 
         cp -R "$APP_PATH" build/Payload/IOSNext.app

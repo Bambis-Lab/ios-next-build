@@ -57,45 +57,41 @@ enum IOS27AmbientBackgroundStyle {
 }
 
 struct IOS27HomeBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var style: IOS27AmbientBackgroundStyle = .home
 
     var body: some View {
         let palette = style.palette
-        let accessibilityFactor = reduceTransparency ? 0.72 : 1.0
-        let intensity = palette.intensity * accessibilityFactor
+        let isDark = colorScheme == .dark
+        let intensity = palette.intensity
 
         ZStack {
-            Color.black
-            LinearGradient(
-                colors: [
-                    palette.primary.opacity(0.44 * intensity),
-                    palette.secondary.opacity(0.18 * intensity),
-                    palette.tertiary.opacity(0.34 * intensity),
-                    Color.black.opacity(0.30)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [palette.secondary.opacity(0.32 * intensity), .clear],
-                center: .topTrailing,
-                startRadius: 24,
-                endRadius: 520
-            )
-            RadialGradient(
-                colors: [palette.tertiary.opacity(0.26 * intensity), .clear],
-                center: .bottomLeading,
-                startRadius: 18,
-                endRadius: 620
-            )
-            LinearGradient(
-                colors: [Color.black.opacity(0.02), Color.black.opacity(0.20)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            Color(.systemGroupedBackground)
+            if !reduceTransparency {
+                LinearGradient(
+                    colors: [
+                        palette.primary.opacity((isDark ? 0.19 : 0.07) * intensity),
+                        palette.secondary.opacity((isDark ? 0.08 : 0.035) * intensity),
+                        palette.tertiary.opacity((isDark ? 0.10 : 0.045) * intensity),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                RadialGradient(
+                    colors: [
+                        palette.secondary.opacity((isDark ? 0.12 : 0.04) * intensity),
+                        .clear
+                    ],
+                    center: .topTrailing,
+                    startRadius: 28,
+                    endRadius: 510
+                )
+            }
         }
         .ignoresSafeArea()
+        .accessibilityHidden(true)
     }
 }
 

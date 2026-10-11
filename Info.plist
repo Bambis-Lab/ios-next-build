@@ -65,8 +65,6 @@
     <string>$(AppIdentifierPrefix)de.nicofroeba16.iosnext.shared</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
-    <key>UIUserInterfaceStyle</key>
-    <string>Dark</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>
