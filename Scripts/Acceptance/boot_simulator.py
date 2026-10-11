@@ -58,7 +58,7 @@ def main():
     env_file = os.environ.get("GITHUB_ENV")
     started = time.monotonic()
 
-    listing = run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=20, emit_output=False)
+    listing = run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=15, emit_output=False)
     data = json.loads(listing)
     matches = [
         (runtime, device) for runtime, devices in data.get("devices", {}).items()
@@ -77,14 +77,14 @@ def main():
         run_bounded(["xcrun", "simctl", "boot", udid], timeout=30)
     except RuntimeError as exc:
         latest = json.loads(run_bounded(
-            ["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=20, emit_output=False
+            ["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=15, emit_output=False
         ))
         states = [d.get("state") for devs in latest.get("devices", {}).values()
                   for d in devs if d.get("udid") == udid]
         if not states or states[0] != "Booted":
             raise exc
 
-    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=60)
+    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=90)
     if env_file:
         with open(env_file, "a", encoding="utf-8") as stream:
             stream.write(f"SIM_ID={udid}\n")
