@@ -14,6 +14,7 @@ final class ChatMediaThumbnailCache {
 
     private let thumbnails = NSCache<NSString, UIImage>()
     private let maxPixelSize = 640
+    private var cacheGeneration: UInt64 = 0
 
     private init() {
         thumbnails.countLimit = 36
@@ -25,13 +26,14 @@ final class ChatMediaThumbnailCache {
     func thumbnail(messageID: String, decryptedImageBytes imageBytes: Data) async -> UIImage? {
         let key = messageID as NSString
         if let cached = thumbnails.object(forKey: key) { return cached }
+        let generation = cacheGeneration
         let trace = IOSNextPerformance.begin("Chat.ThumbnailDecode")
         defer { IOSNextPerformance.end("Chat.ThumbnailDecode", trace) }
         let limit = maxPixelSize
         let payload = await Task.detached(priority: .userInitiated) {
             Self.makeThumbnail(data: imageBytes, maxPixelSize: limit)
         }.value
-        guard !Task.isCancelled, let payload else { return nil }
+        guard !Task.isCancelled, cacheGeneration == generation, let payload else { return nil }
         if let raced = thumbnails.object(forKey: key) { return raced }
         let preview = UIImage(cgImage: payload.cgImage)
         let decodedCost = payload.cgImage.bytesPerRow * payload.cgImage.height
@@ -40,6 +42,7 @@ final class ChatMediaThumbnailCache {
     }
 
     func clear() {
+        cacheGeneration &+= 1
         thumbnails.removeAllObjects()
     }
 
@@ -51,7 +54,7 @@ final class ChatMediaThumbnailCache {
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                   kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-                  kCGImageSourceShouldCacheImmediately: false
+                  kCGImageSourceShouldCacheImmediately: true
               ] as CFDictionary) else { return nil }
         return ChatThumbnailPayload(cgImage: image)
     }
