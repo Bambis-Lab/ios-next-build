@@ -36,9 +36,15 @@ struct WireGuardView: View {
             }
 
             Section {
-                Toggle("Automatisch verbinden", isOn: Bindable(controller).isOnDemandEnabled)
-                    .disabled(controller.state == .notConfigured || controller.state == .unavailable)
-                    .accessibilityIdentifier("wireguard-on-demand")
+                Toggle("Automatisch verbinden", isOn: Binding(
+                    get: { controller.isOnDemandEnabled },
+                    set: { value in
+                        controller.isOnDemandEnabled = value
+                        Task { await controller.updateOnDemand() }
+                    }
+                ))
+                .disabled(controller.state == .notConfigured || controller.state == .unavailable)
+                .accessibilityIdentifier("wireguard-on-demand")
                 if controller.state == .notConfigured {
                     Text("Erst nach dem Import eines WireGuard-Profils verfügbar.")
                         .font(.footnote)
@@ -83,9 +89,6 @@ struct WireGuardView: View {
             }
         }
         .task { await controller.refresh() }
-        .onChange(of: controller.isOnDemandEnabled) { _, _ in
-            Task { await controller.updateOnDemand() }
-        }
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: [UTType(filenameExtension: "conf") ?? .plainText, .plainText]
