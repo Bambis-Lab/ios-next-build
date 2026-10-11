@@ -39,7 +39,7 @@ jobs:
   # is also allowed to run the approved bounded smoke when this connector cannot
   # invoke workflow_dispatch. The regular feature branch remains portable-only.
   xcode27:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-84b0d63')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-84b0d63' && github.sha == 'd081308b34a7bb852354e4250bddd67561fdc31f')
     needs: portable
     runs-on: xcode-27
     timeout-minutes: 18
