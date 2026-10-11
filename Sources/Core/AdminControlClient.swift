@@ -505,6 +505,9 @@ final class AdminControlModel {
     private var lastEventSequence = 0
     private var eventPollingTask: Task<Void, Never>?
     private var statusPollingTask: Task<Void, Never>?
+    private var statusV2RefreshTask: Task<Void, Never>?
+    private var statusV2RefreshToken: UUID?
+    private var ownerSessionGeneration: UInt64 = 0
     private var pollingActive = true
 
     init() {
@@ -512,6 +515,7 @@ final class AdminControlModel {
     }
 
     func configure(endpoint: String, ownerToken: String, enrollmentSecret: String = "") throws {
+        invalidateOwnerReadTasks()
         guard let url = URL(string: endpoint), url.scheme?.lowercased() == "https", !ownerToken.isEmpty else {
             throw AdminControlError.invalidConfiguration
         }
@@ -913,6 +917,34 @@ final class AdminControlModel {
 
     func refreshStatusV2() async {
         guard case .unlocked = state, let configuration, v2Capabilities != nil else { return }
+        if let statusV2RefreshTask {
+            let token = statusV2RefreshToken
+            await statusV2RefreshTask.value
+            if statusV2RefreshToken == token {
+                self.statusV2RefreshTask = nil
+                statusV2RefreshToken = nil
+            }
+            return
+        }
+
+        let generation = ownerSessionGeneration
+        let token = UUID()
+        statusV2RefreshToken = token
+        let task = Task { [weak self] in
+            await self?.refreshStatusV2Direct(configuration: configuration, generation: generation)
+        }
+        statusV2RefreshTask = task
+        await task.value
+        if statusV2RefreshToken == token {
+            statusV2RefreshTask = nil
+            statusV2RefreshToken = nil
+        }
+    }
+
+    private func refreshStatusV2Direct(
+        configuration: AdminControlConfiguration,
+        generation: UInt64
+    ) async {
         do {
             async let status = client.status(configuration: configuration)
             async let systems = client.systemsV2(configuration: configuration)
@@ -925,21 +957,37 @@ final class AdminControlModel {
             async let devices = client.devicesV2(configuration: configuration)
             async let sessions = client.sessionsV2(configuration: configuration)
             async let releases = client.releasesV2(configuration: configuration)
-            backendStatus = try await status
-            systemStatusesV2 = try await systems
-            diagnosticsV2 = try await diagnostics
-            addonsV2 = try await addons
-            addonInventoryStatusV2 = try await addonInventoryStatus
-            projectsV2 = try await projects
-            jobsV2 = try await jobs
-            securityV2 = try await security
-            devicesV2 = try await devices
-            sessionsV2 = try await sessions
-            releasesV2 = try await releases
+            let values = try await (
+                status, systems, diagnostics, addons, addonInventoryStatus,
+                projects, jobs, security, devices, sessions, releases
+            )
+            // Publish this snapshot as a unit only if its authenticated owner
+            // session is still current. Never bleed a previous account's result.
+            guard generation == ownerSessionGeneration,
+                  case .unlocked = state else { return }
+            backendStatus = values.0
+            systemStatusesV2 = values.1
+            diagnosticsV2 = values.2
+            addonsV2 = values.3
+            addonInventoryStatusV2 = values.4
+            projectsV2 = values.5
+            jobsV2 = values.6
+            securityV2 = values.7
+            devicesV2 = values.8
+            sessionsV2 = values.9
+            releasesV2 = values.10
             ownerV2Error = nil
         } catch {
+            guard generation == ownerSessionGeneration, case .unlocked = state else { return }
             ownerV2Error = error.localizedDescription
         }
+    }
+
+    private func invalidateOwnerReadTasks() {
+        ownerSessionGeneration &+= 1
+        statusV2RefreshTask?.cancel()
+        statusV2RefreshTask = nil
+        statusV2RefreshToken = nil
     }
 
     private func startStatusPolling() {
