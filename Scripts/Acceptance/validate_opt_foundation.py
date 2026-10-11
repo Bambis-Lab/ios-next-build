@@ -53,7 +53,9 @@ checks={
     "ordered_nonretry_actions": 'return nil' in model and "coalescingKey" in model,
     "color_and_white_serial": "submitColor(.white(" in color
                               and "submitColor(.rgb(" in color
-                              and "colorCommandQueue.submit(desired)" in color,
+                              and "colorCommandQueue.submit(QueuedLightColorCommand(generation: generation, command: desired))" in color
+                              and "isCurrentCommandGeneration(queued.generation)" in color
+                              and "commandGenerationToken" in model,
     "live_segment_serial": '"light.appearance"' in model
                             and 'service: "set_segments"' in model,
     "pipeline_typed_results": "item.continuation.resume(returning: .superseded)" in pipeline
