@@ -60,6 +60,7 @@ struct OpenIOSNextMediaIntent: AppIntent {
 
 struct IOSNextAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        [
         AppShortcut(
             intent: OpenJarvisIntent(),
             phrases: [
@@ -88,5 +89,6 @@ struct IOSNextAppShortcuts: AppShortcutsProvider {
             shortTitle: "Medien öffnen",
             systemImageName: "play.tv.fill"
         )
+        ]
     }
 }
