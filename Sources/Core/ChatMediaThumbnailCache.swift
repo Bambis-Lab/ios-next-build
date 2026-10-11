@@ -8,6 +8,10 @@ import UIKit
 final class ChatMediaThumbnailCache {
     static let shared = ChatMediaThumbnailCache()
 
+    private struct ThumbnailPayload: @unchecked Sendable {
+        let cgImage: CGImage
+    }
+
     private let thumbnails = NSCache<NSString, UIImage>()
     private let maxPixelSize = 640
 
@@ -16,26 +20,37 @@ final class ChatMediaThumbnailCache {
         thumbnails.totalCostLimit = 24 * 1024 * 1024
     }
 
-    func thumbnail(messageID: String, decryptedImageBytes imageBytes: Data) -> UIImage? {
+    /// Decodes off the main actor. Only the downsampled immutable CGImage is
+    /// sent back; caching and UIImage presentation remain on the main actor.
+    func thumbnail(messageID: String, decryptedImageBytes imageBytes: Data) async -> UIImage? {
         let key = messageID as NSString
         if let cached = thumbnails.object(forKey: key) { return cached }
-
-        // ImageIO downsamples before UIKit has to allocate a full-resolution
-        // bitmap. Failed/corrupt payloads return nil without a disk fallback.
-        guard let source = CGImageSourceCreateWithData(imageBytes as CFData, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                  kCGImageSourceCreateThumbnailFromImageAlways: true,
-                  kCGImageSourceCreateThumbnailWithTransform: true,
-                  kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-                  kCGImageSourceShouldCacheImmediately: false
-              ] as CFDictionary) else { return nil }
-        let preview = UIImage(cgImage: image)
-        let decodedCost = image.bytesPerRow * image.height
+        let limit = maxPixelSize
+        let payload = await Task.detached(priority: .userInitiated) {
+            Self.makeThumbnail(data: imageBytes, maxPixelSize: limit)
+        }.value
+        guard !Task.isCancelled, let payload else { return nil }
+        if let raced = thumbnails.object(forKey: key) { return raced }
+        let preview = UIImage(cgImage: payload.cgImage)
+        let decodedCost = payload.cgImage.bytesPerRow * payload.cgImage.height
         thumbnails.setObject(preview, forKey: key, cost: decodedCost)
         return preview
     }
 
     func clear() {
         thumbnails.removeAllObjects()
+    }
+
+    private nonisolated static func makeThumbnail(
+        data: Data, maxPixelSize: Int
+    ) -> ThumbnailPayload? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                  kCGImageSourceShouldCacheImmediately: false
+              ] as CFDictionary) else { return nil }
+        return ThumbnailPayload(cgImage: image)
     }
 }
