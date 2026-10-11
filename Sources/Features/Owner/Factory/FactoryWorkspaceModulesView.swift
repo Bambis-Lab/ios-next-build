@@ -70,7 +70,7 @@ struct FactoryWorkspaceSourcesView: View {
                 LabeledContent("Verbindung", value: workspace.connection.phase.title)
                 LabeledContent("Entdeckte Tools", value: "\(workspace.discoveredTools.count)")
                 LabeledContent("Neue Workspace-API", value: workspace.canReadWorkspace ? "Verfügbar" : "Noch nicht verfügbar")
-                if let overview = workspace.overview {
+                if workspace.connection.phase == .connected, let overview = workspace.overview {
                     LabeledContent("Quelle", value: overview.source)
                     LabeledContent("Status", value: overview.status)
                     LabeledContent("Schema", value: overview.schemaVersion)
