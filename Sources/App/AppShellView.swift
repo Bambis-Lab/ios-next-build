@@ -34,13 +34,18 @@ struct AppShellView: View {
     let appModel: AppModel
     let chatModel: ChatModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: AppTab?
     @State private var navigationPaths: [AppTab: NavigationPath]
 
     init(appModel: AppModel, chatModel: ChatModel, initialTab: AppTab = .home) {
         self.appModel = appModel
         self.chatModel = chatModel
-        _selectedTab = State(initialValue: initialTab)
+        let requested = UserDefaults.standard.string(forKey: "iosnext.requestedAppTab")
+        _selectedTab = State(initialValue: requested.flatMap(AppTab.init(rawValue:)) ?? initialTab)
+        if requested != nil {
+            UserDefaults.standard.removeObject(forKey: "iosnext.requestedAppTab")
+        }
         _navigationPaths = State(
             initialValue: Dictionary(
                 uniqueKeysWithValues: AppTab.allCases.map { ($0, NavigationPath()) }
@@ -71,6 +76,10 @@ struct AppShellView: View {
             Button("OK") { appModel.dismissActionError() }
         } message: {
             Text(appModel.lastActionError ?? "Unbekannter Fehler")
+        }
+        .onAppear { consumeNavigationRequest() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { consumeNavigationRequest() }
         }
     }
 
@@ -140,6 +149,13 @@ struct AppShellView: View {
             get: { navigationPaths[tab] ?? NavigationPath() },
             set: { navigationPaths[tab] = $0 }
         )
+    }
+
+    private func consumeNavigationRequest() {
+        guard let raw = UserDefaults.standard.string(forKey: "iosnext.requestedAppTab"),
+              let tab = AppTab(rawValue: raw) else { return }
+        UserDefaults.standard.removeObject(forKey: "iosnext.requestedAppTab")
+        select(tab)
     }
 
     private func select(_ tab: AppTab) {
