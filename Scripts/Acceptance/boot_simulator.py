@@ -18,12 +18,30 @@ def run_bounded(argv, timeout=90, *, emit_output=True):
         output, _ = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         print(f"SIMULATOR_COMMAND_TIMEOUT cmd={argv[0]} timeout={timeout}s", flush=True)
-        os.killpg(process.pid, signal.SIGTERM)
         try:
-            output, _ = process.communicate(timeout=5)
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            output, _ = process.communicate(timeout=3)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            output, _ = process.communicate()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                # Never perform an unbounded communicate() after SIGKILL.
+                output, _ = process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                # A descendant may still hold the pipe open. Close our side
+                # and bound reaping so this watchdog cannot stall the whole job.
+                if process.stdout is not None:
+                    process.stdout.close()
+                try:
+                    process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                output = ""
         if output and emit_output:
             print(output, end="" if output.endswith("\n") else "\n", flush=True)
         raise RuntimeError(f"Command timed out after {timeout}s: {argv[0]}")
