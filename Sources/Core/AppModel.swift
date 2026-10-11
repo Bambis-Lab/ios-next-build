@@ -585,10 +585,14 @@ final class AppModel {
     /// Constant-time entity resolution after sortEntities builds the ID index.
     /// Avoid repeating linear array searches on every light/room redraw.
     func entity(withID entityID: String) -> HomeAssistantEntity? {
-        guard let index = entityIndexByID[entityID],
-              entities.indices.contains(index),
-              entities[index].entityID == entityID else { return nil }
-        return entities[index]
+        if let index = entityIndexByID[entityID],
+           entities.indices.contains(index),
+           entities[index].entityID == entityID {
+            return entities[index]
+        }
+        // A just-injected fixture or an initial restore can precede index
+        // construction. Preserve correctness without caching a stale match.
+        return entities.first { $0.entityID == entityID }
     }
 
     func entities(inArea areaID: String) -> [HomeAssistantEntity] {
