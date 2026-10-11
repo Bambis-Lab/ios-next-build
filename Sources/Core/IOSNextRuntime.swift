@@ -7,19 +7,42 @@ final class IOSNextRuntime {
 
     let chatModel: ChatModel
     let lifecycleCoordinator: AppServiceLifecycleCoordinator
-    let runnerModel: RunnerControlModel
-    let liveOperationsModel: LiveOperationsModel
-    let factoryWorkspace: FactoryWorkspaceCoordinator
+
+    // Administrative services restore their own credentials and can be expensive.
+    // Keep them uninitialized until the corresponding feature is first opened.
+    @ObservationIgnored private var runnerModelStorage: RunnerControlModel?
+    @ObservationIgnored private var liveOperationsModelStorage: LiveOperationsModel?
+    @ObservationIgnored private var factoryWorkspaceStorage: FactoryWorkspaceCoordinator?
+
+    var runnerModel: RunnerControlModel {
+        if let runnerModelStorage { return runnerModelStorage }
+        let model = RunnerControlModel()
+        runnerModelStorage = model
+        return model
+    }
+
+    var liveOperationsModel: LiveOperationsModel {
+        if let liveOperationsModelStorage { return liveOperationsModelStorage }
+        let model = LiveOperationsModel()
+        liveOperationsModelStorage = model
+        return model
+    }
+
+    var factoryWorkspace: FactoryWorkspaceCoordinator {
+        if let factoryWorkspaceStorage { return factoryWorkspaceStorage }
+        let coordinator = FactoryWorkspaceCoordinator()
+        factoryWorkspaceStorage = coordinator
+        return coordinator
+    }
 
     private var runnerPollingTask: Task<Void, Never>?
     private var runnerPollingSources: Set<String> = []
 
     private init() {
+        let trace = IOSNextPerformance.begin("Runtime.Initialize")
+        defer { IOSNextPerformance.end("Runtime.Initialize", trace) }
         self.chatModel = ChatModel()
         self.lifecycleCoordinator = AppServiceLifecycleCoordinator(chat: self.chatModel)
-        self.runnerModel = RunnerControlModel()
-        self.liveOperationsModel = LiveOperationsModel()
-        self.factoryWorkspace = FactoryWorkspaceCoordinator()
     }
 
     func setRunnerPollingActive(_ source: String, active: Bool) {
