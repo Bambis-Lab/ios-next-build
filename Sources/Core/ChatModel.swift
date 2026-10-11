@@ -69,9 +69,9 @@ final class ChatModel {
     }
 
     func start(using appModel: AppModel) async {
-        if let startupTask {
+        if let existingStartupTask = startupTask {
             let observedToken = startupToken
-            await startupTask.value
+            await existingStartupTask.value
             if startupToken == observedToken {
                 startupTask = nil
                 startupToken = nil
@@ -90,7 +90,8 @@ final class ChatModel {
         let token = UUID()
         startupToken = token
         let task = Task { [weak self] in
-            await self?.performStart(using: appModel, epoch: epoch)
+            guard let self else { return }
+            await self.performStart(using: appModel, epoch: epoch)
         }
         startupTask = task
         await task.value
@@ -174,8 +175,8 @@ final class ChatModel {
     }
 
     func start() async {
-        if let startupTask {
-            await startupTask.value
+        if let existingStartupTask = startupTask {
+            await existingStartupTask.value
             return
         }
         guard receiveTask == nil else { return }
@@ -183,7 +184,10 @@ final class ChatModel {
         let epoch = startupEpoch
         let token = UUID()
         startupToken = token
-        let task = Task { [weak self] in await self?.performRelayStart(epoch: epoch) }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performRelayStart(epoch: epoch)
+        }
         startupTask = task
         await task.value
         if startupToken == token {
