@@ -8,19 +8,24 @@ import XCTest
 final class FactoryMCPIntegrationTests: XCTestCase {
     private let resource = "https://factory-iosnext-test.invalid/mcp"
     private let issuer = "https://factory-iosnext-test.invalid"
+    private let testCredentials = FactoryTestCredentialBox()
 
     private func service() -> FactoryMCPService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FactoryMockProtocol.self]
-        return FactoryMCPService(session: URLSession(configuration: configuration))
+        return FactoryMCPService(
+            session: URLSession(configuration: configuration),
+            credentials: testCredentials.store
+        )
     }
 
     override func setUp() {
         super.setUp()
         FactoryMockProtocol.reset()
+        testCredentials.data = nil
     }
 
-    func testDynamicOAuthPKCEKeychainRestoreAndReadOnlyMCP() async throws {
+    func testDynamicOAuthPKCECredentialRestoreAndReadOnlyMCP() async throws {
         FactoryMockProtocol.configure(expiresIn: 3600, useSSE: true)
         let client = service()
         defer { client.clear() }
@@ -36,7 +41,7 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         let callback = try XCTUnwrap(URL(string: "iosnext://factory-oauth?code=mock-code&state=\(pending.state)"))
         try await client.completeAuthorization(callback, original: pending)
         let afterRelaunch = service()
-        XCTAssertTrue(try afterRelaunch.restore(), "Factory OAuth tokens were not restored from Keychain")
+        XCTAssertTrue(try afterRelaunch.restore(), "Factory OAuth tokens were not restored from injected test credential store")
         let snapshot = try await afterRelaunch.snapshot()
         XCTAssertEqual(snapshot.rows.count, 3)
         XCTAssertTrue(snapshot.rows.allSatisfy { $0.status == "ok" })
@@ -91,6 +96,21 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         } catch FactoryConnectionError.noReadableTools {
             // Correct: no false LIVE status.
         }
+    }
+}
+
+/// The production default stays KeychainStore. Only unsigned simulator tests
+/// use this ephemeral store, shared across two service instances to test restore.
+@MainActor
+private final class FactoryTestCredentialBox {
+    var data: Data?
+
+    var store: FactoryCredentialStore {
+        FactoryCredentialStore(
+            read: { self.data },
+            write: { self.data = $0 },
+            delete: { self.data = nil }
+        )
     }
 }
 

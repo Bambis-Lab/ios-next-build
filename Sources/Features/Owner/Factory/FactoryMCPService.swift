@@ -1,6 +1,24 @@
 import Foundation
 import CryptoKit
 
+/// Credential persistence seam: production always uses iOS Keychain; the
+/// unsigned CI simulator injects memory-only credentials. No user tokens are
+/// persisted outside Keychain in release builds.
+@MainActor
+struct FactoryCredentialStore {
+    let read: () throws -> Data?
+    let write: (Data) throws -> Void
+    let delete: () -> Void
+
+    static var keychain: Self {
+        Self(
+            read: { try KeychainStore.data(account: "factory.oauth.tokens") },
+            write: { try KeychainStore.save($0, account: "factory.oauth.tokens") },
+            delete: { KeychainStore.delete(account: "factory.oauth.tokens") }
+        )
+    }
+}
+
 enum FactoryConnectionError: LocalizedError {
     case invalidEndpoint, metadataUnavailable, pkceUnavailable, registrationUnavailable
     case oauthCancelled, invalidCallback, expiredState, missingCredentials
@@ -56,6 +74,7 @@ struct FactorySnapshot: Sendable {
 @MainActor
 final class FactoryMCPService {
     private let session: URLSession
+    private let credentials: FactoryCredentialStore
     private let callbackURI = "iosnext://factory-oauth"
     private let resourceMetadataPath = "/.well-known/oauth-protected-resource"
     private let protocolVersion = "2025-06-18"
@@ -74,7 +93,13 @@ final class FactoryMCPService {
     private var mcpSessionID: String?
     private var endpoint: URL?
 
-    init(session: URLSession = .shared) { self.session = session }
+    init(
+        session: URLSession = .shared,
+        credentials: FactoryCredentialStore = .keychain
+    ) {
+        self.session = session
+        self.credentials = credentials
+    }
 
     private func secureURL(_ raw: String) throws -> URL {
         guard let url = URL(string: raw), url.scheme?.lowercased() == "https",
@@ -246,11 +271,11 @@ final class FactoryMCPService {
             "expires_at": expiresAt?.timeIntervalSince1970 ?? 0
         ]
         let data = try JSONSerialization.data(withJSONObject: record)
-        try KeychainStore.save(data, account: "factory.oauth.tokens")
+        try credentials.write(data)
     }
 
     func restore() throws -> Bool {
-        guard let data = try KeychainStore.data(account: "factory.oauth.tokens"),
+        guard let data = try credentials.read(),
               let record = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let access = record["access"] as? String, !access.isEmpty,
               let endpointString = record["endpoint"] as? String,
@@ -272,7 +297,7 @@ final class FactoryMCPService {
         endpoint = nil
         expiresAt = nil
         mcpSessionID = nil
-        KeychainStore.delete(account: "factory.oauth.tokens")
+        credentials.delete()
     }
 
     private func activeToken() async throws -> String {
