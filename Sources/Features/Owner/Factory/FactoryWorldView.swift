@@ -121,7 +121,7 @@ struct FactoryWorldView: View {
         let renderHeight = pack.camera.resolution_px[1]
         GeometryReader { geometry in
             let viewport = geometry.size
-            let city = ZStack {
+            ZStack {
                 Image(uiImage: image)
                     .resizable()
                     .frame(width: viewport.width, height: viewport.height)
