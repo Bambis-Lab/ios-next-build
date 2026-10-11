@@ -3,8 +3,8 @@ import SwiftUI
 /// Factory Control Surface independent of Home Assistant and Owner login.
 /// No implicit network access, mutation actions or fabricated status values.
 struct FactoryStandaloneView: View {
-    @State private var factory = FactoryConnectionModel()
     @State private var runtime = IOSNextRuntime.shared
+    private var factory: FactoryConnectionModel { runtime.factoryWorkspace.connection }
 
     var body: some View {
         ScrollView {
@@ -61,7 +61,7 @@ struct FactoryStandaloneView: View {
                 }
                 if factory.hasRestorableSession {
                     Button("Factory-Daten aktualisieren", systemImage: "arrow.clockwise") {
-                        Task { await factory.refresh() }
+                        Task { await runtime.factoryWorkspace.refresh() }
                     }
                     .disabled(!factory.canRefresh)
                 }
@@ -90,13 +90,7 @@ struct FactoryStandaloneView: View {
                         description: Text("Die Oberfläche ist vollständig erreichbar. Live-Daten erscheinen nach autorisierter Verbindung."))
                 }
 
-                NavigationLink {
-                    RunnerDashboardView(model: runtime.runnerModel)
-                } label: {
-                    Label("Runner separat einrichten", systemImage: "server.rack")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.glass)
+                FactoryWorkspaceModulesView()
 
                 Label("Keine Factory-Schreibaktionen oder freien Befehle.",
                       systemImage: "lock.shield.fill")
@@ -110,11 +104,11 @@ struct FactoryStandaloneView: View {
             .frame(maxWidth: .infinity)
         }
         .background(FactoryAmbientBackground(kind: .factory))
-        .navigationTitle("Master Factory")
+        .navigationTitle(ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance") ? "Master Factory" : "Factory")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if factory.phase == .readyForRefresh {
-                await factory.refresh()
+                await runtime.factoryWorkspace.refresh()
             }
         }
         .accessibilityIdentifier("preconnect-factory-root")
