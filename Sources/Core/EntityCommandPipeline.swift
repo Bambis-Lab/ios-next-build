@@ -71,13 +71,6 @@ final class EntityCommandPipeline {
                 return
             }
 
-            guard lane.active == nil else {
-                // There is already a live request being unwound after invalidation.
-                // Do not launch another command for this entity yet.
-                await Task.yield()
-                continue
-            }
-
             guard !lane.pending.isEmpty else {
                 lanes.removeValue(forKey: entityID)
                 drainTasks[entityID] = nil
