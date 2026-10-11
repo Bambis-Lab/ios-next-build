@@ -105,7 +105,7 @@ struct FactoryWorkspaceSourcesView: View {
                     Text("Noch nicht vom Factory-Gateway angeboten. Die vorhandene Master-Runtime-Live-Ansicht bleibt verfügbar.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    LabeledContent("Cursor", value: workspace.eventHistory.lastSequence.map(String.init) ?? "Noch kein Ereignis")
+                    LabeledContent("Cursor", value: workspace.eventHistory.lastSequence.map { String($0) } ?? "Noch kein Ereignis")
                     LabeledContent("Abgleich", value: workspace.eventsRequireResync ? "Lücke erkannt" : "Keine Lücke erkannt")
                     ForEach(workspace.recentFactoryEvents.suffix(20)) { event in
                         LabeledContent(event.kind, value: event.source)
