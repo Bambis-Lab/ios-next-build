@@ -65,6 +65,7 @@ jobs:
           -only-testing:IOSNextTests/FactoryMCPIntegrationTests \
           -only-testing:IOSNextTests/FactoryWorkspaceEventsTests \
           -only-testing:IOSNextTests/FactoryWorkspaceCollectionTests \
+          -only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests \
           -only-testing:IOSNextUITests/FactoryWorkspaceUITests \
           -derivedDataPath build/FactoryDerivedData \
           -resultBundlePath build/FactoryWorkspaceAcceptance.xcresult \
