@@ -25,6 +25,8 @@ final class ChatMediaThumbnailCache {
     func thumbnail(messageID: String, decryptedImageBytes imageBytes: Data) async -> UIImage? {
         let key = messageID as NSString
         if let cached = thumbnails.object(forKey: key) { return cached }
+        let trace = IOSNextPerformance.begin("Chat.ThumbnailDecode")
+        defer { IOSNextPerformance.end("Chat.ThumbnailDecode", trace) }
         let limit = maxPixelSize
         let payload = await Task.detached(priority: .userInitiated) {
             Self.makeThumbnail(data: imageBytes, maxPixelSize: limit)
