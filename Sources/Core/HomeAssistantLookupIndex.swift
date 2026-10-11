@@ -9,8 +9,13 @@ struct HomeAssistantLookupIndex: Sendable {
     let entityIDsByDeviceID: [String: Set<String>]
 
     init(devices: [HomeAssistantDevice], entityRegistry: [HomeAssistantRegistryEntity]) {
-        let deviceByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        let registryByEntityID = Dictionary(uniqueKeysWithValues: entityRegistry.map { ($0.entityID, $0) })
+        // Registries may transiently contain duplicate rows while HA is
+        // reconciling a reload. Resolve deterministically instead of trapping
+        // in Dictionary(uniqueKeysWithValues:).
+        var deviceByID: [String: HomeAssistantDevice] = [:]
+        for device in devices { deviceByID[device.id] = device }
+        var registryByEntityID: [String: HomeAssistantRegistryEntity] = [:]
+        for registry in entityRegistry { registryByEntityID[registry.entityID] = registry }
 
         var areaIDByEntityID: [String: String] = [:]
         var entityIDsByAreaID: [String: Set<String>] = [:]
