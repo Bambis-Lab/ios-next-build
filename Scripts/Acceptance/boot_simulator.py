@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Start an iOS Simulator without an imposed command timeout.
-
-This helper intentionally leaves simulator discovery, boot and bootstatus running
-until macOS returns. It does not kill simctl or bootstatus processes on elapsed time.
-"""
+"""Start an iOS Simulator with bounded subprocess calls and precise diagnostics."""
 import json
 import os
 import subprocess
@@ -28,7 +24,7 @@ def main():
     env_file = os.environ.get("GITHUB_ENV")
     started = time.monotonic()
 
-    listing = run_unbounded(["xcrun", "simctl", "list", "devices", "available", "-j"])
+    listing = run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=45)
     data = json.loads(listing)
     matches = [
         (runtime, device) for runtime, devices in data.get("devices", {}).items()
