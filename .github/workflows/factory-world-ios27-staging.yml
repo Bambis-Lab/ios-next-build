@@ -1,0 +1,43 @@
+name: Factory World iOS27 compile-only staging
+on:
+  push:
+    branches: [feature/factory-world-ios27-staging]
+    paths:
+      - "Sources/Features/Owner/Factory/FactoryWorld*.swift"
+      - ".github/workflows/factory-world-ios27-staging.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: factory-world-ios27-stage
+  cancel-in-progress: false
+jobs:
+  compile:
+    runs-on: xcode-27
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exact Apple toolchain and isolated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
+          git status --short
+          test "$GITHUB_REF_NAME" = "feature/factory-world-ios27-staging"
+      - name: Build native Factory World alongside unchanged existing features
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          bash Scripts/prepare_free_sideload_project.sh
+          xcodebuild -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/factory-world-ios27-build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          echo "FW03_IOS27_NATIVE_COMPILE=PASS_NO_LIVE_CHANGES"
