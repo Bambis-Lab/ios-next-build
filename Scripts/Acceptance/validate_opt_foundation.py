@@ -10,6 +10,18 @@ workflow=read(".github/workflows/nico-factory-performance-xcode27.yml")
 watchdog=read("Scripts/Acceptance/xcode_watchdog.py")
 tests=read("UITests/NicoRoomLayoutUITests.swift")
 model=read("Sources/Core/AppModel.swift")
+chat=read("Sources/Core/ChatModel.swift")
+lifecycle=read("Sources/Core/AppServiceLifecycleCoordinator.swift")
+runtime=read("Sources/Core/IOSNextRuntime.swift")
+search=read("Sources/Features/GlobalSearchView.swift")
+factory=read("Sources/Features/Owner/Factory/FactoryMCPService.swift")
+owner=read("Sources/Core/AdminControlClient.swift")
+audio=read("Sources/Core/AppAudioCoordinator.swift")
+jarvis=read("Sources/Core/JarvisEngine.swift")
+wireguard=read("Sources/Core/WireGuardTunnelController.swift")
+dashboard=read("Sources/Features/HomeView.swift")
+intents=read("Sources/Core/JarvisAppIntents.swift")
+thumbnail=read("Sources/Core/ChatMediaThumbnailCache.swift")
 pipeline=read("Sources/Core/EntityCommandPipeline.swift")
 pipeline_tests=read("Tests/EntityCommandPipelineTests.swift")
 color=read("Sources/Design/LightControlSheet.swift")
@@ -39,9 +51,31 @@ checks={
                             and 'service: "set_segments"' in model,
     "pipeline_typed_results": "item.continuation.resume(returning: .superseded)" in pipeline
                                and "item.continuation.resume(returning: .cancelled)" in pipeline
-                               and "let result = await next.operation()" in pipeline,
+                               and "let result = await operationTask.value" in pipeline,
+    "pipeline_active_outcome": "activeResultDelivered" in pipeline
+                               and "active.continuation.resume(returning: .outcomeUnknown(" in pipeline
+                               and "activeOperationTasks[entityID]?.cancel()" in pipeline,
     "pipeline_acceptance": "testQueuedAbsoluteValuesCoalesceWithoutDroppingFinalIntent" in pipeline_tests
-                           and "testDisconnectDropsOnlyQueuedCommands" in pipeline_tests,
+                           and "testDisconnectDropsOnlyQueuedCommands" in pipeline_tests
+                           and "testNewGenerationWaitsUntilInvalidatedOperationUnwinds" in pipeline_tests,
+    "chat_start_idempotent": "private var startupTask: Task<Void, Never>?" in chat
+                             and "private func performRelayStart(epoch: UInt64)" in chat,
+    "chat_draft_preserved": "if accepted && draft == originalDraft { draft = \"\" }" in chat,
+    "thumbnail_off_main": "Task.detached(priority: .userInitiated)" in thumbnail
+                          and "totalCostLimit = 24 * 1024 * 1024" in thumbnail,
+    "lifecycle_single_flight": "chatStartupToken" in lifecycle and "lifecycleGeneration" in lifecycle,
+    "search_debounced": ".milliseconds(120)" in search and "appModel.searchRevision" in search,
+    "factory_tool_cache": "toolDiscoveryExpiresAt" in factory and "sessionOpeningTask" in factory,
+    "owner_refresh_single_flight": "statusV2RefreshTask" in owner and "ownerSessionGeneration" in owner,
+    "startup_lazy_services": "runnerModelStorage: RunnerControlModel?" in runtime
+                             and "factoryWorkspaceStorage: FactoryWorkspaceCoordinator?" in runtime,
+    "audio_leases": "activities: [UUID: AppAudioActivity]" in audio
+                    and "setExternalAudioBusy" in jarvis,
+    "wireguard_status_observer": ".NEVPNStatusDidChange" in wireguard,
+    "dashboard_preferences": "DashboardPreferencesStore" in dashboard
+                             and "home-dashboard-customize" in dashboard,
+    "safe_navigation_intents": "OpenIOSNextRoomsIntent" in intents
+                               and "OpenIOSNextMediaIntent" in intents,
 }
 for key, result in checks.items():
     print(f"OPT_{key.upper()}={'PASS' if result else 'FAIL'}")
