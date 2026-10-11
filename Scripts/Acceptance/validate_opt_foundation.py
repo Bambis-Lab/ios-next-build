@@ -88,7 +88,10 @@ checks={
                                and "OpenIOSNextMediaIntent" in intents,
     "indexed_search": "searchIndex.rebuild(" in search and "GlobalSearchIndex" in search_index
                       and "appModel.searchRevision" in search,
+    "search_normalize_shared_helper": "GlobalSearchIndex.normalize(" in search
+                                      and "Self.normalize(" not in search,
     "search_regressions": "testRebuildUpdatesChangedNamesAndStates" in search_tests,
+    "app_shortcuts_result_builder": "static var appShortcuts: [AppShortcut] {\n        AppShortcut(" in intents,
     "grouped_media_snapshot": "MediaPresentationSnapshot.build(from: appModel)" in media_view
                               and "activePlayerCount" in media_snapshot,
     "media_preview_tests": "testValidImageIsDownsampledAndCachedOnlyInMemory" in media_tests,
