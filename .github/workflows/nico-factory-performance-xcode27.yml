@@ -29,7 +29,7 @@ jobs:
     with:
       runs-on: xcode-27
       artifact-name: IOSNext-Nico-Factory-Performance-162
-      artifact-path: build/NicoFactoryAcceptance.xcresult
+      artifact-path: build/NicoFactory*.xcresult
       xcode-command: |
         set -euo pipefail
         xcodebuild -version
@@ -70,4 +70,27 @@ jobs:
           -derivedDataPath build/NicoFactoryDerivedData \
           -resultBundlePath build/NicoFactoryAcceptance.xcresult \
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" test
-        echo "NICO_FACTORY_XCODE27=PASS"
+        echo "NICO_FACTORY_IPHONE_XCODE27=PASS"
+        # Independent tablet geometry: same offline fixtures, no real HA calls.
+        IPAD_ID="$(xcrun simctl list devices available -j | python3 -c '
+        import json,sys
+        ds=json.load(sys.stdin)["devices"]
+        matches=[d["udid"] for runtime,devices in ds.items() if "iOS-27" in runtime
+                 for d in devices if d["name"].startswith("iPad") and d.get("isAvailable",True)]
+        assert matches,"iOS 27 iPad simulator required"
+        print(matches[0])
+        ')"
+        if ! xcrun simctl list devices booted | grep -q "$IPAD_ID"; then
+          xcrun simctl boot "$IPAD_ID"
+        fi
+        xcrun simctl bootstatus "$IPAD_ID" -b
+        xcodebuild \
+          -project IOSNext.xcodeproj -scheme IOSNext \
+          -configuration Debug -sdk iphonesimulator \
+          -destination "platform=iOS Simulator,id=$IPAD_ID" \
+          -parallel-testing-enabled NO \
+          -only-testing:IOSNextUITests/NicoRoomLayoutUITests \
+          -derivedDataPath build/NicoFactoryDerivedData \
+          -resultBundlePath build/NicoFactoryiPad.xcresult \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" test
+        echo "NICO_FACTORY_IPAD_XCODE27=PASS"
