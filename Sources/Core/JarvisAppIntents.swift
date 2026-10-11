@@ -72,19 +72,19 @@ struct IOSNextAppShortcuts: AppShortcutsProvider {
         ),
         AppShortcut(
             intent: OpenIOSNextHomeIntent(),
-            phrases: ["Öffne Zuhause in \\(.applicationName)", "Startseite von \\(.applicationName)"],
+            phrases: ["Öffne Zuhause in \(.applicationName)", "Startseite von \(.applicationName)"],
             shortTitle: "Zuhause öffnen",
             systemImageName: "house.fill"
         ),
         AppShortcut(
             intent: OpenIOSNextRoomsIntent(),
-            phrases: ["Öffne Räume in \\(.applicationName)", "Zeige Räume in \\(.applicationName)"],
+            phrases: ["Öffne Räume in \(.applicationName)", "Zeige Räume in \(.applicationName)"],
             shortTitle: "Räume öffnen",
             systemImageName: "square.grid.2x2.fill"
         ),
         AppShortcut(
             intent: OpenIOSNextMediaIntent(),
-            phrases: ["Öffne Medien in \\(.applicationName)", "Zeige Medien in \\(.applicationName)"],
+            phrases: ["Öffne Medien in \(.applicationName)", "Zeige Medien in \(.applicationName)"],
             shortTitle: "Medien öffnen",
             systemImageName: "play.tv.fill"
         )
