@@ -1,3 +1,4 @@
+# XB-05 isolated diagnostic PR: unsigned iPhone 18 Pro Max iOS 27 acceptance only
 name: XB-05 iOS Next V01-V04 XcodeBuilds Acceptance
 
 on:
