@@ -69,7 +69,7 @@ final class EntityCommandPipeline {
                 item.continuation.resume(returning: false)
             }
         }
-        for entityID in lanes.keys {
+        for entityID in Array(lanes.keys) {
             lanes[entityID]?.pending.removeAll()
         }
     }
