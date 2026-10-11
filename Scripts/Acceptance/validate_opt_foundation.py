@@ -14,6 +14,9 @@ chat=read("Sources/Core/ChatModel.swift")
 lifecycle=read("Sources/Core/AppServiceLifecycleCoordinator.swift")
 runtime=read("Sources/Core/IOSNextRuntime.swift")
 search=read("Sources/Features/GlobalSearchView.swift")
+search_index=read("Sources/Features/GlobalSearchIndex.swift")
+media_view=read("Sources/Features/MediaView.swift")
+media_snapshot=read("Sources/Core/MediaPresentationSnapshot.swift")
 factory=read("Sources/Features/Owner/Factory/FactoryMCPService.swift")
 owner=read("Sources/Core/AdminControlClient.swift")
 audio=read("Sources/Core/AppAudioCoordinator.swift")
@@ -24,6 +27,10 @@ intents=read("Sources/Core/JarvisAppIntents.swift")
 thumbnail=read("Sources/Core/ChatMediaThumbnailCache.swift")
 pipeline=read("Sources/Core/EntityCommandPipeline.swift")
 pipeline_tests=read("Tests/EntityCommandPipelineTests.swift")
+search_tests=read("Tests/GlobalSearchIndexTests.swift")
+media_tests=read("Tests/ChatMediaThumbnailCacheTests.swift")
+audio_tests=read("Tests/AppAudioCoordinatorTests.swift")
+dashboard_tests=read("Tests/DashboardPreferencesTests.swift")
 color=read("Sources/Design/LightControlSheet.swift")
 
 checks={
@@ -76,6 +83,16 @@ checks={
                              and "home-dashboard-customize" in dashboard,
     "safe_navigation_intents": "OpenIOSNextRoomsIntent" in intents
                                and "OpenIOSNextMediaIntent" in intents,
+    "indexed_search": "searchIndex.rebuild(" in search and "GlobalSearchIndex" in search_index
+                      and "appModel.searchRevision" in search,
+    "search_regressions": "testRebuildUpdatesChangedNamesAndStates" in search_tests,
+    "grouped_media_snapshot": "MediaPresentationSnapshot.build(from: appModel)" in media_view
+                              and "activePlayerCount" in media_snapshot,
+    "media_preview_tests": "testValidImageIsDownsampledAndCachedOnlyInMemory" in media_tests,
+    "audio_lease_tests": "testJarvisBusyStateChangesOnlyWhenFirstAndLastLeaseChanges" in audio_tests,
+    "dashboard_preference_tests": "testVisibilityAndOrderingPersistPerProfile" in dashboard_tests,
+    "identity_fenced_chat_send": "configurationGeneration" in chat
+                                 and "sendGeneration == configurationGeneration" in chat,
 }
 for key, result in checks.items():
     print(f"OPT_{key.upper()}={'PASS' if result else 'FAIL'}")
