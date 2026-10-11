@@ -386,7 +386,7 @@ final class AppModel {
         let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true,
-                  lightSegmentBridge(for: entity)?.isReady == true else { return .cancelled }
+                  lightSegmentBridge(for: light)?.isReady == true else { return .cancelled }
             activeActionEntityIDs.insert(entityID)
             lastActionError = nil
             defer { activeActionEntityIDs.remove(entityID) }
@@ -873,7 +873,7 @@ final class AppModel {
         defer { IOSNextPerformance.end("HA.DeviceCommand", commandTrace) }
         let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
             guard generation == connectionGeneration,
-                  entity(withID: entityID)?.isAvailable == true else { return .cancelled }
+                  self.entity(withID: entityID)?.isAvailable == true else { return .cancelled }
             activeActionEntityIDs.insert(entityID)
             lastActionError = nil
             defer { activeActionEntityIDs.remove(entityID) }
