@@ -16,7 +16,7 @@ final class ChatMediaThumbnailCache {
         thumbnails.totalCostLimit = 24 * 1024 * 1024
     }
 
-    func thumbnail(messageID: String, encryptedSessionImageBytes imageBytes: Data) -> UIImage? {
+    func thumbnail(messageID: String, decryptedImageBytes imageBytes: Data) -> UIImage? {
         let key = messageID as NSString
         if let cached = thumbnails.object(forKey: key) { return cached }
 
