@@ -99,6 +99,23 @@ struct FactoryWorkspaceSourcesView: View {
                         .foregroundStyle(.orange)
                 }
             }
+
+            Section("Factory Event-Replay") {
+                if !workspace.discoveredTools.contains("events_history_list") {
+                    Text("Noch nicht vom Factory-Gateway angeboten. Die vorhandene Master-Runtime-Live-Ansicht bleibt verfügbar.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("Cursor", value: workspace.eventHistory.lastSequence.map(String.init) ?? "Noch kein Ereignis")
+                    LabeledContent("Abgleich", value: workspace.eventsRequireResync ? "Lücke erkannt" : "Keine Lücke erkannt")
+                    ForEach(workspace.recentFactoryEvents.suffix(20)) { event in
+                        LabeledContent(event.kind, value: event.source)
+                    }
+                }
+                if let error = workspace.eventHistoryError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         .navigationTitle("Factory-Daten")
         .refreshable { await workspace.refresh() }
