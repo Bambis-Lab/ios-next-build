@@ -32,11 +32,13 @@ final class WireGuardTunnelController {
     var state: State = .notConfigured
     var isOnDemandEnabled = false
     private var manager: NETunnelProviderManager?
+    private var statusObserver: NSObjectProtocol?
     private let providerBundleIdentifier = "de.nicofroeba16.iosnext.packet-tunnel"
 
     func refresh() async {
         do {
             manager = try await installedManager()
+            if let manager { observeStatusChanges(for: manager) }
             isOnDemandEnabled = manager?.isOnDemandEnabled ?? false
             updateState()
         } catch {
@@ -65,6 +67,7 @@ final class WireGuardTunnelController {
             try await save(manager)
             try await load(manager)
             self.manager = manager
+            observeStatusChanges(for: manager)
             updateState()
         } catch {
             if let previousConfiguration {
@@ -90,8 +93,11 @@ final class WireGuardTunnelController {
     }
 
     func disconnect() {
-        manager?.connection.stopVPNTunnel()
-        updateState()
+        guard let manager else { return }
+        state = .disconnecting
+        manager.connection.stopVPNTunnel()
+        // The NetworkExtension notification supplies the final state. Refresh
+        // on next foreground if iOS does not deliver a transition notification.
     }
 
     func updateOnDemand() async {
@@ -106,6 +112,7 @@ final class WireGuardTunnelController {
             try await save(manager)
             try await load(manager)
             self.manager = manager
+            observeStatusChanges(for: manager)
             updateState()
         } catch {
             state = .failed(error.localizedDescription)
@@ -119,11 +126,34 @@ final class WireGuardTunnelController {
                 try await remove(manager)
             }
             WireGuardKeychain.deleteConfiguration()
+            removeStatusObserver()
             manager = nil
             isOnDemandEnabled = false
             state = .notConfigured
         } catch {
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    private func observeStatusChanges(for manager: NETunnelProviderManager) {
+        removeStatusObserver()
+        statusObserver = NotificationCenter.default.addObserver(
+            forName: .NEVPNStatusDidChange,
+            object: manager.connection,
+            queue: .main
+        ) { [weak self, weak manager] _ in
+            Task { @MainActor in
+                guard let self, let manager,
+                      self.manager?.connection === manager.connection else { return }
+                self.updateState()
+            }
+        }
+    }
+
+    private func removeStatusObserver() {
+        if let statusObserver {
+            NotificationCenter.default.removeObserver(statusObserver)
+            self.statusObserver = nil
         }
     }
 

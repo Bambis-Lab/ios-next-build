@@ -57,6 +57,7 @@ final class InMemoryVoiceRecorder {
     var duration: TimeInterval = 0
 
     private var engine: AVAudioEngine?
+    private var audioLease: UUID?
     private let accumulator = PCMAccumulator()
     private var timer: Timer?
     private var startedAt: Date?
@@ -66,33 +67,49 @@ final class InMemoryVoiceRecorder {
         isPreparing = true
         defer { isPreparing = false }
         guard await microphonePermission() else { throw ChatError.microphoneDenied }
+
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        accumulator.reset(sampleRate: format.sampleRate)
-        try input.installAudioTap(onBus: 0, bufferSize: 1_024, format: format) { [accumulator] buffer, _ in
-            accumulator.append(AVAudioPCMBuffer(copying: buffer))
-        }
-        engine.prepare()
+        let lease = AppAudioCoordinator.shared.begin(.voiceRecording)
+        audioLease = lease
+        var candidate: AVAudioEngine?
+        var installedTap = false
         do {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .spokenAudio,
+                options: [.defaultToSpeaker, .allowBluetoothHFP]
+            )
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+            let engine = AVAudioEngine()
+            candidate = engine
+            let input = engine.inputNode
+            let format = input.outputFormat(forBus: 0)
+            accumulator.reset(sampleRate: format.sampleRate)
+            try input.installAudioTap(onBus: 0, bufferSize: 1_024, format: format) { [accumulator] buffer, _ in
+                accumulator.append(AVAudioPCMBuffer(copying: buffer))
+            }
+            installedTap = true
+            engine.prepare()
             try engine.start()
             self.engine = engine
-        } catch {
-            engine.stop()
-            try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            throw error
-        }
-        startedAt = .now
-        duration = 0
-        isRecording = true
-        timer = .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let startedAt = self.startedAt else { return }
-                self.duration = Date.now.timeIntervalSince(startedAt)
+            startedAt = .now
+            duration = 0
+            isRecording = true
+            timer = .scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, let startedAt = self.startedAt else { return }
+                    self.duration = Date.now.timeIntervalSince(startedAt)
+                }
             }
+        } catch {
+            if installedTap { candidate?.inputNode.removeTap(onBus: 0) }
+            candidate?.stop()
+            self.engine = nil
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            AppAudioCoordinator.shared.end(audioLease)
+            audioLease = nil
+            throw error
         }
     }
 
@@ -100,9 +117,14 @@ final class InMemoryVoiceRecorder {
         guard isRecording else { return nil }
         timer?.invalidate()
         timer = nil
-        engine?.stop()
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
         engine = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        AppAudioCoordinator.shared.end(audioLease)
+        audioLease = nil
         isRecording = false
         startedAt = nil
         let data = accumulator.wavData()

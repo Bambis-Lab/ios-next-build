@@ -1,8 +1,19 @@
 import SwiftUI
 
+private struct GlobalSearchResults {
+    var query = ""
+    var areas: [HomeAssistantArea] = []
+    var floors: [HomeAssistantFloor] = []
+    var entities: [HomeAssistantEntity] = []
+    static let empty = GlobalSearchResults()
+}
+
 struct GlobalSearchView: View {
     let appModel: AppModel
     @State private var query = ""
+    @State private var results = GlobalSearchResults.empty
+    @State private var searchIndex = GlobalSearchIndex()
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         List {
@@ -12,12 +23,17 @@ struct GlobalSearchView: View {
                     systemImage: "magnifyingglass",
                     description: Text("Suche nach Räumen, Etagen oder Home-Assistant-Entitäten.")
                 )
+            } else if results.query != normalizedQuery {
+                HStack {
+                    ProgressView()
+                    Text("Suche wird aktualisiert …").foregroundStyle(.secondary)
+                }
             } else if !hasResults {
                 ContentUnavailableView.search(text: trimmedQuery)
             } else {
-                if !matchingAreas.isEmpty {
+                if !results.areas.isEmpty {
                     Section("Räume") {
-                        ForEach(matchingAreas.prefix(20)) { area in
+                        ForEach(results.areas.prefix(20)) { area in
                             NavigationLink {
                                 RoomDetailView(area: area, appModel: appModel)
                             } label: {
@@ -27,9 +43,9 @@ struct GlobalSearchView: View {
                     }
                 }
 
-                if !matchingFloors.isEmpty {
+                if !results.floors.isEmpty {
                     Section("Etagen") {
-                        ForEach(matchingFloors.prefix(12)) { floor in
+                        ForEach(results.floors.prefix(12)) { floor in
                             NavigationLink {
                                 FloorDetailView(floor: floor, appModel: appModel)
                             } label: {
@@ -39,9 +55,9 @@ struct GlobalSearchView: View {
                     }
                 }
 
-                if !matchingEntities.isEmpty {
+                if !results.entities.isEmpty {
                     Section("Entitäten") {
-                        ForEach(matchingEntities.prefix(40)) { entity in
+                        ForEach(results.entities.prefix(40)) { entity in
                             NavigationLink {
                                 EntityDetailView(entityID: entity.entityID, appModel: appModel)
                             } label: {
@@ -64,6 +80,15 @@ struct GlobalSearchView: View {
         .iosNextManagementBackground()
         .navigationTitle("Suche")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { scheduleSearch(query) }
+        .onChange(of: normalizedQuery) { _, value in scheduleSearch(value) }
+        .onChange(of: appModel.searchRevision) { _, _ in scheduleSearch(query) }
+        .onChange(of: appModel.areas) { _, _ in scheduleSearch(query) }
+        .onChange(of: appModel.floors) { _, _ in scheduleSearch(query) }
+        .onDisappear {
+            searchTask?.cancel()
+            searchTask = nil
+        }
     }
 
     private var trimmedQuery: String {
@@ -71,46 +96,44 @@ struct GlobalSearchView: View {
     }
 
     private var normalizedQuery: String {
-        trimmedQuery.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current).lowercased()
-    }
-
-    private var matchingAreas: [HomeAssistantArea] {
-        guard !normalizedQuery.isEmpty else { return [] }
-        return appModel.areas
-            .filter { area in
-                matches(area.name) || matches(area.appDisplayName)
-            }
-            .sorted { $0.appDisplayName.localizedStandardCompare($1.appDisplayName) == .orderedAscending }
-    }
-
-    private var matchingFloors: [HomeAssistantFloor] {
-        guard !normalizedQuery.isEmpty else { return [] }
-        return appModel.floors
-            .filter { matches($0.name) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    private var matchingEntities: [HomeAssistantEntity] {
-        guard !normalizedQuery.isEmpty else { return [] }
-        return appModel.entities
-            .filter { entity in
-                matches(entity.displayName)
-                    || matches(entity.entityID)
-                    || matches(entity.secondaryStateText)
-            }
-            .sorted { lhs, rhs in
-                lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
-            }
+        Self.normalize(trimmedQuery)
     }
 
     private var hasResults: Bool {
-        !matchingAreas.isEmpty || !matchingFloors.isEmpty || !matchingEntities.isEmpty
+        !results.areas.isEmpty || !results.floors.isEmpty || !results.entities.isEmpty
     }
 
-    private func matches(_ value: String) -> Bool {
-        value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-            .contains(normalizedQuery)
+    private func scheduleSearch(_ rawQuery: String) {
+        searchTask?.cancel()
+        let query = Self.normalize(rawQuery)
+        guard !query.isEmpty else {
+            results = .empty
+            return
+        }
+        searchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(120))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            let trace = IOSNextPerformance.begin("Search.Query")
+            defer { IOSNextPerformance.end("Search.Query", trace) }
+
+            // Rebuild after debounce, so a burst of HA websocket events or
+            // keystrokes pays the locale-normalization cost once.
+            searchIndex.rebuild(
+                areas: appModel.areas,
+                floors: appModel.floors,
+                entities: appModel.entities,
+                revision: appModel.searchRevision
+            )
+            let found = searchIndex.results(for: query)
+            guard !Task.isCancelled, query == normalizedQuery else { return }
+            results = GlobalSearchResults(
+                query: query, areas: found.areas, floors: found.floors, entities: found.entities
+            )
+        }
     }
+
 }

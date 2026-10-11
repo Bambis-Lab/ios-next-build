@@ -53,6 +53,7 @@ struct ChatView: View {
                     }
                     Button("Lokalen Verlauf löschen", systemImage: "trash", role: .destructive) {
                         chatModel.messages.removeAll(keepingCapacity: false)
+                        ChatMediaThumbnailCache.shared.clear()
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -60,8 +61,8 @@ struct ChatView: View {
                 .accessibilityLabel("Chatoptionen")
             }
         }
-        .task { await chatModel.start(using: appModel) }
-        .onDisappear { chatModel.stop() }
+        .task { await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel) }
+        .onDisappear { IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared() }
         .sheet(isPresented: $isPresentingConfiguration) {
             ChatConfigurationView(chatModel: chatModel)
         }
@@ -447,15 +448,7 @@ private struct ChatBubble: View {
             Text(message.text ?? "")
                 .textSelection(.enabled)
         case .image:
-            if let image = UIImage(data: message.data) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: 300, maxHeight: 360)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            } else {
-                Label("Bild nicht lesbar", systemImage: "exclamationmark.triangle")
-            }
+            ChatImagePreview(messageID: message.id, data: message.data)
         case .voice:
             HStack(spacing: 12) {
                 InMemoryAudioButton(data: message.data)
@@ -486,6 +479,45 @@ private struct ChatBubble: View {
         case .queued: "checkmark"
         case .received: "checkmark"
         case .failed: "exclamationmark.circle.fill"
+        }
+    }
+}
+
+private struct ChatImagePreview: View {
+    let messageID: String
+    let data: Data
+
+    @State private var preview: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let preview {
+                Image(uiImage: preview)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 300, maxHeight: 360)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityLabel("Chat-Bild")
+            } else if failed {
+                Label("Bild nicht lesbar", systemImage: "exclamationmark.triangle")
+            } else {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(.quaternary)
+                    .frame(width: 180, height: 120)
+                    .overlay { ProgressView("Bild wird geladen") }
+                    .accessibilityLabel("Chat-Bild wird geladen")
+            }
+        }
+        .task(id: messageID) {
+            preview = nil
+            failed = false
+            let decoded = await ChatMediaThumbnailCache.shared.thumbnail(
+                messageID: messageID, decryptedImageBytes: data
+            )
+            guard !Task.isCancelled else { return }
+            preview = decoded
+            failed = decoded == nil
         }
     }
 }

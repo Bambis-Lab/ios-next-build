@@ -26,6 +26,7 @@ struct AppRootView: View {
         .animation(IOSNextMotion.navigation, value: appModel.isConnected)
         .onChange(of: scenePhase) { _, phase in
             appModel.setApplicationActive(phase == .active)
+            runtime.lifecycleCoordinator.applicationPhaseChanged(isActive: phase == .active, appModel: appModel)
             if phase != .active {
                 JarvisEngine.shared.stopWakeListening()
             }
@@ -41,11 +42,10 @@ struct AppRootView: View {
             }
         }
         .task(id: appModel.isConnected) {
-            if !isTestHarnessMode, appModel.isConnected {
-                await runtime.chatModel.start(using: appModel)
-            } else if !appModel.isConnected {
-                runtime.chatModel.stop()
-            }
+            guard !isTestHarnessMode else { return }
+            await runtime.lifecycleCoordinator.homeAssistantConnectionChanged(
+                appModel.isConnected, appModel: appModel
+            )
         }
         .sheet(isPresented: Bindable(appModel).isPresentingConnection) {
             ConnectionSetupView(appModel: appModel)

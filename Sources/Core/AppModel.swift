@@ -25,10 +25,15 @@ final class AppModel {
     var selectedProfile: HomeProfile = .nico
     var connectionState: ConnectionState = .notConfigured
     var entities: [HomeAssistantEntity] = []
+    private(set) var searchRevision: UInt64 = 0
     var floors: [HomeAssistantFloor] = []
     var areas: [HomeAssistantArea] = []
-    var devices: [HomeAssistantDevice] = []
-    var entityRegistry: [HomeAssistantRegistryEntity] = []
+    var devices: [HomeAssistantDevice] = [] {
+        didSet { invalidateHomeAssistantLookupIndex() }
+    }
+    var entityRegistry: [HomeAssistantRegistryEntity] = [] {
+        didSet { invalidateHomeAssistantLookupIndex() }
+    }
     var isPresentingConnection = false
     var activeActionEntityIDs: Set<String> = []
     var lastActionError: String?
@@ -45,8 +50,13 @@ final class AppModel {
     private var shouldReconnect = false
     private var reconnectAttempt = 0
     private var entityIndexByID: [String: Int] = [:]
+    private var entityIDsByDomain: [String: [String]] = [:]
+    @ObservationIgnored var registryIndexCache: HomeAssistantLookupIndex?
     private var pendingStateChanges: [String: HomeAssistantStateChange] = [:]
     private var stateFlushTask: Task<Void, Never>?
+    @ObservationIgnored private let deviceCommands = EntityCommandPipeline()
+    private var entityStateRevisions: [String: UInt64] = [:]
+    private var connectionGeneration: UInt64 = 0
     private var networkAvailable = true
     private var applicationIsActive = true
 
@@ -59,6 +69,19 @@ final class AppModel {
         case .connected, .reconnecting: true
         default: false
         }
+    }
+
+    /// Captured by delayed UI commands so a value queued for an old connection
+    /// can never be sent after disconnect or reconnect.
+    var commandGenerationToken: UInt64 { connectionGeneration }
+
+    private var acceptsDeviceCommands: Bool {
+        if case .connected = connectionState { return true }
+        return false
+    }
+
+    func isCurrentCommandGeneration(_ token: UInt64) -> Bool {
+        token == connectionGeneration
     }
 
     var profileDefinition: ProfileDefinition {
@@ -142,6 +165,11 @@ final class AppModel {
         persist: Bool = true,
         failurePrefix: String? = nil
     ) async {
+        let trace = IOSNextPerformance.begin("HA.Connect")
+        defer { IOSNextPerformance.end("HA.Connect", trace) }
+        connectionGeneration &+= 1
+        let connectGeneration = connectionGeneration
+        deviceCommands.invalidatePending()
         reconnectTask?.cancel()
         reconnectTask = nil
         eventTask?.cancel()
@@ -153,6 +181,9 @@ final class AppModel {
         let configuration = HomeAssistantConfiguration(baseURL: serverURL, accessToken: accessToken)
         do {
             let snapshot = try await client.connect(configuration: configuration)
+            guard connectGeneration == connectionGeneration, !Task.isCancelled else {
+                return
+            }
             currentConfiguration = configuration
             shouldReconnect = true
             reconnectAttempt = 0
@@ -166,6 +197,7 @@ final class AppModel {
                 try KeychainStore.save(accessToken, account: tokenAccount)
             }
         } catch {
+            guard connectGeneration == connectionGeneration, !Task.isCancelled else { return }
             let message = error.localizedDescription
             connectionState = .failed(
                 failurePrefix.map { "\($0): \(message)" } ?? message
@@ -180,6 +212,9 @@ final class AppModel {
     }
 
     func disconnect() {
+        connectionGeneration &+= 1
+        deviceCommands.invalidatePending()
+        entityStateRevisions.removeAll()
         shouldReconnect = false
         currentConfiguration = nil
         eventTask?.cancel()
@@ -196,6 +231,7 @@ final class AppModel {
         devices = []
         entityRegistry = []
         entityIndexByID.removeAll()
+        entityIDsByDomain.removeAll()
         homeAssistantCurrentUser = nil
         connectionState = .notConfigured
     }
@@ -330,11 +366,10 @@ final class AppModel {
         brightness: Double,
         for light: HomeAssistantEntity
     ) async {
-        guard light.isAvailable,
+        guard acceptsDeviceCommands, light.isAvailable,
               let bridge = lightSegmentBridge(for: light),
               bridge.isReady,
-              !indices.isEmpty,
-              !activeActionEntityIDs.contains(light.entityID)
+              !indices.isEmpty
         else { return }
 
         let unique = Array(Set(indices)).sorted()
@@ -344,24 +379,40 @@ final class AppModel {
             return
         }
 
-        activeActionEntityIDs.insert(light.entityID)
-        lastActionError = nil
-        defer { activeActionEntityIDs.remove(light.entityID) }
-        do {
-            try await client.callService(
-                domain: "battletron_segments",
-                service: "set_segments",
-                serviceData: [
-                    "entity_id": .string(light.entityID),
-                    "indices": .array(unique.map { .number(Double($0)) }),
-                    "hue": .number(min(max(hue, 0), 360)),
-                    "saturation": .number(min(max(saturation, 0), 100)),
-                    "brightness": .number(min(max(brightness, 0), 100))
-                ]
-            )
-        } catch {
-            lastActionError = error.localizedDescription
+        let generation = connectionGeneration
+        let entityID = light.entityID
+        let commandTrace = IOSNextPerformance.begin("HA.SegmentCommand")
+        defer { IOSNextPerformance.end("HA.SegmentCommand", commandTrace) }
+        let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
+            guard generation == connectionGeneration,
+                  entity(withID: entityID)?.isAvailable == true,
+                  lightSegmentBridge(for: entity)?.isReady == true else { return .cancelled }
+            activeActionEntityIDs.insert(entityID)
+            lastActionError = nil
+            defer { activeActionEntityIDs.remove(entityID) }
+            do {
+                try await client.callService(
+                    domain: "battletron_segments",
+                    service: "set_segments",
+                    serviceData: [
+                        "entity_id": .string(entityID),
+                        "indices": .array(unique.map { .number(Double($0)) }),
+                        "hue": .number(min(max(hue, 0), 360)),
+                        "saturation": .number(min(max(saturation, 0), 100)),
+                        "brightness": .number(min(max(brightness, 0), 100))
+                    ]
+                )
+                return generation == connectionGeneration ? .executed : .outcomeUnknown("Verbindung wechselte während der Segmentaktion.")
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                    return .outcomeUnknown(error.localizedDescription)
+                }
+                return .outcomeUnknown("Verbindung wechselte während der Segmentaktion.")
+            }
         }
+        reportCommandResult(commandResult, entityID: entityID, generation: generation)
     }
 
     func callFireTVCompanionService(
@@ -369,21 +420,37 @@ final class AppModel {
         for player: HomeAssistantEntity,
         data: [String: Any] = [:]
     ) async {
-        guard isFireTVCompanion(player), player.isAvailable else { return }
+        guard acceptsDeviceCommands, isFireTVCompanion(player), player.isAvailable else {
+            lastActionError = "Fire TV ist nicht verbunden oder nicht verfügbar."
+            return
+        }
         lastActionError = nil
         var serviceData = data.compactMapValues(Self.jsonValue(from:))
         serviceData["entity_id"] = .string(player.entityID)
-        do {
-            try await client.callService(
-                domain: "firetv_companion",
-                service: service,
-                serviceData: serviceData
-            )
-            IOSNextFeedbackCenter.shared.play(.stateChanged)
-        } catch {
-            lastActionError = error.localizedDescription
-            IOSNextFeedbackCenter.shared.play(.error)
+        let entityID = player.entityID
+        let generation = connectionGeneration
+        let result = await deviceCommands.execute(entityID: entityID) { [self] in
+            guard generation == connectionGeneration, acceptsDeviceCommands,
+                  let live = entity(withID: entityID), live.isAvailable,
+                  isFireTVCompanion(live) else { return .cancelled }
+            do {
+                try await client.callService(
+                    domain: "firetv_companion", service: service, serviceData: serviceData
+                )
+                guard generation == connectionGeneration else {
+                    return .outcomeUnknown("Verbindung wechselte während der Fire-TV-Aktion.")
+                }
+                IOSNextFeedbackCenter.shared.play(.stateChanged)
+                return .executed
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                }
+                return .outcomeUnknown(error.localizedDescription)
+            }
         }
+        reportCommandResult(result, entityID: entityID, generation: generation)
     }
 
     func launchFireTVApp(packageName: String, for player: HomeAssistantEntity) async {
@@ -475,11 +542,17 @@ final class AppModel {
     }
 
     func entities(inDomain domain: String) -> [HomeAssistantEntity] {
-        entities.filter { $0.entityID.hasPrefix("\(domain).") }
+        if !entityIndexByID.isEmpty {
+            return entityIDsByDomain[domain, default: []].compactMap(entity(withID:))
+        }
+        // Preview/fixture models may inject entities directly before a real HA
+        // snapshot builds indexes. Keep that path correct without adding a full
+        // scan to normal connected runtime reads.
+        return entities.filter { $0.domain == domain }
     }
 
     func isFireTVCompanion(_ entity: HomeAssistantEntity) -> Bool {
-        if let registry = entityRegistry.first(where: { $0.entityID == entity.entityID }),
+        if let registry = indexedRegistryEntity(for: entity.entityID),
            registry.platform?.localizedCaseInsensitiveCompare("firetv_companion") == .orderedSame {
             return true
         }
@@ -493,7 +566,7 @@ final class AppModel {
         let shadowPlatforms: Set<String> = ["androidtv", "androidtv_remote", "homekit_controller"]
         return candidates.filter { entity in
             if isFireTVCompanion(entity) { return true }
-            let platform = entityRegistry.first(where: { $0.entityID == entity.entityID })?.platform?.lowercased()
+            let platform = indexedRegistryEntity(for: entity.entityID)?.platform?.lowercased()
             return platform.map { !shadowPlatforms.contains($0) } ?? true
         }
     }
@@ -509,10 +582,7 @@ final class AppModel {
     }
 
     func resolvedAreaID(for entityID: String) -> String? {
-        guard let registry = entityRegistry.first(where: { $0.entityID == entityID }) else { return nil }
-        if let areaID = registry.areaID, !areaID.isEmpty { return areaID }
-        guard let deviceID = registry.deviceID else { return nil }
-        return devices.first(where: { $0.id == deviceID })?.areaID
+        indexedResolvedAreaID(for: entityID)
     }
 
     private func areaID(for entity: HomeAssistantEntity) -> String? {
@@ -530,15 +600,7 @@ final class AppModel {
     }
 
     func devices(inArea areaID: String) -> [HomeAssistantDevice] {
-        var ids = Set(devices.filter { $0.areaID == areaID }.map(\.id))
-        for registry in entityRegistry where resolvedAreaID(for: registry.entityID) == areaID {
-            if let deviceID = registry.deviceID { ids.insert(deviceID) }
-        }
-        return devices.filter { ids.contains($0.id) }
-            .sorted { lhs, rhs in
-                let order = lhs.name.localizedStandardCompare(rhs.name)
-                return order == .orderedSame ? lhs.id < rhs.id : order == .orderedAscending
-            }
+        indexedDevices(inArea: areaID)
     }
 
     var unassignedDevices: [HomeAssistantDevice] {
@@ -547,14 +609,11 @@ final class AppModel {
     }
 
     var unassignedEntities: [HomeAssistantEntity] {
-        let devicesByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        let registryByID = Dictionary(uniqueKeysWithValues: entityRegistry.map { ($0.entityID, $0) })
-        return entities.filter { entity in
-            guard let registry = registryByID[entity.entityID] else { return true }
-            if registry.areaID != nil { return false }
-            if let deviceID = registry.deviceID, devicesByID[deviceID]?.areaID != nil { return false }
-            return true
-        }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        entities.filter { resolvedAreaID(for: $0.entityID) == nil }
+            .sorted {
+                let order = $0.displayName.localizedStandardCompare($1.displayName)
+                return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+            }
     }
 
     var serviceLikeEntities: [HomeAssistantEntity] {
@@ -571,8 +630,8 @@ final class AppModel {
     }
 
     func entities(forDevice deviceID: String) -> [HomeAssistantEntity] {
-        let entityIDs = Set(entityRegistry.filter { $0.deviceID == deviceID }.map(\.entityID))
-        return entities.filter { entityIDs.contains($0.entityID) }
+        homeAssistantLookupIndex.entityIDsByDeviceID[deviceID, default: []]
+            .compactMap(entity(withID:))
             .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
@@ -609,9 +668,15 @@ final class AppModel {
                 enqueue(change)
             }
             guard !Task.isCancelled else { return }
+            connectionGeneration &+= 1
+            deviceCommands.invalidatePending()
+            entityStateRevisions.removeAll()
+            stateFlushTask?.cancel()
+            stateFlushTask = nil
+            pendingStateChanges.removeAll()
             connectionState = .connecting
-            // An established session drop gets one immediate retry. If that
-            // attempt fails, scheduleReconnect() applies exponential backoff.
+            // An established session drop invalidates outstanding writes before
+            // reconnecting. Their server-side outcome may remain unknown.
             scheduleReconnect(immediate: true)
         }
     }
@@ -627,6 +692,8 @@ final class AppModel {
     }
 
     private func flushStateChanges() {
+        let trace = IOSNextPerformance.begin("HA.FlushStateChanges")
+        defer { IOSNextPerformance.end("HA.FlushStateChanges", trace) }
         let changes = Array(pendingStateChanges.values)
         pendingStateChanges.removeAll(keepingCapacity: true)
         stateFlushTask = nil
@@ -634,8 +701,12 @@ final class AppModel {
         var removedEntityIDs: Set<String> = []
 
         for change in changes {
+            entityStateRevisions[change.entityID, default: 0] &+= 1
             if let newState = change.newState {
                 if let index = entityIndexByID[change.entityID], entities.indices.contains(index) {
+                    if entities[index].displayName != newState.displayName {
+                        requiresReindex = true
+                    }
                     entities[index] = newState
                 } else {
                     entities.append(newState)
@@ -653,6 +724,10 @@ final class AppModel {
 
         if requiresReindex {
             sortEntities()
+        } else if !changes.isEmpty {
+            // Search includes a bounded state-text field, so refresh its
+            // debounced snapshot after grouped WebSocket state changes.
+            searchRevision &+= 1
         }
     }
 
@@ -686,14 +761,20 @@ final class AppModel {
                   applicationIsActive,
                   networkAvailable,
                   let configuration = currentConfiguration else { return }
+            let reconnectGeneration = connectionGeneration
             do {
                 let snapshot = try await client.connect(configuration: configuration)
+                guard !Task.isCancelled,
+                      reconnectGeneration == connectionGeneration,
+                      shouldReconnect, applicationIsActive, networkAvailable else { return }
                 apply(snapshot)
                 reconnectAttempt = 0
                 connectionState = .connected
                 observeStateChanges()
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled,
+                      reconnectGeneration == connectionGeneration,
+                      shouldReconnect else { return }
                 lastActionError = "Erneute Verbindung fehlgeschlagen: \(error.localizedDescription)"
                 scheduleReconnect()
             }
@@ -711,20 +792,66 @@ final class AppModel {
         } else {
             reconnectTask?.cancel()
             reconnectTask = nil
-            guard shouldReconnect, currentConfiguration != nil else { return }
+            connectionGeneration &+= 1
+            deviceCommands.invalidatePending()
+            entityStateRevisions.removeAll()
+            stateFlushTask?.cancel()
+            stateFlushTask = nil
+            pendingStateChanges.removeAll()
+            eventTask?.cancel()
+            eventTask = nil
+            guard shouldReconnect, currentConfiguration != nil else {
+                Task { await client.disconnect() }
+                return
+            }
             connectionState = .connecting
             Task { await client.disconnect() }
         }
     }
 
     private func replaceEntities(with states: [HomeAssistantEntity]) {
+        entityStateRevisions.removeAll()
         entities = states
         sortEntities()
     }
 
     private func sortEntities() {
-        entities.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        entityIndexByID = Dictionary(uniqueKeysWithValues: entities.enumerated().map { ($0.element.entityID, $0.offset) })
+        // A reload can briefly contain duplicate entity IDs. Deduplicate before
+        // building indexes so dictionary construction can never trap at runtime.
+        var byID: [String: HomeAssistantEntity] = [:]
+        for entity in entities { byID[entity.entityID] = entity }
+        entities = byID.values.sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+        }
+        var entityIndex: [String: Int] = [:]
+        var idsByDomain: [String: [String]] = [:]
+        for (index, entity) in entities.enumerated() {
+            entityIndex[entity.entityID] = index
+            let domain = entity.domain
+            guard !domain.isEmpty else { continue }
+            idsByDomain[domain, default: []].append(entity.entityID)
+        }
+        entityIndexByID = entityIndex
+        entityIDsByDomain = idsByDomain
+        searchRevision &+= 1
+    }
+
+    private nonisolated static func coalescingKey(
+        domain: String, service: String, data: [String: JSONValue]
+    ) -> String? {
+        // Only absolute, replaceable setpoints may be coalesced. In particular,
+        // never deduplicate a toggle, lock, scene, app launch or relative seek.
+        if domain == "light" && service == "turn_on" {
+            if ["rgb_color", "color_temp_kelvin", "effect"].contains(where: { data[$0] != nil }) {
+                return "light.appearance"
+            }
+            if data["brightness_pct"] != nil { return "light.brightness" }
+        }
+        if domain == "media_player" && service == "volume_set" { return "media.volume" }
+        if domain == "climate" && service == "set_temperature" { return "climate.temperature" }
+        if domain == "cover" && service == "set_cover_position" { return "cover.position" }
+        return nil
     }
 
     private func performService(
@@ -735,28 +862,75 @@ final class AppModel {
         optimisticState: String? = nil,
         feedback: IOSNextFeedbackEvent? = nil
     ) async {
-        guard entity.isAvailable, !activeActionEntityIDs.contains(entity.entityID) else { return }
-        activeActionEntityIDs.insert(entity.entityID)
-        lastActionError = nil
-        defer { activeActionEntityIDs.remove(entity.entityID) }
+        guard acceptsDeviceCommands, entity.isAvailable else {
+            lastActionError = "Home Assistant ist nicht verbunden oder das Gerät ist nicht verfügbar."
+            return
+        }
+        let entityID = entity.entityID
+        let generation = connectionGeneration
+        let key = Self.coalescingKey(domain: domain, service: service, data: data)
+        let commandTrace = IOSNextPerformance.begin("HA.DeviceCommand")
+        defer { IOSNextPerformance.end("HA.DeviceCommand", commandTrace) }
+        let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
+            guard generation == connectionGeneration,
+                  entity(withID: entityID)?.isAvailable == true else { return .cancelled }
+            activeActionEntityIDs.insert(entityID)
+            lastActionError = nil
+            defer { activeActionEntityIDs.remove(entityID) }
+            let revisionAtDispatch = entityStateRevisions[entityID, default: 0]
 
-        do {
-            try await client.callService(
-                domain: domain,
-                service: service,
-                targetEntityID: entity.entityID,
-                serviceData: data
-            )
-            if let optimisticState,
-               let index = entityIndexByID[entity.entityID],
-               entities.indices.contains(index) {
-                entities[index] = entity.updating(state: optimisticState)
+            do {
+                try await client.callService(
+                    domain: domain, service: service, targetEntityID: entityID,
+                    serviceData: data
+                )
+                guard generation == connectionGeneration else {
+                    return .outcomeUnknown("Verbindung wechselte nach dem Senden; Zustand wird neu synchronisiert.")
+                }
+                // Never put attributes from the old button/tile snapshot back
+                // over a newer HA WebSocket state change.
+                if let optimisticState,
+                   entityStateRevisions[entityID, default: 0] == revisionAtDispatch,
+                   let index = entityIndexByID[entityID],
+                   entities.indices.contains(index),
+                   entities[index].entityID == entityID {
+                    entities[index] = entities[index].updating(state: optimisticState)
+                }
+                if let feedback { IOSNextFeedbackCenter.shared.play(feedback) }
+                return .executed
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                    // A transport error does not prove the backend did not act.
+                    return .outcomeUnknown(error.localizedDescription)
+                }
+                return .outcomeUnknown("Verbindung wechselte während der Aktion.")
             }
-            if let feedback {
-                IOSNextFeedbackCenter.shared.play(feedback)
-            }
-        } catch {
-            lastActionError = error.localizedDescription
+        }
+        reportCommandResult(commandResult, entityID: entityID, generation: generation)
+    }
+
+    private func reportCommandResult(
+        _ result: DeviceCommandResult,
+        entityID: String,
+        generation: UInt64
+    ) {
+        switch result {
+        case .executed, .superseded:
+            return
+        case .cancelled:
+            guard generation == connectionGeneration else { return }
+            lastActionError = "Der Gerätebefehl wurde vor der Ausführung abgebrochen."
+        case let .failed(message):
+            guard generation == connectionGeneration else { return }
+            lastActionError = message
+            IOSNextFeedbackCenter.shared.play(.error)
+        case let .outcomeUnknown(message):
+            // The transport may have delivered the request before cancellation.
+            // Never retry automatically; surface uncertainty until a later
+            // authoritative Home Assistant state update resolves the device state.
+            lastActionError = "Ergebnis der Aktion für \(entityID) unbekannt: \(message)"
             IOSNextFeedbackCenter.shared.play(.error)
         }
     }

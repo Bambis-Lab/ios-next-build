@@ -11,6 +11,20 @@ final class NicoRoomLayoutUITests: XCTestCase {
         return app
     }
 
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int = 9) -> Bool {
+        if element.isHittable { return true }
+        for _ in 0..<maxSwipes {
+            app.swipeUp()
+            if element.isHittable { return true }
+        }
+        let attachment = XCTAttachment(string: app.debugDescription)
+        attachment.name = "Nico-Accessibility-Hierarchy-ON-FAIL"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        capture("Nico-Accessibility-Failure", app: app)
+        return false
+    }
+
     private func capture(_ name: String, app: XCUIApplication) {
         let item = XCTAttachment(screenshot: app.screenshot())
         item.name = name
@@ -58,7 +72,11 @@ final class NicoRoomLayoutUITests: XCTestCase {
         XCTAssertTrue(cabinet.waitForExistence(timeout: 8))
         let desk = app.descendants(matching: .any)
             .matching(identifier: "nico-micro-Schreibtischlampe").firstMatch
-        XCTAssertTrue(desk.exists)
+        // In accessibility sizes Nico uses a single-column LazyVStack.
+        // Lazy cells outside the viewport need to be scrolled into existence.
+        XCTAssertTrue(reveal(desk, in: app),
+                      "Desk control must be reachable by scrolling with large type.")
+        XCTAssertTrue(desk.isHittable, "Desk must be interactable, not just in the hierarchy.")
         capture("Nico-Zimmer-Dynamic-Type", app: app)
     }
 }

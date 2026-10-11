@@ -47,6 +47,10 @@ final class ChatModel {
     private var configuration: ChatConfiguration?
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
+    private var startupTask: Task<Void, Never>?
+    private var startupToken: UUID?
+    private var startupEpoch: UInt64 = 0
+    private var configurationGeneration: UInt64 = 0
     private var partialMessages: [String: PartialMessage] = [:]
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
@@ -65,23 +69,54 @@ final class ChatModel {
     }
 
     func start(using appModel: AppModel) async {
+        if let startupTask {
+            let observedToken = startupToken
+            await startupTask.value
+            if startupToken == observedToken {
+                startupTask = nil
+                startupToken = nil
+            }
+            if receiveTask != nil { return }
+            // A bare start() can finish without configuration. If the HA
+            // bootstrap context is ready, let this caller own the bootstrap.
+            if configuration == nil, appModel.chatBootstrapContext() != nil {
+                await start(using: appModel)
+            }
+            return
+        }
+        guard receiveTask == nil else { return }
+        startupEpoch &+= 1
+        let epoch = startupEpoch
+        let token = UUID()
+        startupToken = token
+        let task = Task { [weak self] in
+            await self?.performStart(using: appModel, epoch: epoch)
+        }
+        startupTask = task
+        await task.value
+        if startupToken == token {
+            startupTask = nil
+            startupToken = nil
+        }
+    }
+
+    private func performStart(using appModel: AppModel, epoch: UInt64) async {
         if let context = appModel.chatBootstrapContext() {
             let boundHAUser = UserDefaults.standard.string(forKey: haUserKey)
             if let boundHAUser, boundHAUser != context.homeAssistantUserID {
-                forgetConfiguration()
+                forgetConfiguration(preservingStartup: true)
+                guard epoch == startupEpoch, !Task.isCancelled else { return }
             }
             if configuration == nil {
                 do {
                     try await automaticConfigure(using: context)
+                    guard epoch == startupEpoch, !Task.isCancelled else { return }
                 } catch {
+                    guard epoch == startupEpoch, !Task.isCancelled else { return }
                     state = .offline("Automatische Chat-Einrichtung fehlgeschlagen: \(error.localizedDescription)")
                     return
                 }
             } else if boundHAUser == nil, let configuration {
-                // A pre-1.0.10 credential has no HA-user binding. Only migrate it
-                // automatically when the local legacy identity label agrees with the
-                // authenticated HA profile; otherwise discard it to prevent a second
-                // HA account on the same device from inheriting the first user's chat.
                 if Self.legacyIdentityMatchesHomeAssistant(
                     chatUserID: configuration.userID,
                     displayName: context.displayName
@@ -90,20 +125,24 @@ final class ChatModel {
                         accessToken: context.homeAssistantAccessToken,
                         configuration: configuration
                     )) != nil {
+                        guard epoch == startupEpoch, !Task.isCancelled else { return }
                         UserDefaults.standard.set(context.homeAssistantUserID, forKey: haUserKey)
                     }
                 } else {
-                    forgetConfiguration()
+                    forgetConfiguration(preservingStartup: true)
+                    guard epoch == startupEpoch, !Task.isCancelled else { return }
                     do {
                         try await automaticConfigure(using: context)
+                        guard epoch == startupEpoch, !Task.isCancelled else { return }
                     } catch {
+                        guard epoch == startupEpoch, !Task.isCancelled else { return }
                         state = .offline("Automatische Chat-Einrichtung fehlgeschlagen: \(error.localizedDescription)")
                         return
                     }
                 }
             }
         }
-        await start()
+        await performRelayStart(epoch: epoch)
     }
 
     func configure(endpoint: String, token: String, userID: String, recipientUserID: String) throws {
@@ -111,8 +150,19 @@ final class ChatModel {
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
             throw ChatError.invalidConfiguration
         }
-        stop()
         let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
+        let replacesIdentity = configuration.map {
+            $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
+        } ?? false
+        stop()
+        configurationGeneration &+= 1
+        if replacesIdentity {
+            draft = ""
+            messages.removeAll(keepingCapacity: false)
+            partialMessages.removeAll(keepingCapacity: false)
+            seenEnvelopeIDs.removeAll(keepingCapacity: false)
+            ChatMediaThumbnailCache.shared.clear()
+        }
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
         UserDefaults.standard.set(userID, forKey: userKey)
@@ -124,30 +174,54 @@ final class ChatModel {
     }
 
     func start() async {
-        guard receiveTask == nil, let configuration else { return }
+        if let startupTask {
+            await startupTask.value
+            return
+        }
+        guard receiveTask == nil else { return }
+        startupEpoch &+= 1
+        let epoch = startupEpoch
+        let token = UUID()
+        startupToken = token
+        let task = Task { [weak self] in await self?.performRelayStart(epoch: epoch) }
+        startupTask = task
+        await task.value
+        if startupToken == token {
+            startupTask = nil
+            startupToken = nil
+        }
+    }
+
+    private func performRelayStart(epoch: UInt64) async {
+        guard epoch == startupEpoch, !Task.isCancelled,
+              receiveTask == nil, let configuration else { return }
         do {
             let keys = try ChatDeviceKeys.loadOrCreate()
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
             self.keys = keys
             ownSafetyNumber = keys.safetyNumber
             try await relay.register(
                 identity: keys.publicIdentity(userID: configuration.userID, deviceID: configuration.deviceID),
                 configuration: configuration
             )
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
             let session = try await relay.session(configuration: configuration)
-            guard session.userID == configuration.userID else {
-                throw ChatError.invalidResponse
-            }
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
+            guard session.userID == configuration.userID else { throw ChatError.invalidResponse }
             accessRole = session.role
             do {
-                contacts = try await relay.contacts(configuration: configuration)
+                let loadedContacts = try await relay.contacts(configuration: configuration)
+                guard epoch == startupEpoch, !Task.isCancelled else { return }
+                contacts = loadedContacts
                     .filter { $0.userID != configuration.userID }
                     .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
             } catch ChatError.rejected(404) {
-                // Backward compatibility with relay 0.1.x while the add-on is being upgraded.
+                guard epoch == startupEpoch, !Task.isCancelled else { return }
                 contacts = recipientUserID.isEmpty
                     ? []
                     : [ChatContact(userID: recipientUserID, displayName: recipientUserID)]
             }
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
             if !recipientUserID.isEmpty, !contacts.contains(where: { $0.userID == recipientUserID }) {
                 recipientUserID = ""
                 UserDefaults.standard.removeObject(forKey: recipientKey)
@@ -157,22 +231,38 @@ final class ChatModel {
                 UserDefaults.standard.set(onlyContact.userID, forKey: recipientKey)
             }
             try await updateRecipientSafetyNumbers()
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
             state = .online
             receiveTask = Task { [weak self] in await self?.receiveLoop() }
         } catch {
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
             state = .offline(error.localizedDescription)
         }
     }
 
     func stop() {
+        startupEpoch &+= 1
+        startupTask?.cancel()
+        startupTask = nil
+        startupToken = nil
         receiveTask?.cancel()
         receiveTask = nil
+        // Decrypted previews must not outlive an app/chat lifecycle stop.
+        ChatMediaThumbnailCache.shared.clear()
         if configuration != nil { state = .offline("Empfang pausiert") }
     }
 
-    func forgetConfiguration() {
-        stop()
+    func forgetConfiguration(preservingStartup: Bool = false) {
+        configurationGeneration &+= 1
+        draft = ""
+        if preservingStartup {
+            receiveTask?.cancel()
+            receiveTask = nil
+        } else {
+            stop()
+        }
         messages.removeAll(keepingCapacity: false)
+        ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
@@ -256,8 +346,11 @@ final class ChatModel {
     func sendDraft() async {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
-        draft = ""
-        await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
+        let originalDraft = draft
+        let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
+        // A failed preflight/relay request must not erase text the user typed.
+        // Never erase edits made while the send was in flight.
+        if accepted && draft == originalDraft { draft = "" }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -277,17 +370,21 @@ final class ChatModel {
         await send(data, kind: .voice, contentType: "audio/wav")
     }
 
-    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async {
+    @discardableResult
+    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
+        let trace = IOSNextPerformance.begin("Chat.Send")
+        defer { IOSNextPerformance.end("Chat.Send", trace) }
         guard let configuration, let keys, !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
-            return
+            return false
         }
         guard data.count <= (Self.maximumBytes[kind] ?? 0) else {
             lastError = ChatError.contentTooLarge.localizedDescription
-            return
+            return false
         }
         isSending = true
         defer { isSending = false }
+        let sendGeneration = configurationGeneration
         let groupID = UUID().uuidString.lowercased()
         let localMessage = ChatMessage(
             id: groupID,
@@ -302,6 +399,7 @@ final class ChatModel {
         appendMessage(localMessage)
         do {
             let recipients = try await relay.identities(for: recipientUserID, configuration: configuration)
+            guard sendGeneration == configurationGeneration else { return false }
             guard !recipients.isEmpty else { throw ChatError.noRecipientDevice }
             recipientSafetyNumbers = try recipients.map { identity in
                 try ChatDeviceKeys.pin(identity)
@@ -325,12 +423,17 @@ final class ChatModel {
                         createdAt: createdAt
                     )
                     _ = try await relay.send(envelope, configuration: configuration)
+                    guard sendGeneration == configurationGeneration else { return false }
                 }
             }
+            guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .queued)
+            return true
         } catch {
+            guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .failed)
             lastError = error.localizedDescription
+            return false
         }
     }
 

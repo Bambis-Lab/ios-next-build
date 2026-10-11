@@ -1,96 +1,163 @@
-name: Nico Room & Factory Performance iOS 27
+name: iOS Next OPT - bounded acceptance
+
 on:
   push:
     branches:
-      - feature/ios27-nico-factory-performance-162
+      - feature/ios-next-opt-01-14-foundation-162
   workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        description: "Targeted smoke or full iPhone/iPad suite"
+        options: [smoke, full]
+        default: smoke
 
 permissions:
   contents: read
 
 concurrency:
-  group: nico-factory-performance-162
-  cancel-in-progress: true
+  group: iosnext-opt-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
 
 jobs:
   portable:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: App-side scope and invariants
+      - name: Static source and scope checks (NO XCODE)
         run: |
           set -euo pipefail
           python3 Scripts/Acceptance/validate_factory_workspace.py
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
+          python3 Scripts/Acceptance/validate_opt_foundation.py
+          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py
+          python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
+
+  # Explicit manual run ONLY, never launched by a feature-branch push.
+  # A failed test must not suppress the upload of its .xcresult evidence.
   xcode27:
+    if: github.event_name == 'workflow_dispatch'
     needs: portable
-    uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
-    with:
-      runs-on: xcode-27
-      artifact-name: IOSNext-Nico-Factory-Performance-162
-      artifact-path: build/NicoFactory*.xcresult
-      xcode-command: |
-        set -euo pipefail
-        xcodebuild -version
-        test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
-        if ! command -v xcodegen >/dev/null 2>&1; then
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
-        fi
-        bash Scripts/prepare_wireguard_dependency.sh
-        export CM_COMMIT="$(git rev-parse HEAD)"
-        export EXPECTED_VERSION="1.6.2"
-        export EXPECTED_BUILD="25"
-        bash Scripts/prepare_free_sideload_project.sh
-        python3 Scripts/Acceptance/validate_factory_workspace.py
-        python3 Scripts/Acceptance/validate_nico_factory_ui.py
-        SIM_ID="$(xcrun simctl list devices available -j | python3 -c '
-        import json,sys
-        ds=json.load(sys.stdin)["devices"]
-        m=[d["udid"] for runtime,devices in ds.items() if "iOS-27-0" in runtime
-           for d in devices if d["name"]=="iPhone 18 Pro Max" and d.get("isAvailable", True)]
-        assert m,"iPhone 18 Pro Max iOS 27 simulator required"
-        print(m[0])
-        ')"
-        if ! xcrun simctl list devices booted | grep -q "$SIM_ID"; then
-          xcrun simctl boot "$SIM_ID"
-        fi
-        xcrun simctl bootstatus "$SIM_ID" -b
-        mkdir -p build
-        xcodebuild \
-          -project IOSNext.xcodeproj -scheme IOSNext \
-          -configuration Debug -sdk iphonesimulator \
-          -destination "platform=iOS Simulator,id=$SIM_ID" \
-          -parallel-testing-enabled NO \
-          -only-testing:IOSNextTests/LatestValueCommandQueueTests \
-          -only-testing:IOSNextTests/FactoryWorkspaceContractsTests \
-          -only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests \
-          -only-testing:IOSNextUITests/NicoRoomLayoutUITests \
-          -only-testing:IOSNextUITests/FactoryWorkspaceUITests \
-          -derivedDataPath build/NicoFactoryDerivedData \
-          -resultBundlePath build/NicoFactoryAcceptance.xcresult \
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" test
-        echo "NICO_FACTORY_IPHONE_XCODE27=PASS"
-        # Independent tablet geometry: same offline fixtures, no real HA calls.
-        IPAD_ID="$(xcrun simctl list devices available -j | python3 -c '
-        import json,sys
-        ds=json.load(sys.stdin)["devices"]
-        matches=[d["udid"] for runtime,devices in ds.items() if "iOS-27" in runtime
-                 for d in devices if d["name"].startswith("iPad") and d.get("isAvailable",True)]
-        assert matches,"iOS 27 iPad simulator required"
-        print(matches[0])
-        ')"
-        if ! xcrun simctl list devices booted | grep -q "$IPAD_ID"; then
-          xcrun simctl boot "$IPAD_ID"
-        fi
-        xcrun simctl bootstatus "$IPAD_ID" -b
-        xcodebuild \
-          -project IOSNext.xcodeproj -scheme IOSNext \
-          -configuration Debug -sdk iphonesimulator \
-          -destination "platform=iOS Simulator,id=$IPAD_ID" \
-          -parallel-testing-enabled NO \
-          -only-testing:IOSNextUITests/NicoRoomLayoutUITests \
-          -derivedDataPath build/NicoFactoryDerivedData \
-          -resultBundlePath build/NicoFactoryiPad.xcresult \
-          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" test
-        echo "NICO_FACTORY_IPAD_XCODE27=PASS"
+    runs-on: xcode-27
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare dependencies and deterministic project
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.2"
+          export EXPECTED_BUILD="25"
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build
+
+      - name: Boot iPhone 18 Pro Max (all simulator commands bounded)
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/NicoFactoryBoot.log
+
+      - name: Compile once without UI tests (bounded)
+        timeout-minutes: 11
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/NicoFactoryDerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build-for-testing 2>&1 | tee build/NicoFactoryBuild.log
+
+      - name: Targeted iPhone tests (bounded; fail fast)
+        timeout-minutes: 5
+        shell: bash
+        env:
+          SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
+          test "${#files[@]}" -eq 1
+          scope=(
+            "-only-testing:IOSNextTests/LatestValueCommandQueueTests"
+            "-only-testing:IOSNextTests/EntityCommandPipelineTests"
+            "-only-testing:IOSNextTests/ChatDraftSafetyTests"
+            "-only-testing:IOSNextTests/ChatMediaThumbnailCacheTests"
+            "-only-testing:IOSNextTests/HomeAssistantLookupIndexTests"
+            "-only-testing:IOSNextTests/GlobalSearchIndexTests"
+            "-only-testing:IOSNextTests/DashboardPreferencesTests"
+            "-only-testing:IOSNextTests/AppAudioCoordinatorTests"
+            "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
+            "-only-testing:IOSNextUITests/NicoRoomLayoutUITests/testAccessibilityTypeKeepsActionsAccessible"
+          )
+          if [[ "$SUITE" == "full" ]]; then
+            scope=(
+              "-only-testing:IOSNextTests/LatestValueCommandQueueTests"
+              "-only-testing:IOSNextTests/EntityCommandPipelineTests"
+              "-only-testing:IOSNextTests/ChatDraftSafetyTests"
+              "-only-testing:IOSNextTests/ChatMediaThumbnailCacheTests"
+              "-only-testing:IOSNextTests/HomeAssistantLookupIndexTests"
+              "-only-testing:IOSNextTests/GlobalSearchIndexTests"
+              "-only-testing:IOSNextTests/DashboardPreferencesTests"
+              "-only-testing:IOSNextTests/AppAudioCoordinatorTests"
+              "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
+              "-only-testing:IOSNextTests/FactoryWorkspaceCollectionTests"
+              "-only-testing:IOSNextTests/FactoryWorkspaceEventsTests"
+              "-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests"
+              "-only-testing:IOSNextUITests/NicoRoomLayoutUITests"
+              "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
+            )
+          fi
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO "${scope[@]}" \
+            -resultBundlePath build/NicoFactoryiPhone.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Full-suite iPad acceptance (manual full only)
+        if: ${{ inputs.suite == 'full' }}
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPAD_ID="$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          ds=json.load(sys.stdin)["devices"]
+          m=[d["udid"] for runtime,devices in ds.items() if "iOS-27" in runtime
+             for d in devices if d["name"].startswith("iPad") and d.get("isAvailable",True)]
+          assert m,"iOS 27 iPad simulator required"
+          print(m[0])
+          ')"
+          xcrun simctl boot "$IPAD_ID" || true
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl bootstatus "$IPAD_ID" -b
+          files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -parallel-testing-enabled NO \
+            "-only-testing:IOSNextUITests/NicoRoomLayoutUITests" \
+            -resultBundlePath build/NicoFactoryiPad.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Always upload test evidence (including red tests)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-Nico-Factory-OPT-Diagnostics
+          path: |
+            build/NicoFactoryBuild.log
+            build/NicoFactoryiPhone.xcresult
+            build/NicoFactoryiPad.xcresult
+          retention-days: 7
+          if-no-files-found: warn

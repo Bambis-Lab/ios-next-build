@@ -245,6 +245,8 @@ final class RunnerControlModel {
     private let client = RunnerControlClient()
     private let liveClient = RunnerLiveClient()
     private var commanderLiveTask: Task<Void, Never>?
+    @ObservationIgnored private let statusRequests = SingleFlightRequestScheduler()
+    private var configurationRevision: UInt64 = 0
     private let endpointKey = "runnerControlEndpoint"
     private let tokenAccount = "runnerControlToken"
     private let liveTokenAccount = "runnerLiveToken"
@@ -256,6 +258,8 @@ final class RunnerControlModel {
 
     func configure(endpoint: String, token: String, liveToken: String = "") throws {
         stopCommanderLive(reset: true)
+        statusRequests.invalidate()
+        configurationRevision &+= 1
         guard let url = URL(string: endpoint), isAllowedScheme(url.scheme), !token.isEmpty else {
             throw RunnerControlError.invalidConfiguration
         }
@@ -286,14 +290,22 @@ final class RunnerControlModel {
     }
 
     func refresh() async {
+        await statusRequests.run { [self] in
+            await refreshDirect()
+        }
+    }
+
+    private func refreshDirect() async {
         guard let configuration else {
             state = .notConfigured
             return
         }
+        let revision = configurationRevision
         if case .ready = state { } else { state = .loading }
         do {
             lastError = nil
             let status = try await client.status(configuration: configuration)
+            guard revision == configurationRevision else { return }
             state = .ready(status)
             if let commander = status.commander {
                 if commanderLiveState.connection != .live {
@@ -335,6 +347,8 @@ final class RunnerControlModel {
 
     func removeConfiguration() {
         stopCommanderLive(reset: true)
+        statusRequests.invalidate()
+        configurationRevision &+= 1
         configuration = nil
         UserDefaults.standard.removeObject(forKey: endpointKey)
         KeychainStore.delete(account: tokenAccount)

@@ -9,21 +9,26 @@ struct HomeAssistantLookupIndex: Sendable {
     let entityIDsByDeviceID: [String: Set<String>]
 
     init(devices: [HomeAssistantDevice], entityRegistry: [HomeAssistantRegistryEntity]) {
-        let deviceByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        let registryByEntityID = Dictionary(uniqueKeysWithValues: entityRegistry.map { ($0.entityID, $0) })
+        // Registries may transiently contain duplicate rows while HA is
+        // reconciling a reload. Resolve deterministically instead of trapping
+        // in Dictionary(uniqueKeysWithValues:).
+        var deviceByID: [String: HomeAssistantDevice] = [:]
+        for device in devices { deviceByID[device.id] = device }
+        var registryByEntityID: [String: HomeAssistantRegistryEntity] = [:]
+        for registry in entityRegistry { registryByEntityID[registry.entityID] = registry }
 
         var areaIDByEntityID: [String: String] = [:]
         var entityIDsByAreaID: [String: Set<String>] = [:]
         var deviceIDsByAreaID: [String: Set<String>] = [:]
         var entityIDsByDeviceID: [String: Set<String>] = [:]
 
-        for device in devices {
+        for device in deviceByID.values {
             if let areaID = device.areaID, !areaID.isEmpty {
                 deviceIDsByAreaID[areaID, default: []].insert(device.id)
             }
         }
 
-        for registry in entityRegistry {
+        for registry in registryByEntityID.values {
             if let deviceID = registry.deviceID {
                 entityIDsByDeviceID[deviceID, default: []].insert(registry.entityID)
             }
@@ -60,48 +65,20 @@ struct HomeAssistantLookupIndex: Sendable {
 }
 
 @MainActor
-private final class HomeAssistantLookupIndexCache {
-    static let shared = HomeAssistantLookupIndexCache()
-
-    private struct Fingerprint: Equatable {
-        let devices: [String]
-        let registry: [String]
-    }
-
-    private struct Entry {
-        let fingerprint: Fingerprint
-        let index: HomeAssistantLookupIndex
-    }
-
-    private var entries: [ObjectIdentifier: Entry] = [:]
-
-    func index(for model: AppModel) -> HomeAssistantLookupIndex {
-        let fingerprint = Fingerprint(
-            devices: model.devices.map { "\($0.id)|\($0.areaID ?? "")" },
-            registry: model.entityRegistry.map { "\($0.entityID)|\($0.deviceID ?? "")|\($0.areaID ?? "")" }
-        )
-        let key = ObjectIdentifier(model)
-        if let entry = entries[key], entry.fingerprint == fingerprint {
-            return entry.index
-        }
-        let index = HomeAssistantLookupIndex(devices: model.devices, entityRegistry: model.entityRegistry)
-        entries[key] = Entry(fingerprint: fingerprint, index: index)
+extension AppModel {
+    /// No O(N) fingerprint on each access, no global ObjectIdentifier cache.
+    /// The owner invalidates this model-local index on registry/device changes.
+    var homeAssistantLookupIndex: HomeAssistantLookupIndex {
+        if let registryIndexCache { return registryIndexCache }
+        let trace = IOSNextPerformance.begin("HA.RegistryIndexRebuild")
+        defer { IOSNextPerformance.end("HA.RegistryIndexRebuild", trace) }
+        let index = HomeAssistantLookupIndex(devices: devices, entityRegistry: entityRegistry)
+        registryIndexCache = index
         return index
     }
 
-    func invalidate(_ model: AppModel) {
-        entries.removeValue(forKey: ObjectIdentifier(model))
-    }
-}
-
-@MainActor
-extension AppModel {
-    var homeAssistantLookupIndex: HomeAssistantLookupIndex {
-        HomeAssistantLookupIndexCache.shared.index(for: self)
-    }
-
     func invalidateHomeAssistantLookupIndex() {
-        HomeAssistantLookupIndexCache.shared.invalidate(self)
+        registryIndexCache = nil
     }
 
     func indexedResolvedAreaID(for entityID: String) -> String? {
@@ -111,13 +88,15 @@ extension AppModel {
     func indexedEntities(inArea areaID: String) -> [HomeAssistantEntity] {
         let ids = homeAssistantLookupIndex.entityIDs(inArea: areaID)
         guard !ids.isEmpty else { return [] }
-        return entities.filter { ids.contains($0.entityID) }
+        return ids.compactMap(entity(withID:)).sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+        }
     }
 
     func indexedDevices(inArea areaID: String) -> [HomeAssistantDevice] {
-        let ids = homeAssistantLookupIndex.deviceIDs(inArea: areaID)
-        guard !ids.isEmpty else { return [] }
-        return devices.filter { ids.contains($0.id) }
+        let index = homeAssistantLookupIndex
+        return index.deviceIDs(inArea: areaID).compactMap { index.deviceByID[$0] }
             .sorted { lhs, rhs in
                 let order = lhs.name.localizedStandardCompare(rhs.name)
                 return order == .orderedSame ? lhs.id < rhs.id : order == .orderedAscending

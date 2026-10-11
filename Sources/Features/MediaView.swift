@@ -2,25 +2,16 @@ import SwiftUI
 
 struct MediaView: View {
     let appModel: AppModel
+    @State private var presentation = MediaPresentationSnapshot.empty
 
-    private var players: [HomeAssistantEntity] { appModel.entities(inDomain: "media_player") }
-    private var activePlayerCount: Int {
-        players.filter { player in
-            ["playing", "paused", "buffering", "on"].contains(player.state.lowercased())
-        }.count
-    }
-    private var nicoPlayers: [HomeAssistantEntity] {
-        [
-            entity("media_player.nico_zimmer_untergeschoss_apple_tv"),
-            entity("media_player.denon_avr_x1300w"),
-            entity("media_player.playstation_5")
-        ].compactMap { $0 }
-    }
-    private var nicoIDs: Set<String> { Set(nicoPlayers.map(\.entityID)) }
-    private var fireTVPlayers: [HomeAssistantEntity] { players.filter { appModel.isFireTVCompanion($0) } }
-    private var fireTVIDs: Set<String> { Set(fireTVPlayers.map(\.entityID)) }
-    private var remainingPlayers: [HomeAssistantEntity] {
-        players.filter { !nicoIDs.contains($0.entityID) && !fireTVIDs.contains($0.entityID) && !appModel.isShadowedByFireTVCompanion($0) }
+    private var players: [HomeAssistantEntity] { presentation.players }
+    private var activePlayerCount: Int { presentation.activePlayerCount }
+    private var nicoPlayers: [HomeAssistantEntity] { presentation.nicoPlayers }
+    private var fireTVPlayers: [HomeAssistantEntity] { presentation.fireTVPlayers }
+    private var remainingPlayers: [HomeAssistantEntity] { presentation.remainingPlayers }
+
+    private func rebuildPresentation() {
+        presentation = MediaPresentationSnapshot.build(from: appModel)
     }
 
     var body: some View {
@@ -97,10 +88,12 @@ struct MediaView: View {
         .background(IOS27HomeBackground())
         .navigationTitle("Medien")
         .navigationBarTitleDisplayMode(.large)
+        .task { rebuildPresentation() }
+        .onChange(of: appModel.searchRevision) { _, _ in rebuildPresentation() }
     }
 
     private func entity(_ id: String) -> HomeAssistantEntity? {
-        appModel.entities.first { $0.entityID == id }
+        appModel.entity(withID: id)
     }
 }
 
@@ -108,7 +101,7 @@ struct MediaDetailView: View {
     let playerID: String
     let appModel: AppModel
 
-    private var player: HomeAssistantEntity? { appModel.entities.first { $0.entityID == playerID } }
+    private var player: HomeAssistantEntity? { appModel.entity(withID: playerID) }
 
     var body: some View {
         ScrollView {
