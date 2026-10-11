@@ -283,6 +283,8 @@ final class ChatModel {
 
     @discardableResult
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
+        let trace = IOSNextPerformance.begin("Chat.Send")
+        defer { IOSNextPerformance.end("Chat.Send", trace) }
         guard let configuration, let keys, !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
