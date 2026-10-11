@@ -54,10 +54,10 @@ final class AppServiceLifecycleCoordinator {
         // ChatView and AppRoot can ask for the same connection concurrently.
         // Register exactly one startup task and await it without rebuilding
         // a second authenticated relay session.
-        if let chatStartup {
+        if let existingChatStartup = chatStartup {
             let observedToken = chatStartupToken
             let generationAtWait = lifecycleGeneration
-            await chatStartup.value
+            await existingChatStartup.value
             if chatStartupToken == observedToken {
                 chatStartup = nil
                 chatStartupToken = nil
