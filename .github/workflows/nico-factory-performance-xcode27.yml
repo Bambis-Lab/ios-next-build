@@ -32,6 +32,7 @@ jobs:
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
           python3 Scripts/Acceptance/validate_opt_foundation.py
           python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py
+          python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
   # Explicit manual run ONLY, never launched by a feature-branch push.
   # A failed test must not suppress the upload of its .xcresult evidence.
@@ -98,12 +99,16 @@ jobs:
           test "${#files[@]}" -eq 1
           scope=(
             "-only-testing:IOSNextTests/LatestValueCommandQueueTests"
+            "-only-testing:IOSNextTests/EntityCommandPipelineTests"
+            "-only-testing:IOSNextTests/ChatDraftSafetyTests"
             "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
             "-only-testing:IOSNextUITests/NicoRoomLayoutUITests/testAccessibilityTypeKeepsActionsAccessible"
           )
           if [[ "$SUITE" == "full" ]]; then
             scope=(
               "-only-testing:IOSNextTests/LatestValueCommandQueueTests"
+              "-only-testing:IOSNextTests/EntityCommandPipelineTests"
+              "-only-testing:IOSNextTests/ChatDraftSafetyTests"
               "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
               "-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests"
               "-only-testing:IOSNextUITests/NicoRoomLayoutUITests"
