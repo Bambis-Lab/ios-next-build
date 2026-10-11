@@ -49,7 +49,7 @@ final class FactoryConnectionModel {
             // Screenshot harness MUST NOT touch the unsigned simulator Keychain.
             // This is compiled out of the release build and never reports a live session.
             let arguments = ProcessInfo.processInfo.arguments
-            if arguments.contains("--preconnect-ui-acceptance") {
+            if arguments.contains("--preconnect-ui-acceptance") || arguments.contains("--factory-workspace-acceptance") {
                 service = FactoryMCPService(credentials: FactoryCredentialStore(
                     read: {
                         if arguments.contains("--visual-factory-keychain-error") {
