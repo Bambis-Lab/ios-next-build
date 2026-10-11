@@ -19,11 +19,11 @@ expected_labels = {
     "07-factory-custom-preview", "08-factory-preview-sections",
     "09-runner-standalone-background", "10-runner-configuration",
     "11-factory-command-deck-topology", "12-factory-oauth-connect",
-    "13-factory-oauth-security", "14-product-home", "15-product-rooms",
+    "13-factory-oauth-client-id-entry", "14-product-home", "15-product-rooms",
     "16-product-chat", "17-product-media", "18-product-system",
     "19-product-light", "20-product-media-detail", "21-product-owner",
     "22-product-wireguard", "23-factory-no-session-detail",
-    "24-control-center-setup-security", "25-factory-keychain-error",
+    "24-control-center-owner-token-entry", "25-factory-keychain-error",
     "26-runner-offline", "27-factory-oauth-rejection",
     "28-wireguard-offline-security",
 }
