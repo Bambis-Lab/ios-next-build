@@ -1,0 +1,70 @@
+name: Factory World Static S01-S03 iOS27 acceptance
+on:
+  push:
+    branches: [feature/factory-world-static-s01-s03]
+    paths:
+      - "Sources/Features/Owner/Factory/**"
+      - ".github/workflows/factory-world-static-ios27.yml"
+      - "project.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: factory-world-static-ios27
+  cancel-in-progress: false
+jobs:
+  static-scene-ios27:
+    runs-on: xcode-27
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Exact iOS27 SDK and isolated checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
+          test "$GITHUB_REF_NAME" = "feature/factory-world-static-s01-s03"
+          test -z "$(git status --porcelain)"
+      - name: Typecheck static scene and offline manifest model
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/FactoryStaticContentSurfaceShim.swift" <<'SWIFT'
+          import SwiftUI
+          extension View {
+              func ios27ContentSurface(radius: CGFloat) -> some View { self }
+          }
+          SWIFT
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun swiftc -typecheck -target arm64-apple-ios27.0 -sdk "$SDK" \
+            "$RUNNER_TEMP/FactoryStaticContentSurfaceShim.swift" \
+            Sources/Features/Owner/Factory/FactoryWorldStaticAssets.swift \
+            Sources/Features/Owner/Factory/FactoryWorldView.swift
+          echo "S02_S03_STATIC_SWIFT_TYPECHECK=PASS"
+      - name: Compile complete existing app without changing other features
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+              HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.2"
+          export EXPECTED_BUILD="25"
+          bash Scripts/prepare_free_sideload_project.sh
+          xcodebuild \
+            -project IOSNext.xcodeproj \
+            -scheme IOSNext \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/factory-world-static-ios27" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+          echo "S02_S03_FULL_APP_SIMULATOR_BUILD=PASS"
