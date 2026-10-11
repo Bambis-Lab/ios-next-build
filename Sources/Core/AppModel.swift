@@ -218,6 +218,7 @@ final class AppModel {
         devices = []
         entityRegistry = []
         entityIndexByID.removeAll()
+        entityIDsByDomain.removeAll()
         homeAssistantCurrentUser = nil
         connectionState = .notConfigured
     }
