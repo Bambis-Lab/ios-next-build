@@ -50,6 +50,7 @@ final class ChatModel {
     private var startupTask: Task<Void, Never>?
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
+    private var configurationGeneration: UInt64 = 0
     private var partialMessages: [String: PartialMessage] = [:]
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
@@ -150,6 +151,11 @@ final class ChatModel {
             throw ChatError.invalidConfiguration
         }
         stop()
+        configurationGeneration &+= 1
+        messages.removeAll(keepingCapacity: false)
+        partialMessages.removeAll(keepingCapacity: false)
+        seenEnvelopeIDs.removeAll(keepingCapacity: false)
+        ChatMediaThumbnailCache.shared.clear()
         let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
@@ -241,6 +247,8 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
+        configurationGeneration &+= 1
+        draft = ""
         if preservingStartup {
             receiveTask?.cancel()
             receiveTask = nil
@@ -370,6 +378,7 @@ final class ChatModel {
         }
         isSending = true
         defer { isSending = false }
+        let sendGeneration = configurationGeneration
         let groupID = UUID().uuidString.lowercased()
         let localMessage = ChatMessage(
             id: groupID,
@@ -384,6 +393,7 @@ final class ChatModel {
         appendMessage(localMessage)
         do {
             let recipients = try await relay.identities(for: recipientUserID, configuration: configuration)
+            guard sendGeneration == configurationGeneration else { return false }
             guard !recipients.isEmpty else { throw ChatError.noRecipientDevice }
             recipientSafetyNumbers = try recipients.map { identity in
                 try ChatDeviceKeys.pin(identity)
@@ -407,11 +417,14 @@ final class ChatModel {
                         createdAt: createdAt
                     )
                     _ = try await relay.send(envelope, configuration: configuration)
+                    guard sendGeneration == configurationGeneration else { return false }
                 }
             }
+            guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .queued)
             return true
         } catch {
+            guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .failed)
             lastError = error.localizedDescription
             return false
