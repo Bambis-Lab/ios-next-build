@@ -341,8 +341,7 @@ final class AppModel {
         guard light.isAvailable,
               let bridge = lightSegmentBridge(for: light),
               bridge.isReady,
-              !indices.isEmpty,
-              !activeActionEntityIDs.contains(light.entityID)
+              !indices.isEmpty
         else { return }
 
         let unique = Array(Set(indices)).sorted()
@@ -352,23 +351,33 @@ final class AppModel {
             return
         }
 
-        activeActionEntityIDs.insert(light.entityID)
-        lastActionError = nil
-        defer { activeActionEntityIDs.remove(light.entityID) }
-        do {
-            try await client.callService(
-                domain: "battletron_segments",
-                service: "set_segments",
-                serviceData: [
-                    "entity_id": .string(light.entityID),
-                    "indices": .array(unique.map { .number(Double($0)) }),
-                    "hue": .number(min(max(hue, 0), 360)),
-                    "saturation": .number(min(max(saturation, 0), 100)),
-                    "brightness": .number(min(max(brightness, 0), 100))
-                ]
-            )
-        } catch {
-            lastActionError = error.localizedDescription
+        let generation = connectionGeneration
+        let entityID = light.entityID
+        _ = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
+            guard generation == connectionGeneration,
+                  entity(withID: entityID)?.isAvailable == true,
+                  lightSegmentBridge(for: light)?.isReady == true else { return }
+            activeActionEntityIDs.insert(entityID)
+            lastActionError = nil
+            defer { activeActionEntityIDs.remove(entityID) }
+            do {
+                try await client.callService(
+                    domain: "battletron_segments",
+                    service: "set_segments",
+                    serviceData: [
+                        "entity_id": .string(entityID),
+                        "indices": .array(unique.map { .number(Double($0)) }),
+                        "hue": .number(min(max(hue, 0), 360)),
+                        "saturation": .number(min(max(saturation, 0), 100)),
+                        "brightness": .number(min(max(brightness, 0), 100))
+                    ]
+                )
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                }
+            }
         }
     }
 
