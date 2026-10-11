@@ -63,8 +63,8 @@ struct FactoryWorldView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .position(
-                                        x: size.width * place.uv_center[0],
-                                        y: size.height * place.uv_center[1]
+                                        x: size.width * CGFloat(place.uv_center[0]),
+                                        y: size.height * CGFloat(place.uv_center[1])
                                     )
                                     .accessibilityLabel("\(id), \(labels[id] ?? "Factory-Gebäude")")
                                     .accessibilityHint("Öffnet die Gebäudeinformationen ohne Betriebsaktion")
