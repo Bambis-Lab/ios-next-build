@@ -878,8 +878,8 @@ final class AppModel {
             IOSNextFeedbackCenter.shared.play(.error)
         case let .outcomeUnknown(message):
             // The transport may have delivered the request before cancellation.
-            // Never retry automatically; surface uncertainty and request a fresh
-            // authoritative state before the user issues another action.
+            // Never retry automatically; surface uncertainty until a later
+            // authoritative Home Assistant state update resolves the device state.
             lastActionError = "Ergebnis der Aktion für \(entityID) unbekannt: \(message)"
             IOSNextFeedbackCenter.shared.play(.error)
         }
