@@ -21,9 +21,11 @@ final class LatestValueCommandQueue<Value: Sendable> {
     func submit(_ value: Value, apply: @escaping @MainActor (Value) async -> Void) {
         pending = Pending(value: value, apply: apply)
         guard worker == nil else { return }
-        worker = Task { [weak self] in
-            guard let self else { return }
-            await self.drain()
+        // Retain the queue until the latest color command has been delivered,
+        // even when the color sheet is dismissed immediately after selection.
+        // drain() clears worker on completion, ending this temporary retain cycle.
+        worker = Task { [self] in
+            await drain()
         }
     }
 
