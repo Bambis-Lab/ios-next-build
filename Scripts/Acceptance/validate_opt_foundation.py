@@ -37,7 +37,9 @@ checks={
                               and "colorCommandQueue.submit(desired)" in color,
     "live_segment_serial": '"light.appearance"' in model
                             and 'service: "set_segments"' in model,
-    "pipeline_superseded_result": "item.continuation.resume(returning: false)" in pipeline,
+    "pipeline_typed_results": "item.continuation.resume(returning: .superseded)" in pipeline
+                               and "item.continuation.resume(returning: .cancelled)" in pipeline
+                               and "let result = await next.operation()" in pipeline,
     "pipeline_acceptance": "testQueuedAbsoluteValuesCoalesceWithoutDroppingFinalIntent" in pipeline_tests
                            and "testDisconnectDropsOnlyQueuedCommands" in pipeline_tests,
 }
