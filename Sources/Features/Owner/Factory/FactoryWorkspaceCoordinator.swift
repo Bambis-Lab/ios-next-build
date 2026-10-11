@@ -13,6 +13,11 @@ final class FactoryWorkspaceCoordinator {
     private(set) var overviewError: String?
     private(set) var isSynchronizing = false
     private(set) var lastSynchronized: Date?
+    private(set) var eventHistory = FactoryWorkspaceEventReconciler()
+    private(set) var eventHistoryError: String?
+
+    var recentFactoryEvents: [FactoryWorkspaceEvent] { eventHistory.events }
+    var eventsRequireResync: Bool { eventHistory.needsResync }
 
     init(connection: FactoryConnectionModel? = nil) {
         self.connection = connection ?? FactoryConnectionModel()
@@ -52,21 +57,41 @@ final class FactoryWorkspaceCoordinator {
             return
         }
 
-        guard discoveredTools.contains("workspace_overview_get") else {
+        if discoveredTools.contains("workspace_overview_get") {
+            do {
+                let payload = try await connection.readWorkspaceTool("workspace_overview_get")
+                overview = try FactoryWorkspaceEnvelope.decode(payload)
+                overviewError = nil
+            } catch {
+                overview = nil
+                overviewError = error.localizedDescription
+            }
+        } else {
             overview = nil
-            overviewError = nil // Not implemented by backend: legacy modules remain available.
-            lastSynchronized = Date()
+            overviewError = nil // Compatibility adapter remains available.
+        }
+        await refreshEventHistoryIfAvailable()
+        lastSynchronized = Date()
+    }
+
+    private func refreshEventHistoryIfAvailable() async {
+        guard discoveredTools.contains("events_history_list") else {
+            eventHistoryError = nil
             return
         }
-
+        if eventHistory.needsResync {
+            eventHistory.reset()
+        }
         do {
-            let payload = try await connection.readWorkspaceTool("workspace_overview_get")
-            overview = try FactoryWorkspaceEnvelope.decode(payload)
-            overviewError = nil
-            lastSynchronized = Date()
+            var arguments: [String: Any] = ["limit": 100]
+            if let last = eventHistory.lastSequence {
+                arguments["since_sequence"] = last
+            }
+            let payload = try await connection.readWorkspaceTool("events_history_list", arguments: arguments)
+            eventHistory.append(try FactoryWorkspaceEventBatch.decode(payload))
+            eventHistoryError = eventHistory.needsResync ? "Ereignislücke erkannt – vollständige Synchronisation erforderlich." : nil
         } catch {
-            overview = nil
-            overviewError = error.localizedDescription
+            eventHistoryError = error.localizedDescription
         }
     }
 
@@ -75,6 +100,8 @@ final class FactoryWorkspaceCoordinator {
         overviewError = nil
         sourceStates = []
         lastSynchronized = nil
+        eventHistory.reset()
+        eventHistoryError = nil
     }
 
     /// No action execution until a separately reviewed action coordinator is implemented.
