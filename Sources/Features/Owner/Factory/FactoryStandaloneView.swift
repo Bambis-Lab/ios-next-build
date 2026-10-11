@@ -3,7 +3,12 @@ import SwiftUI
 /// Factory Control Surface independent of Home Assistant and Owner login.
 /// No implicit network access, mutation actions or fabricated status values.
 struct FactoryStandaloneView: View {
+    let appModel: AppModel?
     @State private var runtime = IOSNextRuntime.shared
+
+    init(appModel: AppModel? = nil) {
+        self.appModel = appModel
+    }
     private var factory: FactoryConnectionModel { runtime.factoryWorkspace.connection }
 
     var body: some View {
@@ -90,7 +95,7 @@ struct FactoryStandaloneView: View {
                         description: Text("Die Oberfläche ist vollständig erreichbar. Live-Daten erscheinen nach autorisierter Verbindung."))
                 }
 
-                FactoryWorkspaceModulesView()
+                FactoryWorkspaceModulesView(appModel: appModel)
 
                 Label("Keine Factory-Schreibaktionen oder freien Befehle.",
                       systemImage: "lock.shield.fill")
