@@ -35,15 +35,15 @@ color=read("Sources/Design/LightControlSheet.swift")
 
 checks={
     "manual_xcode_only": "if: github.event_name == 'workflow_dispatch'" in workflow,
-    "no_custom_job_timeout": "timeout-minutes:" not in workflow,
-    "no_custom_test_timeout": "--timeout-seconds" not in workflow,
-    "no_custom_compile_timeout": "--timeout-seconds" not in workflow,
+    "bounded_job_timeout": "timeout-minutes: 18" in workflow and "timeout-minutes: 3" in workflow,
+    "bounded_test_timeout": "--timeout-seconds 240 -- xcodebuild test-without-building" in workflow,
+    "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
     "no_automatic_xcode_push": "on:" in workflow and "needs: portable" in workflow,
-    "no_elapsed_time_kills": "communicate(timeout=" not in watchdog
-                           and "wait(timeout=" not in watchdog
-                           and "os.killpg(" not in watchdog,
+    "process_group_watchdog": "communicate(timeout=" not in watchdog
+                             and "wait(timeout=args.timeout_seconds)" in watchdog
+                             and "os.killpg(process.pid, signal.SIGKILL)" in watchdog,
     "lazy_scroll_test": "reveal(desk, in: app)" in tests
                         and "Nico-Accessibility-Hierarchy-ON-FAIL" in tests,
     "entity_serial_lane": "deviceCommands.execute(entityID:" in model,
