@@ -16,7 +16,11 @@ final class AppAudioCoordinator {
     private let busyChanged: @MainActor (Bool) -> Void
     private var lastPublishedBusy = false
 
-    init(busyChanged: @escaping @MainActor (Bool) -> Void = { JarvisEngine.shared.setExternalAudioBusy($0) }) {
+    init() {
+        self.busyChanged = { busy in JarvisEngine.shared.setExternalAudioBusy(busy) }
+    }
+
+    init(busyChanged: @escaping @MainActor (Bool) -> Void) {
         self.busyChanged = busyChanged
     }
 
