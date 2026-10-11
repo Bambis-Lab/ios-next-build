@@ -8,7 +8,7 @@ import sys
 import time
 
 
-def run_bounded(argv, timeout=90):
+def run_bounded(argv, timeout=90, *, emit_output=True):
     print(f"SIMULATOR_COMMAND_START timeout={timeout}s cmd={argv[0]}", flush=True)
     process = subprocess.Popen(
         argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -24,10 +24,10 @@ def run_bounded(argv, timeout=90):
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             output, _ = process.communicate()
-        if output:
+        if output and emit_output:
             print(output, end="" if output.endswith("\n") else "\n", flush=True)
         raise RuntimeError(f"Command timed out after {timeout}s: {argv[0]}")
-    if output:
+    if output and emit_output:
         print(output, end="" if output.endswith("\n") else "\n", flush=True)
     if process.returncode != 0:
         raise RuntimeError(f"Command exited {process.returncode}: {argv[0]}")
@@ -40,7 +40,7 @@ def main():
     env_file = os.environ.get("GITHUB_ENV")
     started = time.monotonic()
 
-    listing = run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=45)
+    listing = run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=20, emit_output=False)
     data = json.loads(listing)
     matches = [
         (runtime, device) for runtime, devices in data.get("devices", {}).items()
@@ -56,17 +56,17 @@ def main():
     print(f"SIMULATOR_SELECTED runtime={runtime} name={device_name} udid={udid}", flush=True)
 
     try:
-        run_bounded(["xcrun", "simctl", "boot", udid], timeout=45)
+        run_bounded(["xcrun", "simctl", "boot", udid], timeout=30)
     except RuntimeError as exc:
         latest = json.loads(run_bounded(
-            ["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=45
+            ["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=20, emit_output=False
         ))
         states = [d.get("state") for devs in latest.get("devices", {}).values()
                   for d in devs if d.get("udid") == udid]
         if not states or states[0] != "Booted":
             raise exc
 
-    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=90)
+    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=60)
     if env_file:
         with open(env_file, "a", encoding="utf-8") as stream:
             stream.write(f"SIM_ID={udid}\n")
