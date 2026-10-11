@@ -153,6 +153,7 @@ final class AppModel {
         let trace = IOSNextPerformance.begin("HA.Connect")
         defer { IOSNextPerformance.end("HA.Connect", trace) }
         connectionGeneration &+= 1
+        let connectGeneration = connectionGeneration
         deviceCommands.invalidatePending()
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -165,6 +166,9 @@ final class AppModel {
         let configuration = HomeAssistantConfiguration(baseURL: serverURL, accessToken: accessToken)
         do {
             let snapshot = try await client.connect(configuration: configuration)
+            guard connectGeneration == connectionGeneration, !Task.isCancelled else {
+                return
+            }
             currentConfiguration = configuration
             shouldReconnect = true
             reconnectAttempt = 0
@@ -178,6 +182,7 @@ final class AppModel {
                 try KeychainStore.save(accessToken, account: tokenAccount)
             }
         } catch {
+            guard connectGeneration == connectionGeneration, !Task.isCancelled else { return }
             let message = error.localizedDescription
             connectionState = .failed(
                 failurePrefix.map { "\($0): \(message)" } ?? message
@@ -705,14 +710,20 @@ final class AppModel {
                   applicationIsActive,
                   networkAvailable,
                   let configuration = currentConfiguration else { return }
+            let reconnectGeneration = connectionGeneration
             do {
                 let snapshot = try await client.connect(configuration: configuration)
+                guard !Task.isCancelled,
+                      reconnectGeneration == connectionGeneration,
+                      shouldReconnect, applicationIsActive, networkAvailable else { return }
                 apply(snapshot)
                 reconnectAttempt = 0
                 connectionState = .connected
                 observeStateChanges()
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled,
+                      reconnectGeneration == connectionGeneration,
+                      shouldReconnect else { return }
                 lastActionError = "Erneute Verbindung fehlgeschlagen: \(error.localizedDescription)"
                 scheduleReconnect()
             }
