@@ -56,12 +56,15 @@ struct HomeView: View {
     }
 
     private var visibleFeaturedItems: [HomeShortcutPresentation] {
-        featuredItems
+        let available = featuredItems
+        let originalOrder = Dictionary(uniqueKeysWithValues: available.enumerated().map { ($0.element.id, $0.offset) })
+        return available
             .filter { dashboardPreferences.isVisible($0.id) }
             .sorted {
                 let left = dashboardPreferences.rank(of: $0.id)
                 let right = dashboardPreferences.rank(of: $1.id)
-                return left == right ? $0.id < $1.id : left < right
+                if left != right { return left < right }
+                return (originalOrder[$0.id] ?? 0) < (originalOrder[$1.id] ?? 0)
             }
     }
 
