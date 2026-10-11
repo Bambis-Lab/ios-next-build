@@ -35,7 +35,8 @@ checks={
                       and 'indexedEntities(inArea: areaID)' in app,
     "color_queue_serial": 'await next.apply(next.value)' in queue
                           and 'pending = Pending(value: value' in queue,
-    "color_queue_integrated": 'colorCommandQueue.submit(desired)' in light,
+    "color_queue_integrated": 'colorCommandQueue.submit(QueuedLightColorCommand(generation: generation, command: desired))' in light
+                               and 'isCurrentCommandGeneration(queued.generation)' in light,
 
     "no_duplicate_white_action": 'submitColor(.white(' in light and 'ignoredSynchronizedColor' in light,
     "owner_direct_route": "FactoryOwnerDirectoryView(" in owner
