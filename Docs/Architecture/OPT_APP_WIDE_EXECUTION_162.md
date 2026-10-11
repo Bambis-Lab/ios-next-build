@@ -24,20 +24,20 @@
 
 | ID | Current source implementation | Remaining requirements |
 | --- | --- | --- |
-| OPT-01 | AppServiceLifecycleCoordinator coalesces ChatView/AppRoot startup, separates view interest, HA auth and foreground | Instrument multi-session/HA-user-swap test; migrate all eligible independent service lifecycle hooks |
-| OPT-02 | Model-local, invalidated registry lookup index; no O(N) fingerprint per read; rooms and devices by IDs | Compare snapshot semantics on HA fake; incremental per-room presentation update; SwiftUI profiling |
-| OPT-03 | Per-entity command serial lanes, explicit coalescing for safe absolute setpoints, no automatic replay; state-revision-aware optimistic updates | Integrate remaining Fire TV/cover/other adapters where appropriate; failure receipts, connectivity test matrix |
-| OPT-04 | Bounded RAM-only ImageIO thumbnail cache; clears on chat reset/user forget; failed draft preserved | Video poster/player lifecycle, full outbox retry semantics, memory profiling and E2EE regression |
-| OPT-05 | SingleFlightRequestScheduler; Runner status refresh integrated with auth-configuration revision fencing | Owner and Factory integration without cross-principal cache; TTL/backoff and conditional refresh |
-| OPT-06 | Not migrated | Cold/warm start profiling; safe deferred initialization without delayed auth/UI |
-| OPT-07 | Not migrated | Normalized indexed search; correctness under renames/state changes; warm result benchmark |
-| OPT-08 | Not migrated | Jarvis/recording/audio coordination; verify AVAudioSession main-thread warning on iOS 27 |
-| OPT-09 | Not migrated | Player view-state consolidation; Fire TV/Apple TV/Denon/PS5 capability & regression matrix |
-| OPT-10 | Not migrated | Selective presentation stores; check Instruments render invalidations and visual goldens |
-| OPT-11 | Not migrated | WireGuard status notifications and foreground/route lifecycle, signed capability parity |
-| OPT-12 | Not migrated | Per-profile custom dashboard reorder and secure persistence; migration tests |
-| OPT-13 | Not migrated | Safe Siri/App Intents navigation, confirmation/security policies, extension support |
-| OPT-14 | Optional Instruments signposts for HA connect/flush/index and Chat.Send; strict comparable p50/p95 report utility with isolated synthetic *math-only* tests | **Real device/simulator Instruments baseline not measured**; expanded scenarios and gated comparable report |
+| OPT-01 | AppServiceLifecycleCoordinator coalesces AppRoot/ChatView startup; ChatModel now fences direct starts, configuration generations, stop/cancel and outgoing sends | Xcode concurrency test, multi-session/HA-user-swap proof; lifecycle for other services remains partly local |
+| OPT-02 | Model-owned registry cache invalidated on device/registry edits; duplicate entity/device rows are normalized; ID/domain indexes and indexed room snapshots | HA fake tests for area/device changes; incremental per-room snapshots and Instruments profile |
+| OPT-03 | Typed command results (executed/superseded/cancelled/failed/outcomeUnknown), per-entity FIFO lanes, safe queued-value replacement, connect-generation and state-revision fencing; Fire TV calls use same lane | Real HA transport test for late send/unknown outcome; verify all toggle/scene/cover/player adapters and visible failure receipt |
+| OPT-04 | RAM-only ImageIO thumbnails with 24 MiB cache cap and off-main decoding; draft survives failed send; identity-generation fences prevent cross-account completion; recording/playback audio leases | Video poster/player lifecycle, fully specified retry/outbox contract, memory-pressure and E2EE regression tests |
+| OPT-05 | Runner status single-flight + configuration generation; Owner V2 refreshes coalesced and session-fenced; event responses fenced; Factory MCP tool list cache only while session exists | Backoff/TTL/conditional requests and measured request counts still needed; no shared credentials/cache across security domains |
+| OPT-06 | Runner, Live and Factory models initialized lazily on feature access; runtime initialization signposted | Real cold/warm start baseline, ensure first-use latency remains acceptable |
+| OPT-07 | Debounced GlobalSearchIndex with pre-normalized/pre-sorted fields; batched HA state revision invalidates results | Xcode correctness test, large-registry search p50/p95 and memory profile |
+| OPT-08 | AppAudioCoordinator lease arbitration integrates Jarvis, chat playback and microphone recorder; recorder removes tap and releases lease on stop/failure | Confirm all TTS/interrupt/audio-route paths and the iOS 27 AVAudioSession warning on actual supported devices |
+| OPT-09 | MediaPresentationSnapshot groups player state once per HA revision; MediaView and player lookups use shared index | Cross-device capability/interactions test for Fire TV/Apple TV/Denon/PS5, no regression in seek/volume/mute |
+| OPT-10 | RoomPresentationSnapshot indexed by area; media snapshot and signposts are present; dashboard uses stable presentation options | Complete Home/Room/Media/SystemHealth store migration remains open; Instruments redraw invalidation proof |
+| OPT-11 | WireGuard observes NEVPNStatusDidChange; programmatic state restoration no longer re-triggers on-demand toggle; removal clears observer | Test manager reload, route/background and real NetworkExtension state transitions |
+| OPT-12 | Local per-profile dashboard tile visibility/order UI with reset and persistence | Verify profile identity stability and migration across profile renames/resets, VoiceOver acceptance |
+| OPT-13 | AppIntents for opening Home, Rooms and Media; tab request consumed on launch/foreground; no privileged Factory write intents added | Xcode App Shortcuts metadata/phrase validation and end-to-end Siri invocation |
+| OPT-14 | Opt-in privacy-safe signposts + strict environment-matched p50/p95 comparator; Python comparator unit fixtures do not claim app measurements | **Real baseline and candidate measurement absent**; need an explicit bounded Xcode/Instruments run and archived comparable reports |
 
 ## Verification ladder (do not skip)
 
@@ -63,4 +63,4 @@ Manual smoke must pass before full visual; never upgrade evidence from portable 
 
 ## Next evidence needed
 
-**Compile gate not yet executed on this commit**. Last Xcode result from parent PR #4 was red due to the unscrolled LazyVStack accessibility test plus a 600-second failure-diagnostics hang. The current branch contains source fixes and hard process-group time budgets, but neither fix is accepted before a deliberately scoped targeted Xcode run and artifact verification. Do not call the 14 optimization program complete before remaining rows and G1–G6 are proven.
+**Compile gate not yet executed on this branch.** The previous portable red check was a stale static expectation for the old color-queue API; it is now aligned to the actual generation-bound `QueuedLightColorCommand` contract. The latest portable run after both the color-validator correction and Owner/Factory stale-response fixes passed, and Xcode was skipped by design. The earlier parent PR #4 Xcode failure (unscrolled LazyVStack accessibility test + 600-second diagnostic hang) remains unverified on this new source head. Do not call the 14 optimization program complete until G1–G6 have independent evidence.
