@@ -10,13 +10,27 @@ struct IOS27RoomHeaderCard: View {
         appModel.resourceMetrics(inArea: area.id)
     }
 
+    private var hasUnassignedNicoLights: Bool {
+        guard area.name.localizedCaseInsensitiveCompare("Nico Zimmer") == .orderedSame,
+              metrics.deviceCount == 0 else { return false }
+        // These live controls can still be addressed by ID even when the
+        // device/area registry is incomplete. Never report fabricated counts.
+        return [
+            "light.kronach_fernseher_links",
+            "light.kronach_fernseher_rechts",
+            "light.kronach_schrank"
+        ].contains { appModel.entity(withID: $0) != nil }
+    }
+
     var body: some View {
         IOS27StatusCard(
             title: "Übersicht",
-            value: "\(metrics.deviceCount) Geräte",
+            value: hasUnassignedNicoLights ? "Raumzuordnung offen" : "\(metrics.deviceCount) Geräte",
             symbol: symbol,
-            tint: tint,
-            detail: "\(metrics.activeEntityCount) aktive Entitäten"
+            tint: hasUnassignedNicoLights ? .orange : tint,
+            detail: hasUnassignedNicoLights
+                ? "Leuchten verfügbar · Geräte-/Entitätszuordnung prüfen"
+                : "\(metrics.activeEntityCount) aktive Entitäten"
         )
     }
 }
