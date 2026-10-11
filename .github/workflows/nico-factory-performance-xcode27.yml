@@ -201,6 +201,7 @@ jobs:
         with:
           name: IOSNext-Nico-Factory-OPT-Diagnostics
           path: |
+            build/NicoFactoryBoot.log
             build/NicoFactoryBuild.log
             build/NicoFactoryiPhone.xcresult
             build/NicoFactoryiPad.xcresult
