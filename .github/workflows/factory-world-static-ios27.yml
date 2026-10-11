@@ -6,6 +6,7 @@ on:
       - "Sources/Features/Owner/Factory/**"
       - ".github/workflows/factory-world-static-ios27.yml"
       - "project.yml"
+      - "Scripts/stage_factory_world_static.py"
   workflow_dispatch:
 permissions:
   contents: read
@@ -28,6 +29,15 @@ jobs:
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
           test "$GITHUB_REF_NAME" = "feature/factory-world-static-s01-s03"
           test -z "$(git status --porcelain)"
+      - name: Stage SHA-verified real Blender day/night art from pinned Factory commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/stage_factory_world_static.py --commit 21dcbf689174f5fe0369851e1e11d82b6b402035
+          test -s Assets.xcassets/FactoryWorldDay.imageset/FactoryWorld_day.png
+          test -s Assets.xcassets/FactoryWorldNight.imageset/FactoryWorld_night.png
+          test -s Sources/Resources/FactoryWorldStaticManifest.json
+          echo "S01_REAL_BLENDER_ASSETS_STAGED=PASS"
       - name: Typecheck static scene and offline manifest model
         shell: bash
         run: |
@@ -67,4 +77,9 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             build
+          APP="$RUNNER_TEMP/factory-world-static-ios27/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP"
+          test -s "$APP/FactoryWorldStaticManifest.json"
+          test -s "$APP/Assets.car"
+          echo "S01_STATIC_BLENDER_BUNDLE_RESOURCES=PASS"
           echo "S02_S03_FULL_APP_SIMULATOR_BUILD=PASS"
