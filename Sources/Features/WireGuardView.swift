@@ -89,6 +89,10 @@ struct WireGuardView: View {
             }
         }
         .task { await controller.refresh() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await controller.refresh() }
+        }
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: [UTType(filenameExtension: "conf") ?? .plainText, .plainText]
