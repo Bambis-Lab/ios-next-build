@@ -1,21 +1,37 @@
 #!/usr/bin/env python3
-"""Start an iOS Simulator with bounded subprocess calls and precise diagnostics."""
+"""Boot a named iOS Simulator with bounded process-group cleanup."""
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
 
 
-def run_unbounded(argv):
-    print(f"SIMULATOR_COMMAND_START cmd={argv[0]} args={argv[1:]}", flush=True)
-    completed = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                               text=True, check=False)
-    if completed.stdout:
-        print(completed.stdout, end="" if completed.stdout.endswith("\n") else "\n", flush=True)
-    if completed.returncode != 0:
-        raise RuntimeError(f"Command exited {completed.returncode}: {argv[0]}")
-    return completed.stdout or ""
+def run_bounded(argv, timeout=90):
+    print(f"SIMULATOR_COMMAND_START timeout={timeout}s cmd={argv[0]}", flush=True)
+    process = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, start_new_session=True
+    )
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"SIMULATOR_COMMAND_TIMEOUT cmd={argv[0]} timeout={timeout}s", flush=True)
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            output, _ = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            output, _ = process.communicate()
+        if output:
+            print(output, end="" if output.endswith("\n") else "\n", flush=True)
+        raise RuntimeError(f"Command timed out after {timeout}s: {argv[0]}")
+    if output:
+        print(output, end="" if output.endswith("\n") else "\n", flush=True)
+    if process.returncode != 0:
+        raise RuntimeError(f"Command exited {process.returncode}: {argv[0]}")
+    return output or ""
 
 
 def main():
@@ -40,17 +56,17 @@ def main():
     print(f"SIMULATOR_SELECTED runtime={runtime} name={device_name} udid={udid}", flush=True)
 
     try:
-        run_unbounded(["xcrun", "simctl", "boot", udid])
+        run_bounded(["xcrun", "simctl", "boot", udid], timeout=45)
     except RuntimeError as exc:
-        # Only suppress boot failure if querying CoreSimulator confirms it is
-        # already booted; otherwise preserve the underlying error.
-        latest = json.loads(run_unbounded(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+        latest = json.loads(run_bounded(
+            ["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=45
+        ))
         states = [d.get("state") for devs in latest.get("devices", {}).values()
                   for d in devs if d.get("udid") == udid]
         if not states or states[0] != "Booted":
             raise exc
 
-    run_unbounded(["xcrun", "simctl", "bootstatus", udid, "-b"])
+    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=90)
     if env_file:
         with open(env_file, "a", encoding="utf-8") as stream:
             stream.write(f"SIM_ID={udid}\n")
