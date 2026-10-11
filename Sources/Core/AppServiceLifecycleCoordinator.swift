@@ -11,20 +11,24 @@ final class AppServiceLifecycleCoordinator {
     private var visibleChatCount = 0
     private var chatStartup: Task<Void, Never>?
     private var chatStartupToken: UUID?
+    private var lifecycleGeneration: UInt64 = 0
 
     init(chat: ChatModel) { self.chat = chat }
 
     func homeAssistantConnectionChanged(_ connected: Bool, appModel: AppModel) async {
+        lifecycleGeneration &+= 1
         homeAssistantConnected = connected
         await reconcileChat(appModel: appModel)
     }
 
     func chatViewAppeared(appModel: AppModel) async {
+        lifecycleGeneration &+= 1
         visibleChatCount += 1
         await reconcileChat(appModel: appModel)
     }
 
     func chatViewDisappeared() {
+        lifecycleGeneration &+= 1
         visibleChatCount = max(0, visibleChatCount - 1)
         ChatMediaThumbnailCache.shared.clear()
         if !homeAssistantConnected && visibleChatCount == 0 {
@@ -33,6 +37,7 @@ final class AppServiceLifecycleCoordinator {
     }
 
     func applicationPhaseChanged(isActive: Bool, appModel: AppModel) {
+        lifecycleGeneration &+= 1
         appForeground = isActive
         if !isActive {
             chat.stop()
@@ -51,6 +56,7 @@ final class AppServiceLifecycleCoordinator {
         // a second authenticated relay session.
         if let chatStartup {
             let observedToken = chatStartupToken
+            let generationAtWait = lifecycleGeneration
             await chatStartup.value
             if chatStartupToken == observedToken {
                 chatStartup = nil
@@ -61,9 +67,11 @@ final class AppServiceLifecycleCoordinator {
                 return
             }
             if case .online = chat.state { return }
-            // The in-flight start may have been cancelled by a lifecycle
-            // transition. This caller can retry once the old flight is gone.
-            if chatStartup == nil { await reconcileChat(appModel: appModel) }
+            // Retry only if the desired lifecycle changed while this flight was
+            // in progress. A genuine relay error must not create an endless retry loop.
+            if lifecycleGeneration != generationAtWait, chatStartup == nil {
+                await reconcileChat(appModel: appModel)
+            }
             return
         }
         let token = UUID()
