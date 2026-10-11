@@ -18,6 +18,9 @@ struct FactoryPreviewView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                if FactoryWorldBundle.available {
+                    FactoryWorldView()
+                }
                 FactoryCommandDeck(
                     factoryConnected: false, ownerConnected: false,
                     runnerConnected: false, reportedSources: 0
