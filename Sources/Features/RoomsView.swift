@@ -756,9 +756,11 @@ private struct NicoRoomDashboardContent: View {
         ["light.kronach_fernseher_links", "light.kronach_fernseher_rechts"].compactMap(entity)
     }
 
-    private var compactLights: [HomeAssistantEntity] {
-        ["light.kronach_schrank", "switch.schreibtisch_rgb_standlampe_steckdose_1"].compactMap(entity)
+    private var cabinetLight: HomeAssistantEntity? { entity("light.kronach_schrank") }
+    private var deskSwitch: HomeAssistantEntity? {
+        entity("switch.schreibtisch_rgb_standlampe_steckdose_1")
     }
+    private var prismaScene: HomeAssistantEntity? { entity("scene.kronach_kronach_prisma") }
 
     private var mediaPlayers: [HomeAssistantEntity] {
         [
@@ -771,7 +773,8 @@ private struct NicoRoomDashboardContent: View {
     private var lightMaster: HomeAssistantEntity {
         entity("group.nico_beleuchtung") ?? HomeAssistantEntity(
             entityID: "group.nico_beleuchtung",
-            state: (tvLights + compactLights).contains(where: \.isOn) ? "on" : "off",
+            state: (tvLights + [cabinetLight, deskSwitch].compactMap { $0 })
+                .contains(where: \.isOn) ? "on" : "off",
             attributes: [:]
         )
     }
@@ -784,39 +787,69 @@ private struct NicoRoomDashboardContent: View {
 
     var body: some View {
         IOS27SectionHeader(title: "Beleuchtung", subtitle: "TV · Schrank · Schreibtisch")
-
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(tvLights) { light in
                 NicoPrimaryLightTile(entity: light, appModel: appModel)
             }
         }
 
-        LazyVGrid(columns: columns, spacing: 12) {
-            ForEach(compactLights) { light in
-                NicoCompactControlTile(entity: light, appModel: appModel)
+        if dynamicTypeSize.isAccessibilitySize {
+            LazyVStack(spacing: 12) {
+                if let cabinetLight {
+                    NicoPrimaryLightTile(entity: cabinetLight, appModel: appModel)
+                }
+                if let deskSwitch {
+                    NicoMicroActionTile(
+                        title: "Schreibtischlampe",
+                        subtitle: deskSwitch.isOn ? "Ein" : "Aus",
+                        symbol: "lamp.desk.fill",
+                        tint: deskSwitch.ios27LightTint
+                    ) { Task { await appModel.toggle(deskSwitch) } }
+                }
+                if let prismaScene {
+                    NicoMicroActionTile(
+                        title: "Prisma", subtitle: "Schrank-Effekt",
+                        symbol: "paintpalette.fill", tint: .purple
+                    ) { Task { await appModel.activate(prismaScene) } }
+                }
+            }
+        } else {
+            // Two equal half-width regions: one cabinet light tile and a pair
+            // of quarter-width actions. No independent color-button remains.
+            HStack(alignment: .top, spacing: 12) {
+                if let cabinetLight {
+                    NicoPrimaryLightTile(entity: cabinetLight, appModel: appModel)
+                        .frame(maxWidth: .infinity)
+                }
+                if deskSwitch != nil || prismaScene != nil {
+                    HStack(spacing: 12) {
+                        if let deskSwitch {
+                            NicoMicroActionTile(
+                                title: "Schreibtischlampe",
+                                subtitle: deskSwitch.isOn ? "Ein" : "Aus",
+                                symbol: "lamp.desk.fill",
+                                tint: deskSwitch.ios27LightTint
+                            ) { Task { await appModel.toggle(deskSwitch) } }
+                        }
+                        if let prismaScene {
+                            NicoMicroActionTile(
+                                title: "Prisma", subtitle: "Szene",
+                                symbol: "paintpalette.fill", tint: .purple
+                            ) { Task { await appModel.activate(prismaScene) } }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             }
         }
 
-        LazyVGrid(columns: columns, spacing: 12) {
-            IOS27RoomActionTile(
-                title: "Licht Master",
-                subtitle: lightMaster.isOn ? "Geräte an" : "Alles aus",
-                symbol: "power",
-                tint: lightMaster.isOn ? .green : .red
-            ) {
-                Task { await appModel.toggle(lightMaster) }
-            }
-
-            if let prisma = entity("scene.kronach_kronach_prisma") {
-                IOS27RoomActionTile(
-                    title: "Prisma",
-                    subtitle: "Schrank-Effekt",
-                    symbol: "paintpalette.fill",
-                    tint: .purple
-                ) {
-                    Task { await appModel.activate(prisma) }
-                }
-            }
+        IOS27RoomActionTile(
+            title: "Licht Master",
+            subtitle: lightMaster.isOn ? "Geräte an" : "Alles aus",
+            symbol: "power",
+            tint: lightMaster.isOn ? .green : .red
+        ) {
+            Task { await appModel.toggle(lightMaster) }
         }
 
         IOS27SectionHeader(title: "Medien-Center", subtitle: "Apple TV · Denon · PS5")
@@ -866,7 +899,50 @@ private struct NicoRoomDashboardContent: View {
     }
 
     private func entity(_ id: String) -> HomeAssistantEntity? {
-        appModel.entities.first { $0.entityID == id }
+        appModel.entity(withID: id)
+    }
+}
+
+/// Narrow button with its own 44pt+ touch area, never a dummy color control.
+/// Uses full readable labels for VoiceOver and a bounded visual layout.
+private struct NicoMicroActionTile: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.title3)
+                    .foregroundStyle(tint)
+                    .frame(width: 39, height: 39)
+                    .background(tint.opacity(0.14), in: Circle())
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.78)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity, minHeight: 158)
+            .padding(.horizontal, 5)
+            .ios27ContentSurface(radius: 21)
+            .contentShape(RoundedRectangle(cornerRadius: 21))
+        }
+        .buttonStyle(.plain)
+        .frame(minWidth: 44, minHeight: 44)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(subtitle)
+        .accessibilityHint("Aktivieren")
     }
 }
 
