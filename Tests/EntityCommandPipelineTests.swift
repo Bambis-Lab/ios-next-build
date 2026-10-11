@@ -103,9 +103,39 @@ final class EntityCommandPipelineTests: XCTestCase {
         pipeline.invalidatePending()
         let runningResult = await running.value
         let pendingResult = await pending.value
-        XCTAssertEqual(runningResult, .executed)
+        guard case .outcomeUnknown = runningResult else {
+            return XCTFail("An in-flight action invalidated by disconnect must report an unknown outcome.")
+        }
         XCTAssertEqual(pendingResult, .cancelled)
         XCTAssertEqual(applied, [1])
+    }
+
+    func testNewGenerationWaitsUntilInvalidatedOperationUnwinds() async throws {
+        let pipeline = EntityCommandPipeline()
+        var applied: [String] = []
+        let old = Task {
+            await pipeline.execute(entityID: "light.test") {
+                applied.append("old-start")
+                try? await Task.sleep(for: .milliseconds(60))
+                applied.append("old-end")
+                return .executed
+            }
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        pipeline.invalidatePending()
+        let fresh = Task {
+            await pipeline.execute(entityID: "light.test") {
+                applied.append("fresh")
+                return .executed
+            }
+        }
+        let oldResult = await old.value
+        let freshResult = await fresh.value
+        guard case .outcomeUnknown = oldResult else {
+            return XCTFail("Old in-flight action must be reported as uncertain.")
+        }
+        XCTAssertEqual(freshResult, .executed)
+        XCTAssertEqual(applied, ["old-start", "old-end", "fresh"])
     }
 
 }
