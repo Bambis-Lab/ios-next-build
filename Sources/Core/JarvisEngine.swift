@@ -132,6 +132,7 @@ final class JarvisEngine {
     private(set) var wakeListeningRequested = false
     private(set) var applicationIsActive = true
     private(set) var audioInterrupted = false
+    private(set) var externalAudioBusy = false
     private(set) var lowPowerModeEnabled = ProcessInfo.processInfo.isLowPowerModeEnabled
     private(set) var thermalState = ProcessInfo.processInfo.thermalState
 
@@ -155,7 +156,7 @@ final class JarvisEngine {
         JarvisRuntimePolicy(
             applicationActive: applicationIsActive,
             wakeRequested: wakeListeningRequested,
-            interrupted: audioInterrupted
+            interrupted: audioInterrupted || externalAudioBusy
         )
     }
 
@@ -188,6 +189,22 @@ final class JarvisEngine {
             return
         }
         scheduleRestart(after: 0.15)
+    }
+
+    /// Temporarily yields microphone ownership to chat playback/recording.
+    /// Wake listening resumes only when the last external audio lease ends.
+    func setExternalAudioBusy(_ busy: Bool) {
+        guard externalAudioBusy != busy else { return }
+        externalAudioBusy = busy
+        if busy {
+            restartTask?.cancel()
+            restartTask = nil
+            stopAudioSession()
+            resetWakeDetection()
+            state = .idle
+        } else if wakeListeningRequested && applicationIsActive && !audioInterrupted {
+            scheduleRestart(after: 0.25)
+        }
     }
 
     func clearLastIntent() {
