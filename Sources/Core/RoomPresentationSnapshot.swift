@@ -29,6 +29,8 @@ extension AppModel {
         inArea areaID: String,
         using index: HomeAssistantLookupIndex
     ) -> RoomPresentationSnapshot {
+        let trace = IOSNextPerformance.begin("Room.PresentationSnapshot")
+        defer { IOSNextPerformance.end("Room.PresentationSnapshot", trace) }
         let entityIDs = index.entityIDs(inArea: areaID)
         let deviceIDs = index.deviceIDs(inArea: areaID)
         let areaEntities = entityIDs.compactMap(entity(withID:)).sorted {
