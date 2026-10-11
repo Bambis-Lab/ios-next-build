@@ -13,7 +13,7 @@ struct FactoryWorldView: View {
     @State private var draggedStartOffset: CGSize = .zero
     @State private var showBuildingList = false
 
-    private let pack = FactoryWorldBundle.load()
+    private let pack = FactoryWorldStaticBundle.load()
     private let minimumZoom: CGFloat = 0.85
     private let maximumZoom: CGFloat = 2.5
 
@@ -45,7 +45,7 @@ struct FactoryWorldView: View {
 
             if let pack {
                 let theme = colorScheme == .dark ? "dark" : "light"
-                if let composite = FactoryWorldBundle.composite(for: theme) {
+                if let composite = FactoryWorldStaticBundle.composite(for: theme) {
                     cityViewport(composite, pack: pack)
                     zoomControls
                     Text("15 Gebäude · maßstabsgetreues Blender-Gesamtbild · keine Live-Simulation")
@@ -116,7 +116,7 @@ struct FactoryWorldView: View {
     }
 
     @ViewBuilder
-    private func cityViewport(_ image: UIImage, pack: FactoryWorldPack) -> some View {
+    private func cityViewport(_ image: UIImage, pack: FactoryWorldStaticPack) -> some View {
         let renderWidth = pack.camera.resolution_px[0]
         let renderHeight = pack.camera.resolution_px[1]
         GeometryReader { geometry in

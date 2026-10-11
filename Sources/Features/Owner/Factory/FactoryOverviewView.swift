@@ -18,7 +18,7 @@ struct FactoryOverviewView: View {
         OwnerPage {
             LazyVStack(alignment: .leading, spacing: 22) {
                 hero
-                if FactoryWorldBundle.available {
+                if FactoryWorldStaticBundle.available {
                     FactoryWorldView()
                 }
                 FactoryCommandDeck(

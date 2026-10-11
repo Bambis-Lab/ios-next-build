@@ -17,7 +17,7 @@ struct FactoryStandaloneView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
 
-                if FactoryWorldBundle.available {
+                if FactoryWorldStaticBundle.available {
                     FactoryWorldView()
                 }
                 FactoryCommandDeck(factoryConnected: factory.phase == .connected,
