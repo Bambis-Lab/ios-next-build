@@ -41,12 +41,15 @@ struct FactoryWorkspaceCollection: Equatable {
             ISO8601DateFormatter().date(from: $0)
         }
         let freshness = root["freshness"] as? [String: Any]
+        let observedStale = when.map { date in
+            date > Date() || Date().timeIntervalSince(date) > 300
+        } ?? true
         return Self(
             source: source,
             observedAt: when,
-            stale: (freshness?["stale"] as? Bool) ?? true,
+            stale: (freshness?["stale"] as? Bool ?? true) || observedStale,
             records: records,
-            nextCursor: (root["next_cursor"] as? String)?.prefix(512).description
+            nextCursor: (root["next_cursor"] as? String).map { String($0.prefix(512)) }
         )
     }
 }
