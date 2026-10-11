@@ -35,8 +35,9 @@ checks={
                       and 'indexedEntities(inArea: areaID)' in app,
     "color_queue_serial": 'await next.apply(next.value)' in queue
                           and 'pending = Pending(value: value' in queue,
-    "color_queue_integrated": 'colorCommandQueue.submit(rgb)' in light,
-    "no_duplicate_white_action": 'selectedColor = .white' not in light,
+    "color_queue_integrated": 'colorCommandQueue.submit(desired)' in light,
+
+    "no_duplicate_white_action": 'submitColor(.white(' in light and 'ignoredSynchronizedColor' in light,
     "owner_direct_route": "FactoryOwnerDirectoryView(" in owner
                           and "if factoryEmbedded" in owner
                           and 'AdminAreaView(appModel: appModel, factoryEmbedded: true)' in factory,
@@ -49,7 +50,8 @@ checks={
                        and '--nico-large-type-acceptance' in fixture,
     "queue_tests": 'testLatestValueIsNotLostWhilePreviousWriteIsInFlight' in tests,
     "ui_tests": 'testCompactRoomTilesAndCabinetColorLongPress' in ui
-                and 'testDarkCompactRoomLayout' in ui,
+                and 'testDarkCompactRoomLayout' in ui
+                and 'reveal(desk, in: app)' in ui,
 }
 for name, passed in checks.items():
     print(f"NICO_FAI_{name.upper()}={'PASS' if passed else 'FAIL'}")
