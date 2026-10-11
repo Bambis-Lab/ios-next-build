@@ -8,6 +8,7 @@ final class IOSNextRuntime {
     let chatModel: ChatModel
     let runnerModel: RunnerControlModel
     let liveOperationsModel: LiveOperationsModel
+    let factoryWorkspace: FactoryWorkspaceCoordinator
 
     private var runnerPollingTask: Task<Void, Never>?
     private var runnerPollingSources: Set<String> = []
@@ -16,6 +17,7 @@ final class IOSNextRuntime {
         self.chatModel = ChatModel()
         self.runnerModel = RunnerControlModel()
         self.liveOperationsModel = LiveOperationsModel()
+        self.factoryWorkspace = FactoryWorkspaceCoordinator()
     }
 
     func setRunnerPollingActive(_ source: String, active: Bool) {
