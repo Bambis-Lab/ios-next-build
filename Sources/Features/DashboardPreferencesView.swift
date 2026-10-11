@@ -29,7 +29,8 @@ struct DashboardPreferencesView: View {
                 }
 
                 Section("Reihenfolge") {
-                    ForEach(Array(orderedOptions.enumerated()), id: \.element.id) { index, option in
+                    ForEach(orderedOptions) { option in
+                        let index = orderedOptions.firstIndex(where: { $0.id == option.id }) ?? 0
                         HStack(spacing: 12) {
                             Label(option.title, systemImage: option.symbol)
                             Spacer()
