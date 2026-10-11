@@ -1,0 +1,150 @@
+import SwiftUI
+
+/// One navigational owner for the historical Master/Owner/Runner/Live modules.
+/// Backend adapters remain separate until the Factory exposes equivalent APIs.
+struct FactoryWorkspaceModulesView: View {
+    @State private var runtime = IOSNextRuntime.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            IOSNextSectionHeader(
+                title: "Factory Workspace",
+                subtitle: "Alle Verwaltungsbereiche an einem Ort · Datenquellen getrennt geprüft",
+                symbol: "square.grid.2x2.fill"
+            )
+            NavigationLink {
+                FactoryWorkspaceSourcesView()
+            } label: {
+                module("Daten & Schnittstellen", "Factory MCP, Verfügbarkeit und Herkunft", "network")
+            }
+            NavigationLink {
+                RunnerDashboardView(model: runtime.runnerModel)
+            } label: {
+                module("Runner & Infrastruktur", "Runner Control · eigene Berechtigung", "server.rack")
+            }
+            NavigationLink {
+                LiveOperationsView()
+            } label: {
+                module("Live-Vorgänge", "Master Runtime Ereignisse · bestehender Live-Adapter", "waveform.path.ecg")
+            }
+            NavigationLink {
+                AdminAreaView()
+            } label: {
+                module("Owner, Projekte & Betrieb", "Tickets, CI, Backups, Releases · gesicherter Owner-Zugang", "person.badge.key.fill")
+            }
+            NavigationLink {
+                FactoryWorkspaceGovernanceView()
+            } label: {
+                module("Governance & Sicherheit", "Factory-Capabilities und wirksame Aktionssperren", "lock.shield.fill")
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("factory-workspace-modules")
+    }
+
+    private func module(_ title: String, _ subtitle: String, _ symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title3).foregroundStyle(.indigo)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline).foregroundStyle(.primary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+        }
+        .padding(16)
+        .ios27ContentSurface(radius: 19)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct FactoryWorkspaceSourcesView: View {
+    @State private var runtime = IOSNextRuntime.shared
+    private var workspace: FactoryWorkspaceCoordinator { runtime.factoryWorkspace }
+
+    var body: some View {
+        List {
+            Section("Factory MCP") {
+                LabeledContent("Verbindung", value: workspace.connection.phase.title)
+                LabeledContent("Entdeckte Tools", value: "\(workspace.discoveredTools.count)")
+                LabeledContent("Neue Workspace-API", value: workspace.canReadWorkspace ? "Verfügbar" : "Noch nicht verfügbar")
+                if let overview = workspace.overview {
+                    LabeledContent("Quelle", value: overview.source)
+                    LabeledContent("Status", value: overview.status)
+                    LabeledContent("Schema", value: overview.schemaVersion)
+                    LabeledContent("Aktualität", value: workspace.isOverviewCurrent ? "Aktuell" : "Veraltet / unbekannt")
+                } else {
+                    Text("Ohne veröffentlichten Workspace-Vertrag bleiben die bisherigen autorisierten Module verfügbar.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Datenherkunft") {
+                if workspace.sourceStates.isEmpty {
+                    ContentUnavailableView("Noch keine Factory-Daten",
+                        systemImage: "network",
+                        description: Text("Die Factory benötigt eine autorisierte Sitzung."))
+                } else {
+                    ForEach(workspace.sourceStates) { item in
+                        LabeledContent(item.title, value: item.status)
+                    }
+                }
+            }
+
+            if let error = workspace.overviewError {
+                Section("Eingeschränkte Quelle") {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .navigationTitle("Factory-Daten")
+        .refreshable { await workspace.refresh() }
+        .task {
+            if workspace.connection.phase == .readyForRefresh {
+                await workspace.refresh()
+            }
+        }
+    }
+}
+
+/// A capability advertised by the server is NOT an action authorization.
+struct FactoryWorkspaceGovernanceView: View {
+    @State private var runtime = IOSNextRuntime.shared
+    private var workspace: FactoryWorkspaceCoordinator { runtime.factoryWorkspace }
+
+    private var advertisedCapabilities: [(String, Bool)] {
+        guard let payload = workspace.connection.snapshot?.rawReports["capabilities_get"],
+              let data = payload.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let capabilities = json["capabilities"] as? [String: Any] else { return [] }
+        return capabilities.compactMap { name, value -> (String, Bool)? in
+            guard let active = value as? Bool else { return nil }
+            return (name, active)
+        }.sorted { $0.0 < $1.0 }
+    }
+
+    var body: some View {
+        List {
+            Section("Factory-Berechtigungsinformationen") {
+                if advertisedCapabilities.isEmpty {
+                    Label("Keine authentifizierten Capability-Daten", systemImage: "lock.shield")
+                } else {
+                    ForEach(advertisedCapabilities, id: \.0) { name, active in
+                        LabeledContent(name, value: active ? "Vom Backend unterstützt" : "Deaktiviert")
+                    }
+                }
+            }
+            Section("Aktionsfreigabe") {
+                Label("Diese App ruft keine allgemeinen Factory-Schreibtools auf.",
+                      systemImage: "hand.raised.fill")
+                Text("Eine Backend-Capability ist keine persönliche Freigabe. Owner- und Runner-Aktionen behalten ihre eigenen Geräte-, Rollen- und Bestätigungskontrollen.")
+                    .font(.footnote)
+            }
+        }
+        .navigationTitle("Factory-Sicherheit")
+        .accessibilityIdentifier("factory-workspace-governance")
+    }
+}
