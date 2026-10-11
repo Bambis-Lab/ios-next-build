@@ -47,6 +47,9 @@ final class AppModel {
     private var entityIndexByID: [String: Int] = [:]
     private var pendingStateChanges: [String: HomeAssistantStateChange] = [:]
     private var stateFlushTask: Task<Void, Never>?
+    @ObservationIgnored private let deviceCommands = EntityCommandPipeline()
+    private var entityStateRevisions: [String: UInt64] = [:]
+    private var connectionGeneration: UInt64 = 0
     private var networkAvailable = true
     private var applicationIsActive = true
 
@@ -142,6 +145,8 @@ final class AppModel {
         persist: Bool = true,
         failurePrefix: String? = nil
     ) async {
+        connectionGeneration &+= 1
+        deviceCommands.invalidatePending()
         reconnectTask?.cancel()
         reconnectTask = nil
         eventTask?.cancel()
@@ -180,6 +185,9 @@ final class AppModel {
     }
 
     func disconnect() {
+        connectionGeneration &+= 1
+        deviceCommands.invalidatePending()
+        entityStateRevisions.removeAll()
         shouldReconnect = false
         currentConfiguration = nil
         eventTask?.cancel()
@@ -634,6 +642,7 @@ final class AppModel {
         var removedEntityIDs: Set<String> = []
 
         for change in changes {
+            entityStateRevisions[change.entityID, default: 0] &+= 1
             if let newState = change.newState {
                 if let index = entityIndexByID[change.entityID], entities.indices.contains(index) {
                     entities[index] = newState
@@ -718,6 +727,7 @@ final class AppModel {
     }
 
     private func replaceEntities(with states: [HomeAssistantEntity]) {
+        entityStateRevisions.removeAll()
         entities = states
         sortEntities()
     }
@@ -725,6 +735,23 @@ final class AppModel {
     private func sortEntities() {
         entities.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         entityIndexByID = Dictionary(uniqueKeysWithValues: entities.enumerated().map { ($0.element.entityID, $0.offset) })
+    }
+
+    private nonisolated static func coalescingKey(
+        domain: String, service: String, data: [String: JSONValue]
+    ) -> String? {
+        // Only absolute, replaceable setpoints may be coalesced. In particular,
+        // never deduplicate a toggle, lock, scene, app launch or relative seek.
+        if domain == "light" && service == "turn_on" {
+            if ["rgb_color", "color_temp_kelvin", "effect"].contains(where: { data[$0] != nil }) {
+                return "light.appearance"
+            }
+            if data["brightness_pct"] != nil { return "light.brightness" }
+        }
+        if domain == "media_player" && service == "volume_set" { return "media.volume" }
+        if domain == "climate" && service == "set_temperature" { return "climate.temperature" }
+        if domain == "cover" && service == "set_cover_position" { return "cover.position" }
+        return nil
     }
 
     private func performService(
@@ -735,29 +762,42 @@ final class AppModel {
         optimisticState: String? = nil,
         feedback: IOSNextFeedbackEvent? = nil
     ) async {
-        guard entity.isAvailable, !activeActionEntityIDs.contains(entity.entityID) else { return }
-        activeActionEntityIDs.insert(entity.entityID)
-        lastActionError = nil
-        defer { activeActionEntityIDs.remove(entity.entityID) }
+        guard entity.isAvailable else { return }
+        let entityID = entity.entityID
+        let generation = connectionGeneration
+        let key = Self.coalescingKey(domain: domain, service: service, data: data)
+        _ = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
+            guard generation == connectionGeneration,
+                  entity(withID: entityID)?.isAvailable == true else { return }
+            activeActionEntityIDs.insert(entityID)
+            lastActionError = nil
+            defer { activeActionEntityIDs.remove(entityID) }
+            let revisionAtDispatch = entityStateRevisions[entityID, default: 0]
 
-        do {
-            try await client.callService(
-                domain: domain,
-                service: service,
-                targetEntityID: entity.entityID,
-                serviceData: data
-            )
-            if let optimisticState,
-               let index = entityIndexByID[entity.entityID],
-               entities.indices.contains(index) {
-                entities[index] = entity.updating(state: optimisticState)
+            do {
+                try await client.callService(
+                    domain: domain, service: service, targetEntityID: entityID,
+                    serviceData: data
+                )
+                // Never put attributes from the old button/tile snapshot back
+                // over a newer HA WebSocket state change.
+                if let optimisticState,
+                   generation == connectionGeneration,
+                   entityStateRevisions[entityID, default: 0] == revisionAtDispatch,
+                   let index = entityIndexByID[entityID],
+                   entities.indices.contains(index),
+                   entities[index].entityID == entityID {
+                    entities[index] = entities[index].updating(state: optimisticState)
+                }
+                if generation == connectionGeneration, let feedback {
+                    IOSNextFeedbackCenter.shared.play(feedback)
+                }
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                }
             }
-            if let feedback {
-                IOSNextFeedbackCenter.shared.play(feedback)
-            }
-        } catch {
-            lastActionError = error.localizedDescription
-            IOSNextFeedbackCenter.shared.play(.error)
         }
     }
 
