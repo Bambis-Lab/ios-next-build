@@ -129,7 +129,7 @@ struct AdminAreaView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Text("Schon vor der Anmeldung erreichbar. Live-Daten und Aktionen erst nach bestätigter Owner-Berechtigung.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.82))
                 }
                 .padding(.bottom, 4)
 
@@ -161,7 +161,7 @@ struct AdminAreaView: View {
                     .accessibilityIdentifier("factory-preview-entry")
                     Text("Factory und Runner können separat verbunden werden. Keine Freigabe ohne Anmeldung.")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.78))
                 }
                 .padding(17)
                 .ios27ContentSurface(radius: 22)
@@ -176,12 +176,27 @@ struct AdminAreaView: View {
     }
 
     private func lockedSurface(message: String, authenticating: Bool) -> some View {
-        IOSNextControlCenterLockedSurface(
-            message: message,
-            isAuthenticating: authenticating,
-            onUnlock: { Task { await model.unlock() } },
-            onConfigure: { isPresentingConfiguration = true }
-        )
+        VStack(spacing: 12) {
+            IOSNextControlCenterLockedSurface(
+                message: message,
+                isAuthenticating: authenticating,
+                onUnlock: { Task { await model.unlock() } },
+                onConfigure: { isPresentingConfiguration = true }
+            )
+                .frame(maxHeight: .infinity)
+            Label(
+                "Owner-Aktionen bleiben bis zur bestätigten Geräteauthentifizierung und Serverfreigabe gesperrt.",
+                systemImage: "lock.shield.fill"
+            )
+                .font(.footnote)
+                .foregroundStyle(Color.primary.opacity(0.82))
+                .frame(maxWidth: 670, alignment: .leading)
+                .padding(16)
+                .ios27ContentSurface(radius: 18)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 18)
+                .accessibilityIdentifier("owner-locked-security-note")
+        }
     }
 
     private func requestClose() {
