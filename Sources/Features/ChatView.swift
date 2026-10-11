@@ -53,6 +53,7 @@ struct ChatView: View {
                     }
                     Button("Lokalen Verlauf löschen", systemImage: "trash", role: .destructive) {
                         chatModel.messages.removeAll(keepingCapacity: false)
+                        ChatMediaThumbnailCache.shared.clear()
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
