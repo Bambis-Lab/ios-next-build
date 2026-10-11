@@ -61,12 +61,12 @@ jobs:
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build
 
-      - name: Boot iPhone 18 Pro Max (all simulator commands bounded)
-        timeout-minutes: 3
+      - name: Resolve iPhone 18 Pro Max destination (Xcode owns test-time boot)
+        timeout-minutes: 1
         shell: bash
         run: |
           set -euo pipefail
-          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/NicoFactoryBoot.log
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/NicoFactoryBoot.log
 
       - name: Compile once without UI tests (bounded)
         timeout-minutes: 11
@@ -80,6 +80,50 @@ jobs:
             -derivedDataPath build/NicoFactoryDerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build-for-testing 2>&1 | tee build/NicoFactoryBuild.log
+
+      - name: Build unsigned device IPA candidate (no signing or release)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="build/IOSNext-IPA-Candidate"
+          DERIVED="$OUT/DerivedData"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/ipa-root/Payload"
+          xcodebuild build \
+            -project IOSNext.xcodeproj \
+            -scheme IOSNext \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" MARKETING_VERSION=1.6.2 CURRENT_PROJECT_VERSION=25
+          APP="$DERIVED/Build/Products/Release-iphoneos/IOSNext.app"
+          test -d "$APP"
+          test -f "$APP/Info.plist"
+          EXEC_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          test -x "$APP/$EXEC_NAME"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "de.nicofroeba16.iosnext"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "1.6.2"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "25"
+          test "$(lipo -archs "$APP/$EXEC_NAME")" = "arm64"
+          ditto "$APP" "$OUT/ipa-root/Payload/IOSNext.app"
+          (cd "$OUT/ipa-root" && zip -qry "$OUT/IOSNext-Free-unsigned.ipa" Payload)
+          unzip -t "$OUT/IOSNext-Free-unsigned.ipa"
+          shasum -a 256 "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.sha256"
+          stat -f '%z' "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.size"
+          cat > "$OUT/BUILD_OK.txt" <<EOF
+          IOSNEXT_UNSIGNED_IPA_BUILD=PASS
+          VERSION=1.6.2
+          BUILD=25
+          BUNDLE_ID=de.nicofroeba16.iosnext
+          ARCH=arm64
+          SIGNED=NO
+          RELEASE=NO
+          SOURCE_COMMIT=$GITHUB_SHA
+          EOF
+          cat "$OUT/BUILD_OK.txt"
 
       - name: Targeted iPhone tests (bounded; fail fast)
         timeout-minutes: 5
@@ -126,50 +170,6 @@ jobs:
             -parallel-testing-enabled NO "${scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
-
-      - name: Build unsigned device IPA candidate (no signing or release)
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUT="build/IOSNext-IPA-Candidate"
-          DERIVED="$OUT/DerivedData"
-          rm -rf "$OUT"
-          mkdir -p "$OUT/ipa-root/Payload"
-          xcodebuild build \
-            -project IOSNext.xcodeproj \
-            -scheme IOSNext \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath "$DERIVED" \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" MARKETING_VERSION=1.6.2 CURRENT_PROJECT_VERSION=25
-          APP="$DERIVED/Build/Products/Release-iphoneos/IOSNext.app"
-          test -d "$APP"
-          test -f "$APP/Info.plist"
-          EXEC_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
-          test -x "$APP/$EXEC_NAME"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "de.nicofroeba16.iosnext"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "1.6.2"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "25"
-          test "$(lipo -archs "$APP/$EXEC_NAME")" = "arm64"
-          ditto "$APP" "$OUT/ipa-root/Payload/IOSNext.app"
-          (cd "$OUT/ipa-root" && zip -qry "$OUT/IOSNext-Free-unsigned.ipa" Payload)
-          unzip -t "$OUT/IOSNext-Free-unsigned.ipa"
-          shasum -a 256 "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.sha256"
-          stat -f '%z' "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.size"
-          cat > "$OUT/BUILD_OK.txt" <<EOF
-          IOSNEXT_UNSIGNED_IPA_BUILD=PASS
-          VERSION=1.6.2
-          BUILD=25
-          BUNDLE_ID=de.nicofroeba16.iosnext
-          ARCH=arm64
-          SIGNED=NO
-          RELEASE=NO
-          SOURCE_COMMIT=$GITHUB_SHA
-          EOF
-          cat "$OUT/BUILD_OK.txt"
 
       - name: Full-suite iPad acceptance (manual full only)
         if: ${{ inputs.suite == 'full' }}
