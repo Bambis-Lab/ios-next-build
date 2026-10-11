@@ -61,7 +61,7 @@ def main():
             if not states or states[0] != "Booted":
                 raise
 
-    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], 60)
+    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], 105)
     if env_file:
         with open(env_file, "a", encoding="utf-8") as stream:
             stream.write(f"SIM_ID={udid}\n")
