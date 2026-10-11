@@ -13,9 +13,11 @@ struct LightControlSheet: View {
     @State private var colorTemperature = 3000.0
     @State private var favorites: [LightColorFavorite] = []
     @State private var selectedSegments: Set<Int> = []
+    @State private var colorCommandQueue = LatestValueCommandQueue<HomeAssistantLightColor>()
+    @State private var isSynchronizingColor = false
 
     private var entity: HomeAssistantEntity? {
-        appModel.entities.first { $0.entityID == entityID }
+        appModel.entity(withID: entityID)
     }
 
     private var segmentBridge: LightSegmentBridgeSnapshot? {
@@ -119,7 +121,22 @@ struct LightControlSheet: View {
                 ColorPicker("Lichtfarbe", selection: $selectedColor, supportsOpacity: false)
                     .disabled(!entity.isAvailable)
                     .onChange(of: selectedColor) { _, value in
-                        Task { await applyColor(value, entity: entity) }
+                        guard !isSynchronizingColor,
+                              entity.isAvailable,
+                              let rgb = value.homeAssistantLightColor else { return }
+                        // State sync must not accidentally send a service call.
+                        if let existing = entity.lightColor {
+                            let distance = abs(existing.red - rgb.red)
+                                + abs(existing.green - rgb.green)
+                                + abs(existing.blue - rgb.blue)
+                            if distance < 0.003 { return }
+                        }
+                        colorCommandQueue.submit(rgb) { desired in
+                            await applyColor(
+                                Color(red: desired.red, green: desired.green, blue: desired.blue),
+                                entity: entity
+                            )
+                        }
                     }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -303,7 +320,8 @@ struct LightControlSheet: View {
     }
 
     private func applyWhite(_ entity: HomeAssistantEntity) async {
-        selectedColor = .white
+        // White is a direct color-temperature/segment operation. Do not also
+        // enqueue an RGB update through ColorPicker's onChange observer.
         if !selectedSegments.isEmpty {
             await appModel.setLightSegments(
                 indices: Array(selectedSegments),
@@ -334,7 +352,13 @@ struct LightControlSheet: View {
         colorTemperature = entity.colorTemperatureKelvin ?? colorTemperature
         favorites = LightColorFavoritesStore.favorites(for: entity.entityID)
         if let color = entity.lightColor {
+            isSynchronizingColor = true
             selectedColor = Color(red: color.red, green: color.green, blue: color.blue)
+            // The next user-driven picker value is handled normally.
+            Task { @MainActor in
+                await Task.yield()
+                isSynchronizingColor = false
+            }
         }
     }
 }

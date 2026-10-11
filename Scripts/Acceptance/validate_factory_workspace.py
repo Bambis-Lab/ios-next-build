@@ -48,7 +48,7 @@ required = {
     "standalone live preserved": 'LiveOperationsView()' in modules,
     "standalone runner preserved": 'RunnerDashboardView(model: runtime.runnerModel)' in modules,
     "owner auth not bypassed":
-       'AdminAreaView(appModel: appModel)' in modules
+       'AdminAreaView(appModel: appModel, factoryEmbedded: true)' in modules
        and 'case .unlocked:' in admin
        and 'OwnerControlView(' in admin
        and 'lockedSurface(message:' in admin,

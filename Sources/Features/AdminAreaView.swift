@@ -4,6 +4,7 @@ struct AdminAreaView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let appModel: AppModel?
+    let factoryEmbedded: Bool
     @State private var model = AdminControlModel()
     @State private var runtime = IOSNextRuntime.shared
     @State private var isPresentingConfiguration = false
@@ -11,42 +12,21 @@ struct AdminAreaView: View {
     @State private var isLockingControlCenter = false
     @State private var dismissAfterLock = false
 
-    init(appModel: AppModel? = nil) {
+    init(appModel: AppModel? = nil, factoryEmbedded: Bool = false) {
         self.appModel = appModel
+        self.factoryEmbedded = factoryEmbedded
     }
 
     var body: some View {
         ZStack {
             OwnerBackground()
-            NavigationStack {
-                content
-                    .navigationTitle("Control Center")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Schließen") { requestClose() }
-                                .disabled(isLockingControlCenter)
-                        }
-                        if case .unlocked = model.state {
-                            ToolbarItemGroup(placement: .topBarTrailing) {
-                                NavigationLink {
-                                    OwnerNotificationsView(model: model)
-                                } label: {
-                                    Image(systemName: model.ownerAttentionCount > 0 || model.ownerOpenTicketCount > 0 ? "bell.badge.fill" : "bell")
-                                }
-                                .accessibilityLabel("Owner-Meldungen")
-
-                                Button("Sperren", systemImage: "lock.fill") {
-                                    dismissAfterLock = false
-                                    isLockingControlCenter = true
-                                }
-                                .labelStyle(.iconOnly)
-                                .disabled(isLockingControlCenter)
-                            }
-                        }
-                    }
+            if factoryEmbedded {
+                ownerContent
+            } else {
+                NavigationStack {
+                    ownerContent
+                }
             }
-            .background(Color.clear)
         }
         .interactiveDismissDisabled(model.state == .unlocking || isLockingControlCenter)
         .alert("Owner-Aktion fehlgeschlagen", isPresented: Binding(
@@ -82,6 +62,35 @@ struct AdminAreaView: View {
         }
     }
 
+    private var ownerContent: some View {
+        content
+                    .navigationTitle(factoryEmbedded ? "Owner & Projekte" : "Control Center")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Schließen") { requestClose() }
+                                .disabled(isLockingControlCenter)
+                        }
+                        if case .unlocked = model.state {
+                            ToolbarItemGroup(placement: .topBarTrailing) {
+                                NavigationLink {
+                                    OwnerNotificationsView(model: model)
+                                } label: {
+                                    Image(systemName: model.ownerAttentionCount > 0 || model.ownerOpenTicketCount > 0 ? "bell.badge.fill" : "bell")
+                                }
+                                .accessibilityLabel("Owner-Meldungen")
+
+                                Button("Sperren", systemImage: "lock.fill") {
+                                    dismissAfterLock = false
+                                    isLockingControlCenter = true
+                                }
+                                .labelStyle(.iconOnly)
+                                .disabled(isLockingControlCenter)
+                            }
+                        }
+                    }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch model.state {
@@ -103,12 +112,20 @@ struct AdminAreaView: View {
         case .unlocked:
             IOSNextControlCenterLockHost(isLocking: isLockingControlCenter, onFinished: finishLock) {
                 IOSNextControlCenterUnlockHost {
-                    OwnerControlView(
-                        model: model,
-                        capabilities: model.ownerCapabilityRegistry,
-                        appModel: appModel,
-                        runnerModel: runtime.runnerModel
-                    )
+                    if factoryEmbedded {
+                        FactoryOwnerDirectoryView(
+                            model: model,
+                            capabilities: model.ownerCapabilityRegistry,
+                            appModel: appModel
+                        )
+                    } else {
+                        OwnerControlView(
+                            model: model,
+                            capabilities: model.ownerCapabilityRegistry,
+                            appModel: appModel,
+                            runnerModel: runtime.runnerModel
+                        )
+                    }
                 }
             }
         case let .failed(message):

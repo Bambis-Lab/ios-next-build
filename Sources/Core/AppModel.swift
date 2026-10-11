@@ -582,8 +582,21 @@ final class AppModel {
             .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
+    /// Constant-time entity resolution after sortEntities builds the ID index.
+    /// Avoid repeating linear array searches on every light/room redraw.
+    func entity(withID entityID: String) -> HomeAssistantEntity? {
+        if let index = entityIndexByID[entityID],
+           entities.indices.contains(index),
+           entities[index].entityID == entityID {
+            return entities[index]
+        }
+        // A just-injected fixture or an initial restore can precede index
+        // construction. Preserve correctness without caching a stale match.
+        return entities.first { $0.entityID == entityID }
+    }
+
     func entities(inArea areaID: String) -> [HomeAssistantEntity] {
-        entities.filter { resolvedAreaID(for: $0.entityID) == areaID }
+        indexedEntities(inArea: areaID)
     }
 
     private func observeStateChanges() {
@@ -735,7 +748,8 @@ final class AppModel {
                 serviceData: data
             )
             if let optimisticState,
-               let index = entities.firstIndex(where: { $0.id == entity.id }) {
+               let index = entityIndexByID[entity.entityID],
+               entities.indices.contains(index) {
                 entities[index] = entity.updating(state: optimisticState)
             }
             if let feedback {

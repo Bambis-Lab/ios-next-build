@@ -47,7 +47,7 @@ struct FactoryWorkspaceModulesView: View {
                 module("Live-Vorgänge", "Master Runtime Ereignisse · bestehender Live-Adapter", "waveform.path.ecg")
             }
             NavigationLink {
-                AdminAreaView(appModel: appModel)
+                AdminAreaView(appModel: appModel, factoryEmbedded: true)
             } label: {
                 module("Owner, Projekte & Betrieb", "Tickets, CI, Backups, Releases · gesicherter Owner-Zugang", "person.badge.key.fill")
             }
