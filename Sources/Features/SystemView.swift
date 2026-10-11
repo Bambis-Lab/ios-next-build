@@ -57,7 +57,7 @@ struct SystemView: View {
                     }
                 }
                 NavigationLink {
-                    FactoryStandaloneView()
+                    FactoryStandaloneView(appModel: appModel)
                 } label: {
                     Label("Factory", systemImage: "network")
                 }
