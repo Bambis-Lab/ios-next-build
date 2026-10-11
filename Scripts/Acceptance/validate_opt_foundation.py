@@ -36,15 +36,16 @@ color=read("Sources/Design/LightControlSheet.swift")
 checks={
     "xcode_dispatch_is_scoped": "github.event_name == 'workflow_dispatch'" in workflow
                                 and "refs/heads/acceptance/iosnext-opt-smoke-105" in workflow,
-    "bounded_job": "timeout-minutes: 18" in workflow,
-    "bounded_test": "--timeout-seconds 240" in workflow,
-    "bounded_compile": "--timeout-seconds 660" in workflow,
+    "no_custom_job_timeout": "timeout-minutes:" not in workflow,
+    "no_custom_test_timeout": "--timeout-seconds" not in workflow,
+    "no_custom_compile_timeout": "--timeout-seconds" not in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
     "regular_feature_push_stays_portable": "feature/ios-next-opt-01-14-foundation-162" in workflow
                                            and "needs: portable" in workflow,
-    "watchdog_group_kill": "os.killpg(child.pid, signal.SIGKILL)" in watchdog
-                           and "start_new_session=True" in watchdog,
+    "no_elapsed_time_kills": "communicate(timeout=" not in watchdog
+                           and "wait(timeout=" not in watchdog
+                           and "os.killpg(" not in watchdog,
     "lazy_scroll_test": "reveal(desk, in: app)" in tests
                         and "Nico-Accessibility-Hierarchy-ON-FAIL" in tests,
     "entity_serial_lane": "deviceCommands.execute(entityID:" in model,
