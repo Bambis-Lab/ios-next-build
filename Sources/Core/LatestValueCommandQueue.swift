@@ -21,7 +21,10 @@ final class LatestValueCommandQueue<Value: Sendable> {
     func submit(_ value: Value, apply: @escaping @MainActor (Value) async -> Void) {
         pending = Pending(value: value, apply: apply)
         guard worker == nil else { return }
-        worker = Task { [weak self] in await self?.drain() }
+        worker = Task { [weak self] in
+            guard let self else { return }
+            await self.drain()
+        }
     }
 
     private func drain() async {
