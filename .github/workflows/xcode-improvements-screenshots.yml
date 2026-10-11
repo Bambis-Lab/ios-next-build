@@ -1,0 +1,103 @@
+name: iOS Next 1.6.2 Improvements Screenshots
+
+on:
+  push:
+    branches:
+      - visual/ios-next-1.6.2-improvements-xcode27
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-next-162-improvement-gallery-xcode27
+  cancel-in-progress: false
+
+jobs:
+  visual-gallery:
+    uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
+    with:
+      runs-on: xcode-27
+      artifact-name: IOSNext-1.6.2-Improvements-iPhone18ProMax-LightDark
+      artifact-path: build/screenshots
+      xcode-command: |
+        set -euo pipefail
+        echo "=== ISOLATED READ-ONLY SCREENSHOT SOURCE SCOPE ==="
+        BASE="32d436ff6c9d71a5618b6106a4672dde4a639e1e"
+        git fetch --no-tags --depth=1 origin "$BASE"
+        BASE="$BASE" python3 - <<'PY'
+        import os, subprocess
+        changed=set(subprocess.check_output(
+          ["git", "diff", "--name-only", os.environ["BASE"]+"..HEAD"],
+          text=True).splitlines())
+        allowed={
+          ".github/workflows/xcode-improvements-screenshots.yml",
+          "UITests/ImprovementsGalleryUITests.swift",
+          "Scripts/package_improvement_screenshots.py"
+        }
+        assert changed == allowed, f"UNAUTHORIZED_SCREENSHOT_CHANGES: {changed ^ allowed}"
+        print("IMPROVEMENTS_VISUAL_SCOPE=PASS files=3")
+        PY
+
+        xcodebuild -version
+        test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+        if ! command -v xcodegen >/dev/null 2>&1; then
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+        fi
+        bash Scripts/prepare_wireguard_dependency.sh
+        export CM_COMMIT="$(git rev-parse HEAD)"
+        export EXPECTED_VERSION="1.6.2"
+        export EXPECTED_BUILD="25"
+        bash Scripts/prepare_free_sideload_project.sh
+
+        mkdir -p build/screenshots
+        SIM_ID="$(xcrun simctl list devices available -j | python3 -c '
+        import json, sys
+        d=json.load(sys.stdin)
+        choices=[device["udid"] for runtime, devices in d["devices"].items()
+                 if "iOS-27-0" in runtime
+                 for device in devices
+                 if device["name"] == "iPhone 18 Pro Max" and device.get("isAvailable", True)]
+        assert len(choices) >= 1, "No iPhone 18 Pro Max iOS27 simulator"
+        print(choices[0])
+        ')"
+        echo "VISUAL_DEVICE=iPhone 18 Pro Max iOS 27.0"
+        if ! xcrun simctl list devices booted | grep -q "$SIM_ID"; then
+          xcrun simctl boot "$SIM_ID"
+        fi
+        xcrun simctl bootstatus "$SIM_ID" -b
+
+        for APPEARANCE in light dark; do
+          echo "=== VISUAL_SCREENSHOTS $APPEARANCE ==="
+          xcrun simctl ui "$SIM_ID" appearance "$APPEARANCE"
+          RESULT="build/Improvements-$APPEARANCE.xcresult"
+          if [ "$APPEARANCE" = light ]; then
+            SELECT_A="testLightIndependentServices"
+            SELECT_B="testLightProductBackgrounds"
+          else
+            SELECT_A="testDarkIndependentServices"
+            SELECT_B="testDarkProductBackgrounds"
+          fi
+          xcodebuild \
+            -project IOSNext.xcodeproj \
+            -scheme IOSNext \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO \
+            "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_A" \
+            "-only-testing:IOSNextUITests/ImprovementsGalleryUITests/$SELECT_B" \
+            -derivedDataPath build/VisualDerivedData \
+            -resultBundlePath "$RESULT" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            test
+          xcrun xcresulttool export attachments \
+            --path "$RESULT" \
+            --output-path "build/screenshots/$APPEARANCE"
+          echo "VISUAL_SCREENSHOT_TEST_$APPEARANCE=PASS"
+        done
+
+        python3 Scripts/package_improvement_screenshots.py
+        echo "IOSNEXT_162_VISUAL_GALLERY=PASS"
