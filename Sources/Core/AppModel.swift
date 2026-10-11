@@ -588,14 +588,11 @@ final class AppModel {
     }
 
     var unassignedEntities: [HomeAssistantEntity] {
-        let devicesByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
-        let registryByID = Dictionary(uniqueKeysWithValues: entityRegistry.map { ($0.entityID, $0) })
-        return entities.filter { entity in
-            guard let registry = registryByID[entity.entityID] else { return true }
-            if registry.areaID != nil { return false }
-            if let deviceID = registry.deviceID, devicesByID[deviceID]?.areaID != nil { return false }
-            return true
-        }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+        entities.filter { resolvedAreaID(for: $0.entityID) == nil }
+            .sorted {
+                let order = $0.displayName.localizedStandardCompare($1.displayName)
+                return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+            }
     }
 
     var serviceLikeEntities: [HomeAssistantEntity] {
