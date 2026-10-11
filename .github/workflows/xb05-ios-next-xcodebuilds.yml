@@ -1,0 +1,25 @@
+name: XB-05 iOS Next V01-V04 XcodeBuilds Acceptance
+
+on:
+  push:
+    branches:
+      - visual/ios-next-162-v01-v04
+    paths:
+      - '.github/workflows/xb05-ios-next-xcodebuilds.yml'
+      - 'Scripts/package_improvement_screenshots.py'
+      - 'UITests/ImprovementsGalleryUITests.swift'
+      - 'Tests/FactoryMCPIntegrationTests.swift'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xb05-ios-next-v01-v04-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  xcode27-visual:
+    uses: Bambis-Lab/XcodeBuilds-/.github/workflows/reusable-ios-next-162-visual.yml@acf0a18f7b3e05eded7265a3bd5e70815ddb5ece
+    with:
+      tooling_ref: acf0a18f7b3e05eded7265a3bd5e70815ddb5ece
