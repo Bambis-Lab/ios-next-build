@@ -38,7 +38,7 @@ jobs:
   # Manual dispatch is normal. This specific one-off branch is authorized for
   # one bounded smoke because dispatch is unavailable in the connected GitHub tool.
   xcode27:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-bbe')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-bbe' && github.sha == '4f989fcf987ef03cdc2e44cd9e050a2f6d029898')
     needs: portable
     runs-on: xcode-27
     timeout-minutes: 18
