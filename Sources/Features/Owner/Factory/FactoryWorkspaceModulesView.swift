@@ -3,7 +3,12 @@ import SwiftUI
 /// One navigational owner for the historical Master/Owner/Runner/Live modules.
 /// Backend adapters remain separate until the Factory exposes equivalent APIs.
 struct FactoryWorkspaceModulesView: View {
+    let appModel: AppModel?
     @State private var runtime = IOSNextRuntime.shared
+
+    init(appModel: AppModel? = nil) {
+        self.appModel = appModel
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -42,7 +47,7 @@ struct FactoryWorkspaceModulesView: View {
                 module("Live-Vorgänge", "Master Runtime Ereignisse · bestehender Live-Adapter", "waveform.path.ecg")
             }
             NavigationLink {
-                AdminAreaView()
+                AdminAreaView(appModel: appModel)
             } label: {
                 module("Owner, Projekte & Betrieb", "Tickets, CI, Backups, Releases · gesicherter Owner-Zugang", "person.badge.key.fill")
             }
