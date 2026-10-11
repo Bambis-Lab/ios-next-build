@@ -420,21 +420,37 @@ final class AppModel {
         for player: HomeAssistantEntity,
         data: [String: Any] = [:]
     ) async {
-        guard isFireTVCompanion(player), player.isAvailable else { return }
+        guard acceptsDeviceCommands, isFireTVCompanion(player), player.isAvailable else {
+            lastActionError = "Fire TV ist nicht verbunden oder nicht verfügbar."
+            return
+        }
         lastActionError = nil
         var serviceData = data.compactMapValues(Self.jsonValue(from:))
         serviceData["entity_id"] = .string(player.entityID)
-        do {
-            try await client.callService(
-                domain: "firetv_companion",
-                service: service,
-                serviceData: serviceData
-            )
-            IOSNextFeedbackCenter.shared.play(.stateChanged)
-        } catch {
-            lastActionError = error.localizedDescription
-            IOSNextFeedbackCenter.shared.play(.error)
+        let entityID = player.entityID
+        let generation = connectionGeneration
+        let result = await deviceCommands.execute(entityID: entityID) { [self] in
+            guard generation == connectionGeneration, acceptsDeviceCommands,
+                  let live = entity(withID: entityID), live.isAvailable,
+                  isFireTVCompanion(live) else { return .cancelled }
+            do {
+                try await client.callService(
+                    domain: "firetv_companion", service: service, serviceData: serviceData
+                )
+                guard generation == connectionGeneration else {
+                    return .outcomeUnknown("Verbindung wechselte während der Fire-TV-Aktion.")
+                }
+                IOSNextFeedbackCenter.shared.play(.stateChanged)
+                return .executed
+            } catch {
+                if generation == connectionGeneration {
+                    lastActionError = error.localizedDescription
+                    IOSNextFeedbackCenter.shared.play(.error)
+                }
+                return .outcomeUnknown(error.localizedDescription)
+            }
         }
+        reportCommandResult(result, entityID: entityID, generation: generation)
     }
 
     func launchFireTVApp(packageName: String, for player: HomeAssistantEntity) async {
