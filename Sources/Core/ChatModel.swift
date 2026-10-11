@@ -150,6 +150,7 @@ final class ChatModel {
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
             throw ChatError.invalidConfiguration
         }
+        let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         let replacesIdentity = configuration.map {
             $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
         } ?? false
@@ -162,7 +163,6 @@ final class ChatModel {
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
             ChatMediaThumbnailCache.shared.clear()
         }
-        let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
         UserDefaults.standard.set(userID, forKey: userKey)
