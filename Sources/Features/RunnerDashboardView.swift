@@ -42,7 +42,7 @@ struct RunnerDashboardView: View {
                 dashboard(status)
             }
         }
-        .background(IOS27HomeBackground(style: .neutral))
+        .background(FactoryAmbientBackground(kind: .runner))
         .navigationTitle("Runner")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -175,7 +175,7 @@ struct RunnerDashboardView: View {
             .padding(.bottom, 24)
         }
         .ios27ScrollBottomClearance()
-        .background(IOS27HomeBackground(style: .neutral))
+        .background(FactoryAmbientBackground(kind: .runner))
     }
 
     private func runnerHero(_ status: RunnerStatus) -> some View {
@@ -423,7 +423,7 @@ private struct RunnerConfigurationView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(IOS27HomeBackground(style: .neutral))
+            .background(FactoryAmbientBackground(kind: .runner))
             .navigationTitle("Runner einrichten")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

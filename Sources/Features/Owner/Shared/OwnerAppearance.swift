@@ -1,34 +1,8 @@
 import SwiftUI
 
 struct OwnerBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     var body: some View {
-        ZStack {
-            if colorScheme == .dark {
-                Color.black
-            } else {
-                Color(.systemGroupedBackground)
-            }
-            LinearGradient(
-                colors: [
-                    Color.indigo.opacity(reduceTransparency ? 0.06 : 0.11),
-                    Color.blue.opacity(reduceTransparency ? 0.02 : 0.04),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [Color.indigo.opacity(reduceTransparency ? 0.025 : 0.06), .clear],
-                center: .topTrailing,
-                startRadius: 24,
-                endRadius: 560
-            )
-        }
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
+        FactoryAmbientBackground(kind: .owner)
     }
 }
 

@@ -246,6 +246,19 @@ private struct ControlCenterView: View {
                 )
             }
             .buttonStyle(.plain)
+            NavigationLink {
+                FactoryOverviewView(ownerModel: ownerModel, runnerModel: runnerModel)
+            } label: {
+                OwnerStatusRow(
+                    title: "Master Factory",
+                    detail: "Projekte, CI, Runner, Governance und Diagnose · lesender Zugriff",
+                    symbol: "network",
+                    value: "Öffnen",
+                    tint: .indigo
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("control-center-factory")
             ownerLink(.projects) { OwnerProjectsView(model: ownerModel, capabilities: capabilities) }
             ownerLink(.operations) { OwnerOperationsView(model: ownerModel, capabilities: capabilities) }
             ownerLink(.systems) { OwnerSystemsView(model: ownerModel, capabilities: capabilities, appModel: appModel) }
