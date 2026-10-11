@@ -394,7 +394,7 @@ final class FactoryMCPService {
         if let sessionOpeningTask {
             return try await sessionOpeningTask.value
         }
-        let task = Task { @MainActor [weak self] () throws -> Set<String> in
+        let task = Task { @MainActor [weak self] in
             guard let self else { throw FactoryConnectionError.missingCredentials }
             self.mcpSessionID = nil
             let hello = try await self.rpc(method: "initialize", params: [
