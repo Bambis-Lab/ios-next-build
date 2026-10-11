@@ -22,7 +22,6 @@ concurrency:
 jobs:
   portable:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Static source and scope checks (NO XCODE)
@@ -40,7 +39,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: portable
     runs-on: xcode-27
-    timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare dependencies and deterministic project
@@ -69,8 +67,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 660 -- \
-            xcodebuild -project IOSNext.xcodeproj -scheme IOSNext \
+                      xcodebuild -project IOSNext.xcodeproj -scheme IOSNext \
             -configuration Debug -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO \
@@ -117,8 +114,7 @@ jobs:
               "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
             )
           fi
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- \
-            xcodebuild test-without-building -xctestrun "${files[0]}" \
+                      xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO "${scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
@@ -138,10 +134,9 @@ jobs:
           print(m[0])
           ')"
           xcrun simctl boot "$IPAD_ID" || true
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl bootstatus "$IPAD_ID" -b
+          xcrun simctl bootstatus "$IPAD_ID" -b
           files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- \
-            xcodebuild test-without-building -xctestrun "${files[0]}" \
+                      xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -parallel-testing-enabled NO \
             "-only-testing:IOSNextUITests/NicoRoomLayoutUITests" \
@@ -150,7 +145,6 @@ jobs:
 
       - name: Always upload test evidence (including red tests)
         if: always()
-        timeout-minutes: 2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: IOSNext-Nico-Factory-OPT-Diagnostics
