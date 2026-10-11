@@ -7,17 +7,43 @@ import UniformTypeIdentifiers
 private final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
     static let shared = AudioPlayback()
     private var player: AVAudioPlayer?
+    private var audioLease: UUID?
 
     func toggle(_ data: Data) {
         if player?.isPlaying == true {
             player?.stop()
             player = nil
+            AppAudioCoordinator.shared.end(audioLease)
+            audioLease = nil
             return
         }
+        audioLease = AppAudioCoordinator.shared.begin(.chatVoicePlayback)
         player = try? AVAudioPlayer(data: data)
-        player?.delegate = self
-        player?.prepareToPlay()
-        player?.play()
+        guard let player else {
+            AppAudioCoordinator.shared.end(audioLease)
+            audioLease = nil
+            return
+        }
+        player.delegate = self
+        player.prepareToPlay()
+        guard player.play() else {
+            self.player = nil
+            AppAudioCoordinator.shared.end(audioLease)
+            audioLease = nil
+            return
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        self.player = nil
+        AppAudioCoordinator.shared.end(audioLease)
+        audioLease = nil
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        self.player = nil
+        AppAudioCoordinator.shared.end(audioLease)
+        audioLease = nil
     }
 }
 
