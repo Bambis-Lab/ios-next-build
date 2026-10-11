@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   xcode27-visual:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'Bambis-Lab/ios-next-build' }}
+    if: ${{ !startsWith(github.head_ref, 'feature/fai-') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'Bambis-Lab/ios-next-build') }}
     uses: Bambis-Lab/XcodeBuilds-/.github/workflows/reusable-ios-next-162-visual.yml@a26440ba6ea551108e04966b2d6150de83b9b38d
     with:
       tooling_ref: a26440ba6ea551108e04966b2d6150de83b9b38d
