@@ -63,6 +63,8 @@ jobs:
           -parallel-testing-enabled NO \
           -only-testing:IOSNextTests/FactoryWorkspaceContractsTests \
           -only-testing:IOSNextTests/FactoryMCPIntegrationTests \
+          -only-testing:IOSNextTests/FactoryWorkspaceEventsTests \
+          -only-testing:IOSNextTests/FactoryWorkspaceCollectionTests \
           -only-testing:IOSNextUITests/FactoryWorkspaceUITests \
           -derivedDataPath build/FactoryDerivedData \
           -resultBundlePath build/FactoryWorkspaceAcceptance.xcresult \
