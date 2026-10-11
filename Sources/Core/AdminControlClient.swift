@@ -534,6 +534,8 @@ final class AdminControlModel {
     }
 
     func unlock() async {
+        invalidateOwnerReadTasks()
+        ownerSessionGeneration &+= 1
         guard let configuration else {
             state = .notConfigured
             return
@@ -931,7 +933,8 @@ final class AdminControlModel {
         let token = UUID()
         statusV2RefreshToken = token
         let task = Task { [weak self] in
-            await self?.refreshStatusV2Direct(configuration: configuration, generation: generation)
+            guard let self else { return }
+            await self.refreshStatusV2Direct(configuration: configuration, generation: generation)
         }
         statusV2RefreshTask = task
         await task.value
