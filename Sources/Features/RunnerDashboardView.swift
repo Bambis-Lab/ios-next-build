@@ -94,7 +94,7 @@ struct RunnerDashboardView: View {
                         .font(.largeTitle.bold())
                     Text("Ressourcen, laufende Jobs und begrenzte Aktionen – nach separater, gesicherter Verbindung.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.82))
                 }
                 OwnerStatusRow(title: "Runner-Control-Dienst", detail: "Noch keine Verbindung eingerichtet", symbol: "server.rack", value: "Setup", tint: .blue)
                 OwnerStatusRow(title: "Master Runtime Live", detail: "Read-only-Ereignisse über eigenen Live-Zugang", symbol: "waveform.path.ecg", value: "Separat", tint: .cyan)
@@ -104,7 +104,7 @@ struct RunnerDashboardView: View {
                         .accessibilityIdentifier("runner-setup-action")
                     Label("SSH- und GitHub-Zugangsdaten werden hier nicht benötigt.", systemImage: "lock.shield")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.primary.opacity(0.80))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(17)

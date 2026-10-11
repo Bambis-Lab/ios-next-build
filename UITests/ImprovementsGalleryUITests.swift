@@ -155,6 +155,10 @@ final class ImprovementsGalleryUITests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any)
                     .matching(identifier: "visual-owner-locked").firstMatch
                     .waitForExistence(timeout: 8))
+                XCTAssertTrue(app.descendants(matching: .any)
+                    .matching(identifier: "owner-locked-security-note").firstMatch
+                    .waitForExistence(timeout: 8),
+                    "Locked Owner screen must explain the authorization boundary")
             }
             if screen == "wireguard" {
                 let toggle = app.descendants(matching: .any)
