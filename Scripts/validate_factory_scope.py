@@ -13,6 +13,10 @@ changed = subprocess.check_output(
 allowed = {
     "Sources/Features/Owner/OwnerControlView.swift",
     "Sources/Features/AdminAreaView.swift",
+    "Sources/App/AppRootView.swift",
+    "Sources/Core/ChatRelayClient.swift",
+    "UITests/IndependentServicesUITests.swift",
+    "Docs/Releases/1.6.1.md",
     "Sources/Features/Owner/Shared/OwnerAppearance.swift",
     "Sources/Features/RunnerDashboardView.swift",
     "project.yml",
@@ -45,5 +49,9 @@ gateway = (root / "Sources/Features/Owner/Factory/FactoryMCPService.swift").read
 assert 'allowedTools:' in gateway and 'tools/call' in gateway and 'factory_status' in gateway
 assert 'KeychainStore.save' in gateway and 'code_challenge_method' in gateway
 assert 'SOURCE_WRITE' not in gateway and 'LIVE_WRITE' not in gateway
+assert "preconnect-service-hub" in (root / "Sources/App/AppRootView.swift").read_text()
+assert "waitsForConnectivity = false" in (root / "Sources/Core/ChatRelayClient.swift").read_text()
+assert "preconnect-factory-root" in (root / "Sources/Features/Owner/Factory/FactoryStandaloneView.swift").read_text()
+assert (root / "UITests/IndependentServicesUITests.swift").is_file()
 print("FACTORY_SCOPE=PASS", "files=" + str(len(changed)))
 print("FACTORY_SOURCE_LOCK=" + base)

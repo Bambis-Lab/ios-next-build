@@ -13,9 +13,9 @@ actor ChatRelayClient {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 35
-        configuration.timeoutIntervalForResource = 45
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 12
+        configuration.timeoutIntervalForResource = 20
         session = URLSession(configuration: configuration)
         encoder = JSONEncoder()
         decoder = JSONDecoder()

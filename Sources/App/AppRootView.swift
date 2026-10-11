@@ -4,7 +4,7 @@ struct AppRootView: View {
     let appModel: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var runtime = IOSNextRuntime.shared
-    @State private var isPresentingStandaloneChat = false
+    @State private var initialService: PreConnectionService?
     @State private var didCompleteStartupReveal = false
 
     var body: some View {
@@ -50,8 +50,31 @@ struct AppRootView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: $isPresentingStandaloneChat) {
-            StandaloneChatView(appModel: appModel, chatModel: runtime.chatModel)
+        .fullScreenCover(item: $initialService) { service in
+            switch service {
+            case .chat:
+                StandaloneChatView(appModel: appModel, chatModel: runtime.chatModel)
+            case .controlCenter:
+                AdminAreaView(appModel: appModel)
+            case .runner:
+                NavigationStack {
+                    RunnerDashboardView(model: runtime.runnerModel)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Schließen") { initialService = nil }
+                            }
+                        }
+                }
+            case .factory:
+                NavigationStack {
+                    FactoryStandaloneView()
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Schließen") { initialService = nil }
+                            }
+                        }
+                }
+            }
         }
     }
 
@@ -74,8 +97,8 @@ struct AppRootView: View {
                     ReconnectStatusOverlay(state: appModel.connectionState)
                 }
         default:
-            ConnectionLandingView(appModel: appModel) {
-                isPresentingStandaloneChat = true
+            ConnectionLandingView(appModel: appModel) { selected in
+                initialService = selected
             }
             .transition(.opacity)
         }
@@ -87,7 +110,8 @@ struct AppRootView: View {
     }
 
     private var isTestHarnessMode: Bool {
-        isLiveCardTestMode || isAnimationAcceptanceMode || isProductAcceptanceMode || isMotionAcceptanceMode
+        isLiveCardTestMode || isAnimationAcceptanceMode || isProductAcceptanceMode
+            || isMotionAcceptanceMode || ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance")
     }
 
     private var isMotionAcceptanceMode: Bool {
@@ -107,55 +131,121 @@ struct AppRootView: View {
     }
 }
 
+private enum PreConnectionService: String, Identifiable {
+    case chat
+    case controlCenter
+    case runner
+    case factory
+
+    var id: String { rawValue }
+}
+
 private struct ConnectionLandingView: View {
     let appModel: AppModel
-    let openChat: () -> Void
+    let openService: (PreConnectionService) -> Void
 
     var body: some View {
-        ZStack {
-            IOSNextBackground()
-            VStack(spacing: 28) {
-                Spacer()
-                ZStack {
-                    RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .fill(.tint.opacity(0.14))
-                    Image(systemName: "house.lodge.fill")
-                        .font(.system(size: 48, weight: .medium))
-                        .foregroundStyle(.tint)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 14) {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 25, weight: .medium))
+                        .foregroundStyle(.indigo)
+                        .frame(width: 58, height: 58)
+                        .background(Color.indigo.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("iOS Next").font(.largeTitle.bold())
+                        Text("Deine Dienste. Unabhängig verbunden.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .frame(width: 108, height: 108)
-                .accessibilityHidden(true)
+                .padding(.top, 30)
 
-                VStack(spacing: 8) {
-                    Text("iOS Next")
-                        .font(.largeTitle.bold())
-                    Text("Dein Zuhause. Nativ auf iPhone und iPad.")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                Text("Richte jeden Bereich einzeln ein. Chat Relay, Control Center, Runner und Factory sind bereits vor der Home-Assistant-Verbindung erreichbar.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
                 if case let .failed(message) = appModel.connectionState {
                     IOSNextErrorBanner(message: message)
-                        .frame(maxWidth: 520)
                 }
 
-                Spacer()
-                Button("Home Assistant verbinden", systemImage: "link") {
-                    appModel.isPresentingConnection = true
+                VStack(alignment: .leading, spacing: 13) {
+                    Text("Home Assistant")
+                        .font(.title3.bold())
+                    Text("Zuhause, Räume, Szenen und Medien verbinden.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        appModel.isPresentingConnection = true
+                    } label: {
+                        Label("Home Assistant verbinden", systemImage: "link")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .accessibilityIdentifier("preconnect-ha")
                 }
-                .font(.headline)
-                .controlSize(.large)
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.capsule)
-                .accessibilityHint("Öffnet die sichere Einrichtung der Home-Assistant-Verbindung.")
-                Button("Verschlüsselten Chat öffnen", systemImage: "message.badge.shield.fill", action: openChat)
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.capsule)
+                .padding(18)
+                .ios27ContentSurface(radius: 24)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Weitere Dienste").font(.title3.bold())
+                    Text("Ohne Home Assistant einrichten, ansehen oder verwalten.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    service("Chat Relay", detail: "Verschlüsselter Chat · eigener Zugang",
+                            symbol: "message.badge.shield.fill", route: .chat)
+                    service("Control Center", detail: "Owner-Zugang · sichere Einrichtung",
+                            symbol: "slider.horizontal.3", route: .controlCenter)
+                    service("Runner", detail: "Runner-Dienst · Ressourcen und Steuerung",
+                            symbol: "server.rack", route: .runner)
+                    service("Master Factory", detail: "Custom UI · MCP und Governance",
+                            symbol: "network", route: .factory)
+                }
+
+                Label("Kein Login für die Navigation erforderlich. Live-Aktionen benötigen ihre jeweiligen Berechtigungen.",
+                      systemImage: "lock.shield")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 24)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: 670)
+            .frame(maxWidth: .infinity)
         }
+        .background(IOSNextBackground())
+        .accessibilityIdentifier("preconnect-service-hub")
+    }
+
+    private func service(_ name: String, detail: String, symbol: String,
+                         route: PreConnectionService) -> some View {
+        Button {
+            openService(route)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: symbol)
+                    .font(.title3)
+                    .foregroundStyle(.indigo)
+                    .frame(width: 38, height: 38)
+                    .background(Color.indigo.opacity(0.08), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).font(.headline).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.forward").foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .padding(13)
+            .ios27ContentSurface(radius: 19)
+            .contentShape(RoundedRectangle(cornerRadius: 19))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("preconnect-\(route.rawValue)")
+        .accessibilityLabel(route == .chat ? "Verschlüsselten Chat öffnen" : name)
+        .accessibilityHint("Dienst ohne Home-Assistant-Verbindung öffnen")
     }
 }
 

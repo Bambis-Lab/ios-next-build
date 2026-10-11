@@ -47,6 +47,9 @@ jobs:
         grep -q 'FactoryAmbientBackground(kind: .runner)' Sources/Features/RunnerDashboardView.swift
         grep -q 'FactoryCommandDeck(' Sources/Features/Owner/Factory/FactoryOverviewView.swift
         grep -q 'factory-preview-entry' Sources/Features/AdminAreaView.swift
+        grep -q 'preconnect-service-hub' Sources/App/AppRootView.swift
+        grep -q 'preconnect-factory-root' Sources/Features/Owner/Factory/FactoryStandaloneView.swift
+        test -f UITests/IndependentServicesUITests.swift
         grep -q 'code_challenge_method' Sources/Features/Owner/Factory/FactoryMCPService.swift
         test "$(grep -c '<key>UIUserInterfaceStyle</key>' Info.plist)" = "0"
 
@@ -77,3 +80,20 @@ jobs:
         /usr/bin/unzip -tq build/IOSNext.ipa
         echo "FACTORY_IPA_PACKAGE=PASS signing=UNSIGNED"
         shasum -a 256 build/IOSNext.ipa
+
+        echo "=== PRECONNECTION UI ACCEPTANCE (NO LIVE SERVICES) ==="
+        xcodebuild \
+          -project IOSNext.xcodeproj \
+          -scheme IOSNext \
+          -configuration Debug \
+          -sdk iphonesimulator \
+          -destination 'platform=iOS Simulator,name=iPhone 18 Pro Max,OS=27.0' \
+          -parallel-testing-enabled NO \
+          -only-testing:IOSNextUITests/IndependentServicesUITests \
+          -derivedDataPath build/UITestDerivedData \
+          -resultBundlePath build/PreconnectionAcceptance.xcresult \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          test
+        echo "PRECONNECTION_ACCEPTANCE=PASS"
