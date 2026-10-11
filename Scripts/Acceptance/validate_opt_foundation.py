@@ -34,13 +34,15 @@ dashboard_tests=read("Tests/DashboardPreferencesTests.swift")
 color=read("Sources/Design/LightControlSheet.swift")
 
 checks={
-    "manual_xcode_only": "if: github.event_name == 'workflow_dispatch'" in workflow,
+    "xcode_dispatch_is_scoped": "github.event_name == 'workflow_dispatch'" in workflow
+                                and "refs/heads/acceptance/iosnext-opt-smoke-bbe" in workflow,
     "bounded_job": "timeout-minutes: 18" in workflow,
     "bounded_test": "--timeout-seconds 240" in workflow,
     "bounded_compile": "--timeout-seconds 660" in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
-    "no_automatic_xcode_push": "on:" in workflow and "needs: portable" in workflow,
+    "regular_feature_push_stays_portable": "feature/ios-next-opt-01-14-foundation-162" in workflow
+                                           and "needs: portable" in workflow,
     "watchdog_group_kill": "os.killpg(child.pid, signal.SIGKILL)" in watchdog
                            and "start_new_session=True" in watchdog,
     "lazy_scroll_test": "reveal(desk, in: app)" in tests
