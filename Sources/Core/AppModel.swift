@@ -511,7 +511,13 @@ final class AppModel {
     }
 
     func entities(inDomain domain: String) -> [HomeAssistantEntity] {
-        entityIDsByDomain[domain, default: []].compactMap(entity(withID:))
+        if !entityIndexByID.isEmpty {
+            return entityIDsByDomain[domain, default: []].compactMap(entity(withID:))
+        }
+        // Preview/fixture models may inject entities directly before a real HA
+        // snapshot builds indexes. Keep that path correct without adding a full
+        // scan to normal connected runtime reads.
+        return entities.filter { $0.domain == domain }
     }
 
     func isFireTVCompanion(_ entity: HomeAssistantEntity) -> Bool {
