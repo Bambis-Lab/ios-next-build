@@ -46,6 +46,7 @@ jobs:
         grep -q 'FactoryOverviewView(ownerModel: ownerModel, runnerModel: runnerModel)' Sources/Features/Owner/OwnerControlView.swift
         grep -q 'FactoryAmbientBackground(kind: .runner)' Sources/Features/RunnerDashboardView.swift
         grep -q 'FactoryCommandDeck(' Sources/Features/Owner/Factory/FactoryOverviewView.swift
+        grep -q 'factory-preview-entry' Sources/Features/AdminAreaView.swift
         grep -q 'code_challenge_method' Sources/Features/Owner/Factory/FactoryMCPService.swift
         test "$(grep -c '<key>UIUserInterfaceStyle</key>' Info.plist)" = "0"
 

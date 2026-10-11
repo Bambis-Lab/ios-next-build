@@ -12,6 +12,7 @@ changed = subprocess.check_output(
 ).splitlines()
 allowed = {
     "Sources/Features/Owner/OwnerControlView.swift",
+    "Sources/Features/AdminAreaView.swift",
     "Sources/Features/Owner/Shared/OwnerAppearance.swift",
     "Sources/Features/RunnerDashboardView.swift",
     "project.yml",

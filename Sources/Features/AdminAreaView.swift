@@ -7,6 +7,7 @@ struct AdminAreaView: View {
     @State private var model = AdminControlModel()
     @State private var runtime = IOSNextRuntime.shared
     @State private var isPresentingConfiguration = false
+    @State private var isPresentingFactoryPreview = false
     @State private var isLockingControlCenter = false
     @State private var dismissAfterLock = false
 
@@ -59,6 +60,9 @@ struct AdminAreaView: View {
         .sheet(isPresented: $isPresentingConfiguration) {
             AdminConfigurationView(model: model)
         }
+        .sheet(isPresented: $isPresentingFactoryPreview) {
+            NavigationStack { FactoryPreviewView() }
+        }
         .onAppear {
             let active = scenePhase == .active
             model.setPollingActive(active)
@@ -87,8 +91,13 @@ struct AdminAreaView: View {
             } description: {
                 Text("Die Einrichtung erfordert die HTTPS-Adresse des Admin-Backends und ein serverseitiges Owner-Token.")
             } actions: {
-                Button("Control Center einrichten") { isPresentingConfiguration = true }
-                    .buttonStyle(.glassProminent)
+                VStack(spacing: 12) {
+                    Button("Control Center einrichten") { isPresentingConfiguration = true }
+                        .buttonStyle(.glassProminent)
+                    Button("Factory Vorschau") { isPresentingFactoryPreview = true }
+                        .buttonStyle(.glass)
+                        .accessibilityIdentifier("factory-preview-entry")
+                }
             }
             .padding(24)
         case .locked:
