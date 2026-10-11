@@ -111,8 +111,13 @@ final class ImprovementsGalleryUITests: XCTestCase {
         configure.tap()
         XCTAssertTrue(app.navigationBars["Factory verbinden"].waitForExistence(timeout: 8))
         capture("12-factory-oauth-connect", app: app)
-        app.swipeUp()
-        capture("13-factory-oauth-security", app: app)
+        // Capture a genuinely different, still-disconnected input state.
+        // Do not type or submit any credentials or start browser authentication.
+        let clientID = app.textFields["Registrierte Client-ID (optional)"]
+        XCTAssertTrue(clientID.waitForExistence(timeout: 8))
+        clientID.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        capture("13-factory-oauth-client-id-entry", app: app)
     }
 
     private func captureProductGallery() {
@@ -201,13 +206,16 @@ final class ImprovementsGalleryUITests: XCTestCase {
         capture("23-factory-no-session-detail", app: app)
         app.terminate()
 
-        // 24: Owner configuration security details, not another duplicate empty page.
+        // 24: An actual owner-token input-focus state, no token entered or saved.
         app = launchPreconnection()
         service("controlCenter", app: app)
         action("Control Center einrichten", app: app)
         XCTAssertTrue(app.navigationBars["Owner-Zugang"].waitForExistence(timeout: 8))
-        app.swipeUp()
-        capture("24-control-center-setup-security", app: app)
+        let ownerToken = app.secureTextFields["Owner-Token"]
+        XCTAssertTrue(ownerToken.waitForExistence(timeout: 8))
+        ownerToken.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 8))
+        capture("24-control-center-owner-token-entry", app: app)
         app.terminate()
 
         // 25: Deterministically reproduce simulator Keychain read failure.
