@@ -197,6 +197,7 @@ jobs:
 
       - name: Always upload test evidence (including red tests)
         if: always()
+        timeout-minutes: 2
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: IOSNext-Nico-Factory-OPT-Diagnostics
