@@ -449,7 +449,7 @@ private struct ChatBubble: View {
                 .textSelection(.enabled)
         case .image:
             if let image = ChatMediaThumbnailCache.shared.thumbnail(
-                messageID: message.id, encryptedSessionImageBytes: message.data
+                messageID: message.id, decryptedImageBytes: message.data
             ) {
                 Image(uiImage: image)
                     .resizable()
