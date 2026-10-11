@@ -6,6 +6,7 @@ final class IOSNextRuntime {
     static let shared = IOSNextRuntime()
 
     let chatModel: ChatModel
+    let lifecycleCoordinator: AppServiceLifecycleCoordinator
     let runnerModel: RunnerControlModel
     let liveOperationsModel: LiveOperationsModel
     let factoryWorkspace: FactoryWorkspaceCoordinator
@@ -15,6 +16,7 @@ final class IOSNextRuntime {
 
     private init() {
         self.chatModel = ChatModel()
+        self.lifecycleCoordinator = AppServiceLifecycleCoordinator(chat: self.chatModel)
         self.runnerModel = RunnerControlModel()
         self.liveOperationsModel = LiveOperationsModel()
         self.factoryWorkspace = FactoryWorkspaceCoordinator()
