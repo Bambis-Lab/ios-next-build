@@ -17,8 +17,10 @@ final class EntityCommandPipelineTests: XCTestCase {
         let second = Task {
             await pipeline.execute(entityID: "light.schrank") { events.append("B") }
         }
-        XCTAssertTrue(await first.value)
-        XCTAssertTrue(await second.value)
+        let firstResult = await first.value
+        let secondResult = await second.value
+        XCTAssertTrue(firstResult)
+        XCTAssertTrue(secondResult)
         XCTAssertEqual(events, ["start-A", "end-A", "B"])
     }
 
@@ -43,9 +45,12 @@ final class EntityCommandPipelineTests: XCTestCase {
                 applied.append(3)
             }
         }
-        XCTAssertTrue(await first.value)
-        XCTAssertFalse(await obsolete.value)
-        XCTAssertTrue(await white.value)
+        let firstResult = await first.value
+        let obsoleteResult = await obsolete.value
+        let whiteResult = await white.value
+        XCTAssertTrue(firstResult)
+        XCTAssertFalse(obsoleteResult)
+        XCTAssertTrue(whiteResult)
         XCTAssertEqual(applied, [1, 3])
     }
 
@@ -74,8 +79,10 @@ final class EntityCommandPipelineTests: XCTestCase {
         }
         try await Task.sleep(for: .milliseconds(12))
         pipeline.invalidatePending()
-        XCTAssertTrue(await running.value)
-        XCTAssertFalse(await pending.value)
+        let runningResult = await running.value
+        let pendingResult = await pending.value
+        XCTAssertTrue(runningResult)
+        XCTAssertFalse(pendingResult)
         XCTAssertEqual(applied, [1])
     }
 }
