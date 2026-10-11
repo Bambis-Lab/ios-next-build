@@ -765,14 +765,23 @@ final class AppModel {
     }
 
     private func sortEntities() {
-        entities.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-        entityIndexByID = Dictionary(uniqueKeysWithValues: entities.enumerated().map { ($0.element.entityID, $0.offset) })
+        // A reload can briefly contain duplicate entity IDs. Deduplicate before
+        // building indexes so dictionary construction can never trap at runtime.
+        var byID: [String: HomeAssistantEntity] = [:]
+        for entity in entities { byID[entity.entityID] = entity }
+        entities = byID.values.sorted {
+            let order = $0.displayName.localizedStandardCompare($1.displayName)
+            return order == .orderedSame ? $0.entityID < $1.entityID : order == .orderedAscending
+        }
+        var entityIndex: [String: Int] = [:]
         var idsByDomain: [String: [String]] = [:]
-        for entity in entities {
-            let domain = entity.entityID.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+        for (index, entity) in entities.enumerated() {
+            entityIndex[entity.entityID] = index
+            let domain = entity.domain
             guard !domain.isEmpty else { continue }
             idsByDomain[domain, default: []].append(entity.entityID)
         }
+        entityIndexByID = entityIndex
         entityIDsByDomain = idsByDomain
         searchRevision &+= 1
     }
