@@ -111,19 +111,25 @@ struct FactoryWorkspaceSourcesView: View {
 }
 
 /// A capability advertised by the server is NOT an action authorization.
+private struct FactoryCapabilityFlag: Identifiable {
+    let name: String
+    let active: Bool
+    var id: String { name }
+}
+
 struct FactoryWorkspaceGovernanceView: View {
     @State private var runtime = IOSNextRuntime.shared
     private var workspace: FactoryWorkspaceCoordinator { runtime.factoryWorkspace }
 
-    private var advertisedCapabilities: [(String, Bool)] {
+    private var advertisedCapabilities: [FactoryCapabilityFlag] {
         guard let payload = workspace.connection.snapshot?.rawReports["capabilities_get"],
               let data = payload.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let capabilities = json["capabilities"] as? [String: Any] else { return [] }
-        return capabilities.compactMap { name, value -> (String, Bool)? in
+        return capabilities.compactMap { name, value -> FactoryCapabilityFlag? in
             guard let active = value as? Bool else { return nil }
-            return (name, active)
-        }.sorted { $0.0 < $1.0 }
+            return FactoryCapabilityFlag(name: name, active: active)
+        }.sorted { $0.name < $1.name }
     }
 
     var body: some View {
@@ -132,8 +138,8 @@ struct FactoryWorkspaceGovernanceView: View {
                 if advertisedCapabilities.isEmpty {
                     Label("Keine authentifizierten Capability-Daten", systemImage: "lock.shield")
                 } else {
-                    ForEach(advertisedCapabilities, id: \.0) { name, active in
-                        LabeledContent(name, value: active ? "Vom Backend unterstützt" : "Deaktiviert")
+                    ForEach(advertisedCapabilities) { item in
+                        LabeledContent(item.name, value: item.active ? "Vom Backend unterstützt" : "Deaktiviert")
                     }
                 }
             }
