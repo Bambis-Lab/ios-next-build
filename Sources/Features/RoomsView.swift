@@ -943,6 +943,7 @@ private struct NicoMicroActionTile: View {
         .accessibilityLabel(title)
         .accessibilityValue(subtitle)
         .accessibilityHint("Aktivieren")
+        .accessibilityIdentifier("nico-micro-\(title)")
     }
 }
 
@@ -1009,64 +1010,9 @@ private struct NicoPrimaryLightTile: View {
         .sheet(isPresented: $showControls) {
             LightControlSheet(entityID: entity.entityID, appModel: appModel)
         }
-    }
-}
-
-private struct NicoCompactControlTile: View {
-    @State private var showControls = false
-    let entity: HomeAssistantEntity
-    let appModel: AppModel
-
-    private var hasExtendedLightControls: Bool {
-        entity.domain == "light" && (entity.supportsColor || entity.supportsColorTemperature || entity.supportsBrightness)
-    }
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button {
-                Task { await appModel.toggle(entity) }
-            } label: {
-                HStack(spacing: 11) {
-                    Image(systemName: entity.domain == "light" ? "lightbulb.fill" : "lamp.desk.fill")
-                        .foregroundStyle(entity.ios27LightTint)
-                        .frame(width: 34, height: 34)
-                        .background(entity.ios27LightTint.opacity(0.12), in: Circle())
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entity.displayName).font(.subheadline.weight(.semibold))
-                        Text(entity.isOn ? "Ein" : "Aus").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                .padding(14)
-                .ios27ContentSurface(radius: 20)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(entity.displayName)
-            .accessibilityValue(entity.isOn ? "Ein" : "Aus")
-            .accessibilityHint("Schaltet \(entity.displayName) um")
-            .ios27HoldAction {
-                guard entity.domain == "light" else { return }
-                showControls = true
-            }
-
-            if hasExtendedLightControls {
-                Button {
-                    showControls = true
-                } label: {
-                    Image(systemName: entity.supportsColor ? "paintpalette.fill" : "slider.horizontal.3")
-                        .font(.headline)
-                        .frame(width: 44, height: 44)
-                }
-                .ios27GlassButton()
-                .tint(entity.ios27LightTint)
-                .accessibilityLabel("Lichtsteuerung \(entity.displayName)")
-                .accessibilityHint(entity.supportsColor ? "Öffnet Farbe, Helligkeit und Farbtemperatur" : "Öffnet die erweiterten Lichtregler")
-            }
-        }
-        .sheet(isPresented: $showControls) {
-            LightControlSheet(entityID: entity.entityID, appModel: appModel)
-        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("nico-primary-\(entity.entityID)")
+        .accessibilityHint("Gedrückt halten für die Licht- und Farbauswahl")
     }
 }
 
