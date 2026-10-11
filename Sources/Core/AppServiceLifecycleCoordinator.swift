@@ -10,6 +10,7 @@ final class AppServiceLifecycleCoordinator {
     private var homeAssistantConnected = false
     private var visibleChatCount = 0
     private var chatStartup: Task<Void, Never>?
+    private var chatStartupToken: UUID?
 
     init(chat: ChatModel) { self.chat = chat }
 
@@ -25,6 +26,7 @@ final class AppServiceLifecycleCoordinator {
 
     func chatViewDisappeared() {
         visibleChatCount = max(0, visibleChatCount - 1)
+        ChatMediaThumbnailCache.shared.clear()
         if !homeAssistantConnected && visibleChatCount == 0 {
             chat.stop()
         }
@@ -48,13 +50,31 @@ final class AppServiceLifecycleCoordinator {
         // Register exactly one startup task and await it without rebuilding
         // a second authenticated relay session.
         if let chatStartup {
+            let observedToken = chatStartupToken
             await chatStartup.value
+            if chatStartupToken == observedToken {
+                chatStartup = nil
+                chatStartupToken = nil
+            }
+            guard appForeground, homeAssistantConnected || visibleChatCount > 0 else {
+                chat.stop()
+                return
+            }
+            if case .online = chat.state { return }
+            // The in-flight start may have been cancelled by a lifecycle
+            // transition. This caller can retry once the old flight is gone.
+            if chatStartup == nil { await reconcileChat(appModel: appModel) }
             return
         }
+        let token = UUID()
+        chatStartupToken = token
         let startup = Task { [chat] in await chat.start(using: appModel) }
         chatStartup = startup
         await startup.value
-        chatStartup = nil
+        if chatStartupToken == token {
+            chatStartup = nil
+            chatStartupToken = nil
+        }
         if !appForeground || (!homeAssistantConnected && visibleChatCount == 0) {
             chat.stop()
         }
