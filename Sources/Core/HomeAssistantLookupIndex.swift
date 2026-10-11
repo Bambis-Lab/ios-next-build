@@ -22,13 +22,13 @@ struct HomeAssistantLookupIndex: Sendable {
         var deviceIDsByAreaID: [String: Set<String>] = [:]
         var entityIDsByDeviceID: [String: Set<String>] = [:]
 
-        for device in devices {
+        for device in deviceByID.values {
             if let areaID = device.areaID, !areaID.isEmpty {
                 deviceIDsByAreaID[areaID, default: []].insert(device.id)
             }
         }
 
-        for registry in entityRegistry {
+        for registry in registryByEntityID.values {
             if let deviceID = registry.deviceID {
                 entityIDsByDeviceID[deviceID, default: []].insert(registry.entityID)
             }
