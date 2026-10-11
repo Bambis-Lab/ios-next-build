@@ -18,6 +18,8 @@ final class HomeAssistantLookupIndexTests: XCTestCase {
         XCTAssertEqual(index.resolvedAreaID(for: "light.test"), "area-direct")
         XCTAssertTrue(index.entityIDs(inArea: "area-direct").contains("light.test"))
         XCTAssertFalse(index.entityIDs(inArea: "area-old").contains("light.test"))
+        XCTAssertTrue(index.deviceIDs(inArea: "area-current").contains("device-1"))
+        XCTAssertFalse(index.deviceIDs(inArea: "area-old").contains("device-1"))
     }
 
     func testAreaResolutionUsesDeviceAreaOnlyWhenEntityHasNoDirectArea() {
