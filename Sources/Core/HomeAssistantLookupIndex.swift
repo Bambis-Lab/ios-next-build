@@ -65,6 +65,8 @@ extension AppModel {
     /// The owner invalidates this model-local index on registry/device changes.
     var homeAssistantLookupIndex: HomeAssistantLookupIndex {
         if let registryIndexCache { return registryIndexCache }
+        let trace = IOSNextPerformance.begin("HA.RegistryIndexRebuild")
+        defer { IOSNextPerformance.end("HA.RegistryIndexRebuild", trace) }
         let index = HomeAssistantLookupIndex(devices: devices, entityRegistry: entityRegistry)
         registryIndexCache = index
         return index
