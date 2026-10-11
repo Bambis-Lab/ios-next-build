@@ -23,7 +23,9 @@ ui_tests = read("UITests/FactoryWorkspaceUITests.swift")
 required = {
     "version unchanged": "MARKETING_VERSION: 1.6.2" in read("project.yml"),
     "build unchanged": "CURRENT_PROJECT_VERSION: 25" in read("project.yml"),
-    "one shared workspace": "let factoryWorkspace: FactoryWorkspaceCoordinator" in runtime,
+    "one shared workspace": "var factoryWorkspace: FactoryWorkspaceCoordinator" in runtime
+        and "factoryWorkspaceStorage: FactoryWorkspaceCoordinator?" in runtime
+        and "let coordinator = FactoryWorkspaceCoordinator()" in runtime,
     "shared standalone model": "runtime.factoryWorkspace.connection" in standalone,
     "shared owner model": "runtime.factoryWorkspace.connection" in overview,
     "factory tool guard": "FactoryWorkspaceToolCatalog.isPermittedRead(name)" in gateway,
