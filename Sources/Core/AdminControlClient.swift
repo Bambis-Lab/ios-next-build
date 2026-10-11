@@ -1019,14 +1019,19 @@ final class AdminControlModel {
         guard case .unlocked = state,
               let configuration,
               v2Capabilities?.capabilities.contains("events.read") == true else { return }
+        let generation = ownerSessionGeneration
         do {
             let feed = try await client.eventsV2(since: lastEventSequence, configuration: configuration)
+            // A response from a prior owner session must never populate the
+            // current session's event history after lock/account reconfiguration.
+            guard generation == ownerSessionGeneration, case .unlocked = state else { return }
             if !feed.events.isEmpty {
                 eventsV2.append(contentsOf: feed.events)
                 eventsV2 = Array(eventsV2.suffix(200))
             }
             lastEventSequence = feed.lastSequence
         } catch {
+            guard generation == ownerSessionGeneration, case .unlocked = state else { return }
             ownerV2Error = error.localizedDescription
         }
     }
