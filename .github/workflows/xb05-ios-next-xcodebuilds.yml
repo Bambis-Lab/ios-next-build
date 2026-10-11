@@ -9,6 +9,11 @@ on:
       - 'Scripts/package_improvement_screenshots.py'
       - 'UITests/ImprovementsGalleryUITests.swift'
       - 'Tests/FactoryMCPIntegrationTests.swift'
+  pull_request:
+    branches:
+      - visual/ios-next-162-v01-v04
+    paths:
+      - '.github/workflows/xb05-ios-next-xcodebuilds.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,6 +25,7 @@ concurrency:
 
 jobs:
   xcode27-visual:
-    uses: Bambis-Lab/XcodeBuilds-/.github/workflows/reusable-ios-next-162-visual.yml@acf0a18f7b3e05eded7265a3bd5e70815ddb5ece
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'Bambis-Lab/ios-next-build' }}
+    uses: Bambis-Lab/XcodeBuilds-/.github/workflows/reusable-ios-next-162-visual.yml@a26440ba6ea551108e04966b2d6150de83b9b38d
     with:
-      tooling_ref: acf0a18f7b3e05eded7265a3bd5e70815ddb5ece
+      tooling_ref: a26440ba6ea551108e04966b2d6150de83b9b38d
