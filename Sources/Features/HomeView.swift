@@ -18,6 +18,15 @@ private struct HomeShortcutPresentation: Identifiable {
 struct HomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let appModel: AppModel
+    @State private var dashboardPreferences: DashboardPreferencesStore
+    @State private var isShowingDashboardPreferences = false
+
+    init(appModel: AppModel) {
+        self.appModel = appModel
+        _dashboardPreferences = State(
+            initialValue: DashboardPreferencesStore(profileID: String(describing: appModel.selectedProfile))
+        )
+    }
 
     private var nicoArea: HomeAssistantArea? { area(named: "Nico Zimmer") }
     private var groundFloor: HomeAssistantFloor? {
@@ -46,6 +55,20 @@ struct HomeView: View {
         return items
     }
 
+    private var visibleFeaturedItems: [HomeShortcutPresentation] {
+        featuredItems
+            .filter { dashboardPreferences.isVisible($0.id) }
+            .sorted {
+                let left = dashboardPreferences.rank(of: $0.id)
+                let right = dashboardPreferences.rank(of: $1.id)
+                return left == right ? $0.id < $1.id : left < right
+            }
+    }
+
+    private var dashboardPreferenceOptions: [DashboardPreferenceOption] {
+        featuredItems.map { .init(id: $0.id, title: $0.title, symbol: $0.symbol) }
+    }
+
     var body: some View {
         ZStack {
             IOS27HomeBackground()
@@ -54,10 +77,10 @@ struct HomeView: View {
                     OwnerHomeHeader(connectionState: appModel.connectionState)
                     if let nicoArea { heroCard(for: nicoArea) }
 
-                    if !featuredItems.isEmpty {
+                    if !visibleFeaturedItems.isEmpty {
                         sectionTitle("Häufig genutzt")
                         LazyVGrid(columns: featuredColumns, spacing: 12) {
-                            ForEach(featuredItems) { item in
+                            ForEach(visibleFeaturedItems) { item in
                                 NavigationLink {
                                     destination(for: item.destination)
                                 } label: {
@@ -85,6 +108,27 @@ struct HomeView: View {
         }
         .navigationTitle("Zuhause")
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isShowingDashboardPreferences = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .accessibilityLabel("Startseite anpassen")
+                .accessibilityIdentifier("home-dashboard-customize")
+            }
+        }
+        .sheet(isPresented: $isShowingDashboardPreferences) {
+            DashboardPreferencesView(options: dashboardPreferenceOptions, store: dashboardPreferences)
+        }
+        .task {
+            dashboardPreferences.ensureKnownIDs(featuredItems.map(\\.id))
+        }
+        .onChange(of: appModel.selectedProfile) { _, profile in
+            dashboardPreferences = DashboardPreferencesStore(profileID: String(describing: profile))
+            dashboardPreferences.ensureKnownIDs(featuredItems.map(\\.id))
+        }
     }
 
     @ViewBuilder
