@@ -57,6 +57,18 @@ struct FactoryConnectionView: View {
                     }
                 }
             }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--visual-factory-oauth-error") {
+                Section("OAuth-Testzustand") {
+                    Label("Simulierter Testzustand: OAuth-Anmeldung abgelehnt", systemImage: "exclamationmark.shield")
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("visual-oauth-error")
+                    Text("Keine Live-Anmeldung und keine Factory-Daten wurden abgefragt.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+#endif
             Section("Sicherheit") {
                 Label("OAuth PKCE S256 und serverseitige Berechtigungen", systemImage: "lock.shield")
                 Label("Gerätegebundene Token im iOS-Schlüsselbund", systemImage: "key.fill")
@@ -64,6 +76,7 @@ struct FactoryConnectionView: View {
                 Label("Keine freien Befehle und keine Factory-Schreibaktionen", systemImage: "hand.raised")
             }
             .font(.footnote)
+            .accessibilityIdentifier("factory-oauth-security")
         }
         .scrollContentBackground(.hidden)
         .background(FactoryAmbientBackground(kind: .factory))

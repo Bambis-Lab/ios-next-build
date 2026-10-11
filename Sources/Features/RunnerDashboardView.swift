@@ -17,7 +17,15 @@ struct RunnerDashboardView: View {
         Group {
             switch model.state {
             case .notConfigured:
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--visual-runner-offline") {
+                    runnerUnavailableSurface(message: "Simulierter Testzustand: Runner nicht erreichbar.")
+                } else {
+                    runnerSetupSurface
+                }
+#else
                 runnerSetupSurface
+#endif
             case .loading:
                 ProgressView("Runner wird geladen …")
             case let .failed(message):
@@ -463,7 +471,7 @@ private struct RunnerConfigurationView: View {
             }
             .scrollContentBackground(.hidden)
             .background(FactoryAmbientBackground(kind: .runner))
-            .navigationTitle("Runner einrichten")
+            .navigationTitle("Runner-Zugang")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

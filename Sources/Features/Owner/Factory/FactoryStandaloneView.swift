@@ -66,6 +66,12 @@ struct FactoryStandaloneView: View {
                     .disabled(!factory.canRefresh)
                 }
 
+                if !factory.hasRestorableSession {
+                    Label("Keine gespeicherte Sitzung", systemImage: "lock.shield")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("factory-no-session")
+                }
                 if let snapshot = factory.snapshot {
                     Text("Factory MCP · \(snapshot.observedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.headline)

@@ -86,7 +86,16 @@ struct AdminAreaView: View {
     private var content: some View {
         switch model.state {
         case .notConfigured:
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--visual-owner-locked") {
+                lockedSurface(message: "Demonstration: Owner Control ist lokal gesperrt.", authenticating: false)
+                    .accessibilityIdentifier("visual-owner-locked")
+            } else {
+                preconnectionSurface
+            }
+#else
             preconnectionSurface
+#endif
         case .locked:
             lockedSurface(message: "Der Bereich ist lokal gesperrt.", authenticating: false)
         case .unlocking:
