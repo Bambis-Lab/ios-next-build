@@ -5,6 +5,7 @@ enum FactoryConnectionError: LocalizedError {
     case invalidEndpoint, metadataUnavailable, pkceUnavailable, registrationUnavailable
     case oauthCancelled, invalidCallback, expiredState, missingCredentials
     case unauthorized, unexpectedResponse, rpcError(String), toolNotAvailable(String)
+    case invalidProtocol, noReadableTools, noSuccessfulReads
 
     var errorDescription: String? {
         switch self {
@@ -18,6 +19,9 @@ enum FactoryConnectionError: LocalizedError {
         case .missingCredentials: "Factory noch nicht verbunden. Melde dich zuerst an."
         case .unauthorized: "Factory-Zugang ist abgelaufen oder nicht berechtigt."
         case .unexpectedResponse: "Die Factory hat eine unerwartete Antwort geliefert."
+        case .invalidProtocol: "Die Factory-MCP-Antwort hat eine ungültige Protokollversion oder Sitzungskennung."
+        case .noReadableTools: "Der Gateway-Zugang bietet keine freigegebenen lesenden Factory-Funktionen."
+        case .noSuccessfulReads: "Die Factory ist erreichbar, aber keine lesende Datenabfrage war erfolgreich."
         case let .rpcError(message): "Factory-Anfrage abgelehnt: \(message)"
         case let .toolNotAvailable(tool): "Diese lesende Factory-Funktion wird nicht angeboten: \(tool)"
         }
@@ -55,6 +59,7 @@ final class FactoryMCPService {
     private let callbackURI = "iosnext://factory-oauth"
     private let resourceMetadataPath = "/.well-known/oauth-protected-resource"
     private let protocolVersion = "2025-06-18"
+    private let maxPaginationPages = 12
     private let allowedTools: [String] = [
         "factory_status", "factory_discover", "capabilities_get",
         "control_plane_status", "control_plane_registry_summary",
@@ -298,14 +303,15 @@ final class FactoryMCPService {
         guard let endpoint else { throw FactoryConnectionError.missingCredentials }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20
+        request.timeoutInterval = 10
         request.setValue("Bearer \(try await activeToken())", forHTTPHeaderField: "Authorization")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
         if let mcpSessionID { request.setValue(mcpSessionID, forHTTPHeaderField: "Mcp-Session-Id") }
         var value: [String: Any] = ["jsonrpc": "2.0", "method": method, "params": params]
-        if !notification { value["id"] = UUID().uuidString }
+        let requestID = UUID().uuidString
+        if !notification { value["id"] = requestID }
         request.httpBody = try JSONSerialization.data(withJSONObject: value)
         let (body, reply) = try await data(for: request)
         guard reply.statusCode != 401 else { throw FactoryConnectionError.unauthorized }
@@ -316,18 +322,28 @@ final class FactoryMCPService {
             mcpSessionID = session
         }
         if notification { return [:] }
-        let payload: Data
+        // Streamable HTTP can send multiple SSE events, including heartbeats.
+        // Never select the last data: line without verifying its JSON-RPC id.
+        let objects: [[String: Any]]
         if let contentType = reply.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
            contentType.contains("text/event-stream") {
-            guard let sse = String(data: body, encoding: .utf8),
-                  let line = sse.split(separator: "\n").last(where: { $0.hasPrefix("data:") }) else {
+            guard let text = String(data: body, encoding: .utf8) else {
                 throw FactoryConnectionError.unexpectedResponse
             }
-            payload = Data(line.dropFirst(5).trimmingCharacters(in: .whitespaces).utf8)
+            objects = text.components(separatedBy: .newlines).compactMap { line in
+                guard line.hasPrefix("data:") else { return nil }
+                let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                guard value != "[DONE]", let bytes = value.data(using: .utf8) else { return nil }
+                return try? json(bytes)
+            }
         } else {
-            payload = body
+            objects = [try json(body)]
         }
-        let object = try json(payload)
+        guard let object = objects.first(where: {
+            ($0["id"] as? String) == requestID && ($0["jsonrpc"] as? String) == "2.0"
+        }) else {
+            throw FactoryConnectionError.invalidProtocol
+        }
         if let error = object["error"] as? [String: Any] {
             throw FactoryConnectionError.rpcError(error["message"] as? String ?? "RPC Error")
         }
@@ -339,24 +355,34 @@ final class FactoryMCPService {
 
     private func openSession() async throws -> Set<String> {
         mcpSessionID = nil
-        _ = try await rpc(method: "initialize", params: [
+        let hello = try await rpc(method: "initialize", params: [
             "protocolVersion": protocolVersion,
             "capabilities": [:],
-            "clientInfo": ["name": "iOS Next Factory", "version": "1.6.0"]
+            "clientInfo": ["name": "iOS Next Factory", "version": "1.6.2"]
         ])
+        guard hello["protocolVersion"] as? String == protocolVersion else {
+            throw FactoryConnectionError.invalidProtocol
+        }
         _ = try await rpc(method: "notifications/initialized", params: [:], notification: true)
         var names = Set<String>()
+        var cursors = Set<String>()
         var cursor: String?
-        repeat {
+        for _ in 0..<maxPaginationPages {
             var p: [String: Any] = [:]
             if let cursor { p["cursor"] = cursor }
             let result = try await rpc(method: "tools/list", params: p)
             for tool in (result["tools"] as? [[String: Any]]) ?? [] {
                 if let name = tool["name"] as? String { names.insert(name) }
             }
-            cursor = result["nextCursor"] as? String
-        } while cursor != nil
-        return names
+            guard let next = result["nextCursor"] as? String, !next.isEmpty else {
+                return names
+            }
+            guard cursors.insert(next).inserted else {
+                throw FactoryConnectionError.invalidProtocol
+            }
+            cursor = next
+        }
+        throw FactoryConnectionError.invalidProtocol
     }
 
     private func call(_ name: String) async throws -> String {
@@ -365,21 +391,31 @@ final class FactoryMCPService {
         if result["isError"] as? Bool == true {
             throw FactoryConnectionError.rpcError("Tool \(name) meldet einen Fehler.")
         }
+        if let structured = result["structuredContent"] as? [String: Any],
+           let data = try? JSONSerialization.data(withJSONObject: structured, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            return text
+        }
         let blocks = result["content"] as? [[String: Any]] ?? []
         return blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
     }
 
     func snapshot() async throws -> FactorySnapshot {
         let available = try await openSession()
+        guard !available.intersection(Set(allowedTools)).isEmpty else {
+            throw FactoryConnectionError.noReadableTools
+        }
         let now = Date()
         var rows: [FactorySnapshotRow] = []
         var reports: [String: String] = [:]
+        var successCount = 0
         for name in allowedTools where available.contains(name) {
             do {
                 let body = try await call(name)
                 // Keep raw diagnostics transient in memory; the UI never dumps
                 // untrusted response bodies or possible sensitive payloads.
                 reports[name] = body
+                successCount += 1
                 let decoded = (try? JSONSerialization.jsonObject(with: Data(body.utf8))) as? [String: Any]
                 let state = decoded?["state"] as? String ?? decoded?["status"] as? String ?? "Geliefert"
                 let detail = decoded?["detail"] as? String ?? "Antwort vom autorisierten Factory-Gateway"
@@ -392,6 +428,7 @@ final class FactoryMCPService {
                                   status: "Eingeschränkt", observedAt: now))
             }
         }
+        guard successCount > 0 else { throw FactoryConnectionError.noSuccessfulReads }
         return FactorySnapshot(observedAt: now, rows: rows, rawReports: reports,
                                toolNames: available.sorted())
     }

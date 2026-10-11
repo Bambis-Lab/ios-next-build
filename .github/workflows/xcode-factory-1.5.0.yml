@@ -1,4 +1,4 @@
-name: iOS Next 1.6.1 Independent Services IPA
+name: iOS Next 1.6.2 Factory OAuth MCP Verification IPA
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
     with:
       runs-on: xcode-27
-      artifact-name: IOSNext-1.6.1-IndependentServices-build24-unsigned
+      artifact-name: IOSNext-1.6.2-FactoryMCP-build25-unsigned
       artifact-path: build/IOSNext.ipa
       xcode-command: |
         set -euo pipefail
@@ -29,6 +29,9 @@ jobs:
         git cat-file -e "$BASE_SHA^{commit}"
         python3 Scripts/validate_factory_scope.py "$BASE_SHA"
 
+        echo "=== PUBLIC FACTORY OAUTH METADATA (READ ONLY) ==="
+        python3 Scripts/probe_factory_oauth_metadata.py
+
         echo "=== TOOLCHAIN ==="
         xcodebuild -version
         test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
@@ -38,8 +41,8 @@ jobs:
         bash Scripts/prepare_wireguard_dependency.sh
 
         export CM_COMMIT="$(git rev-parse HEAD)"
-        export EXPECTED_VERSION="1.6.1"
-        export EXPECTED_BUILD="24"
+        export EXPECTED_VERSION="1.6.2"
+        export EXPECTED_BUILD="25"
 
         bash Scripts/prepare_free_sideload_project.sh
         python3 Scripts/validate_apple_final_acceptance_source.py
@@ -70,8 +73,8 @@ jobs:
 
         APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/IOSNext.app"
         test -d "$APP_PATH"
-        /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" | grep -qx '1.6.1'
-        /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx '24'
+        /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist" | grep -qx '1.6.2'
+        /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx '25'
         /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist" | grep -qx 'de.nicofroeba16.iosnext'
 
         cp -R "$APP_PATH" build/Payload/IOSNext.app
@@ -81,7 +84,7 @@ jobs:
         echo "FACTORY_IPA_PACKAGE=PASS signing=UNSIGNED"
         shasum -a 256 build/IOSNext.ipa
 
-        echo "=== PRECONNECTION UI ACCEPTANCE (NO LIVE SERVICES) ==="
+        echo "=== FACTORY OAUTH/MCP CONTRACT + PRECONNECTION UI ACCEPTANCE ==="
         xcodebuild \
           -project IOSNext.xcodeproj \
           -scheme IOSNext \
@@ -89,6 +92,7 @@ jobs:
           -sdk iphonesimulator \
           -destination 'platform=iOS Simulator,name=iPhone 18 Pro Max,OS=27.0' \
           -parallel-testing-enabled NO \
+          -only-testing:IOSNextTests/FactoryMCPIntegrationTests \
           -only-testing:IOSNextUITests/IndependentServicesUITests \
           -derivedDataPath build/UITestDerivedData \
           -resultBundlePath build/PreconnectionAcceptance.xcresult \
@@ -96,4 +100,5 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGN_IDENTITY="" \
           test
+        echo "FACTORY_OAUTH_MCP_MOCK_CONTRACT=PASS"
         echo "PRECONNECTION_ACCEPTANCE=PASS"

@@ -63,6 +63,12 @@ final class FactoryConnectionModel {
         }
     }
 
+    /// A cancelled browser prompt must not leave the connection spinning.
+    func cancelAuthorization() {
+        errorMessage = nil
+        phase = ((try? service.restore()) == true) ? .readyForRefresh : .disconnected
+    }
+
     func finishAuthorization(callback: URL, original: FactoryAuthorization) async throws {
         do {
             try await service.completeAuthorization(callback, original: original)

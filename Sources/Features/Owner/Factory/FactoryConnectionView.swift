@@ -91,7 +91,10 @@ struct FactoryConnectionView: View {
             try await model.finishAuthorization(callback: callback, original: authorization)
             dismiss()
         } catch {
-            alertMessage = error.localizedDescription
+            model.cancelAuthorization()
+            if !(error is CancellationError) {
+                alertMessage = error.localizedDescription
+            }
         }
     }
 }

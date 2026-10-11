@@ -16,6 +16,9 @@ allowed = {
     "Sources/App/AppRootView.swift",
     "Sources/Core/ChatRelayClient.swift",
     "UITests/IndependentServicesUITests.swift",
+    "Tests/FactoryMCPIntegrationTests.swift",
+    "Scripts/probe_factory_oauth_metadata.py",
+    "Docs/Releases/1.6.2.md",
     "Docs/Releases/1.6.1.md",
     "Sources/Features/Owner/Shared/OwnerAppearance.swift",
     "Sources/Features/RunnerDashboardView.swift",
@@ -53,5 +56,7 @@ assert "preconnect-service-hub" in (root / "Sources/App/AppRootView.swift").read
 assert "waitsForConnectivity = false" in (root / "Sources/Core/ChatRelayClient.swift").read_text()
 assert "preconnect-factory-root" in (root / "Sources/Features/Owner/Factory/FactoryStandaloneView.swift").read_text()
 assert (root / "UITests/IndependentServicesUITests.swift").is_file()
+assert (root / "Tests/FactoryMCPIntegrationTests.swift").is_file()
+assert (root / "Scripts/probe_factory_oauth_metadata.py").is_file()
 print("FACTORY_SCOPE=PASS", "files=" + str(len(changed)))
 print("FACTORY_SOURCE_LOCK=" + base)
