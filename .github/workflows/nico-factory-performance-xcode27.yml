@@ -22,6 +22,7 @@ concurrency:
 jobs:
   portable:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Static source and scope checks (NO XCODE)
@@ -39,9 +40,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: portable
     runs-on: xcode-27
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare dependencies and deterministic project
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -58,16 +61,18 @@ jobs:
           mkdir -p build
 
       - name: Boot iPhone 18 Pro Max (all simulator commands bounded)
+        timeout-minutes: 3
         shell: bash
         run: |
           set -euo pipefail
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/NicoFactoryBoot.log
 
       - name: Compile once without UI tests (bounded)
+        timeout-minutes: 11
         shell: bash
         run: |
           set -euo pipefail
-                      xcodebuild -project IOSNext.xcodeproj -scheme IOSNext \
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj -scheme IOSNext \
             -configuration Debug -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO \
@@ -76,6 +81,7 @@ jobs:
             build-for-testing 2>&1 | tee build/NicoFactoryBuild.log
 
       - name: Targeted iPhone tests (bounded; fail fast)
+        timeout-minutes: 5
         shell: bash
         env:
           SUITE: ${{ inputs.suite }}
@@ -114,7 +120,7 @@ jobs:
               "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
             )
           fi
-                      xcodebuild test-without-building -xctestrun "${files[0]}" \
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO "${scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
@@ -122,6 +128,7 @@ jobs:
 
       - name: Full-suite iPad acceptance (manual full only)
         if: ${{ inputs.suite == 'full' }}
+        timeout-minutes: 5
         shell: bash
         run: |
           set -euo pipefail
@@ -134,9 +141,9 @@ jobs:
           print(m[0])
           ')"
           xcrun simctl boot "$IPAD_ID" || true
-          xcrun simctl bootstatus "$IPAD_ID" -b
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl bootstatus "$IPAD_ID" -b
           files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
-                      xcodebuild test-without-building -xctestrun "${files[0]}" \
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -parallel-testing-enabled NO \
             "-only-testing:IOSNextUITests/NicoRoomLayoutUITests" \
