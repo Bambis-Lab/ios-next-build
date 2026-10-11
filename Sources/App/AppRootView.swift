@@ -67,7 +67,7 @@ struct AppRootView: View {
                 }
             case .factory:
                 NavigationStack {
-                    FactoryStandaloneView()
+                    FactoryStandaloneView(appModel: appModel)
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("Schließen") { initialService = nil }
