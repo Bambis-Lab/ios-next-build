@@ -14,7 +14,7 @@ struct FactoryStandaloneView: View {
                         .font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     Text("Master Factory").font(.largeTitle.bold())
                     Text("Unabhängig von Home Assistant. Verbinde das Factory-Gateway erst, wenn du Live-Daten brauchst.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                        .font(.subheadline).foregroundStyle(Color.primary.opacity(0.82))
                 }
 
                 FactoryCommandDeck(factoryConnected: factory.phase == .connected,
@@ -101,7 +101,7 @@ struct FactoryStandaloneView: View {
                 Label("Keine Factory-Schreibaktionen oder freien Befehle.",
                       systemImage: "lock.shield.fill")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.primary.opacity(0.80))
                     .padding(.bottom, 18)
             }
             .frame(maxWidth: 670)
