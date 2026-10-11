@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/ios-next-opt-01-14-foundation-162
+      - acceptance/iosnext-opt-unbounded
   workflow_dispatch:
     inputs:
       suite:
@@ -36,7 +37,7 @@ jobs:
   # Explicit manual run ONLY, never launched by a feature-branch push.
   # A failed test must not suppress the upload of its .xcresult evidence.
   xcode27:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/acceptance/iosnext-opt-unbounded'
     needs: portable
     runs-on: xcode-27
     steps:
