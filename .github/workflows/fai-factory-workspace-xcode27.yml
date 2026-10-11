@@ -1,0 +1,70 @@
+name: FAI iOS Next Factory Workspace Acceptance
+on:
+  push:
+    branches:
+      - feature/fai-factory-workspace-162
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fai-factory-workspace-162
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: App-only contract and scope checks
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/validate_factory_workspace.py
+          git status --porcelain
+  xcode27:
+    needs: portable
+    uses: Bambis-Lab/platform-workflows/.github/workflows/apple-xcode-ci.yml@4593d93abbafb3703751ccd887e9bad98fb5d139
+    with:
+      runs-on: xcode-27
+      artifact-name: IOSNext-FAI-1.6.2-Contract-UITests
+      artifact-path: build/FactoryWorkspaceAcceptance.xcresult
+      xcode-command: |
+        set -euo pipefail
+        xcodebuild -version
+        test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+        if ! command -v xcodegen >/dev/null 2>&1; then
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+        fi
+        bash Scripts/prepare_wireguard_dependency.sh
+        export CM_COMMIT="$(git rev-parse HEAD)"
+        export EXPECTED_VERSION="1.6.2"
+        export EXPECTED_BUILD="25"
+        bash Scripts/prepare_free_sideload_project.sh
+        python3 Scripts/Acceptance/validate_factory_workspace.py
+        SIM_ID="$(xcrun simctl list devices available -j | python3 -c '
+        import json,sys
+        ds=json.load(sys.stdin)["devices"]
+        m=[d["udid"] for runtime,devices in ds.items() if "iOS-27-0" in runtime
+           for d in devices if d["name"]=="iPhone 18 Pro Max" and d.get("isAvailable", True)]
+        assert m,"iPhone 18 Pro Max iOS 27 simulator required"
+        print(m[0])
+        ')"
+        if ! xcrun simctl list devices booted | grep -q "$SIM_ID"; then
+          xcrun simctl boot "$SIM_ID"
+        fi
+        xcrun simctl bootstatus "$SIM_ID" -b
+        mkdir -p build
+        xcodebuild \
+          -project IOSNext.xcodeproj -scheme IOSNext \
+          -configuration Debug -sdk iphonesimulator \
+          -destination "platform=iOS Simulator,id=$SIM_ID" \
+          -parallel-testing-enabled NO \
+          -only-testing:IOSNextTests/FactoryWorkspaceContractsTests \
+          -only-testing:IOSNextTests/FactoryMCPIntegrationTests \
+          -only-testing:IOSNextUITests/FactoryWorkspaceUITests \
+          -derivedDataPath build/FactoryDerivedData \
+          -resultBundlePath build/FactoryWorkspaceAcceptance.xcresult \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" test
+        echo "FAI_XCODE27_CONTRACT_AND_UI=PASS"
