@@ -31,7 +31,7 @@ jobs:
           python3 Scripts/Acceptance/validate_factory_workspace.py
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
           python3 Scripts/Acceptance/validate_opt_foundation.py
-          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py
+          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
   # Explicit manual run ONLY, never launched by a feature-branch push.
@@ -86,7 +86,7 @@ jobs:
             -parallel-testing-enabled NO \
             -derivedDataPath build/NicoFactoryDerivedData \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build-for-testing
+            build-for-testing 2>&1 | tee build/NicoFactoryBuild.log
 
       - name: Targeted iPhone tests (bounded; fail fast)
         shell: bash
@@ -164,6 +164,7 @@ jobs:
         with:
           name: IOSNext-Nico-Factory-OPT-Diagnostics
           path: |
+            build/NicoFactoryBuild.log
             build/NicoFactoryiPhone.xcresult
             build/NicoFactoryiPad.xcresult
           retention-days: 7
