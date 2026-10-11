@@ -86,20 +86,7 @@ struct AdminAreaView: View {
     private var content: some View {
         switch model.state {
         case .notConfigured:
-            ContentUnavailableView {
-                Label("Control Center nicht eingerichtet", systemImage: "person.badge.key.fill")
-            } description: {
-                Text("Die Einrichtung erfordert die HTTPS-Adresse des Admin-Backends und ein serverseitiges Owner-Token.")
-            } actions: {
-                VStack(spacing: 12) {
-                    Button("Control Center einrichten") { isPresentingConfiguration = true }
-                        .buttonStyle(.glassProminent)
-                    Button("Factory Vorschau") { isPresentingFactoryPreview = true }
-                        .buttonStyle(.glass)
-                        .accessibilityIdentifier("factory-preview-entry")
-                }
-            }
-            .padding(24)
+            preconnectionSurface
         case .locked:
             lockedSurface(message: "Der Bereich ist lokal gesperrt.", authenticating: false)
         case .unlocking:
@@ -118,6 +105,65 @@ struct AdminAreaView: View {
         case let .failed(message):
             lockedSurface(message: message, authenticating: false)
         }
+    }
+
+    /// Read-only setup overview. Never claims a successful Owner login.
+    private var preconnectionSurface: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("OWNER · CONTROL CENTER", systemImage: "slider.horizontal.3")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Deine Verwaltung.\nDeine Freigaben.")
+                        .font(.largeTitle.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Schon vor der Anmeldung erreichbar. Live-Daten und Aktionen erst nach bestätigter Owner-Berechtigung.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 4)
+
+                OwnerStatusRow(
+                    title: "Owner Backend",
+                    detail: "Verbindung noch nicht eingerichtet",
+                    symbol: "person.badge.key.fill",
+                    value: "Setup",
+                    tint: .indigo
+                )
+                OwnerStatusRow(
+                    title: "Geräteauthentifizierung",
+                    detail: "Face ID und serverseitige Gerätebindung nach dem Verbinden",
+                    symbol: "lock.shield.fill",
+                    value: "Geschützt",
+                    tint: .blue
+                )
+                VStack(alignment: .leading, spacing: 12) {
+                    Button("Control Center einrichten") {
+                        isPresentingConfiguration = true
+                    }
+                    .buttonStyle(.glassProminent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("control-center-setup-action")
+                    Button("Factory Vorschau") {
+                        isPresentingFactoryPreview = true
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("factory-preview-entry")
+                    Text("Factory und Runner können separat verbunden werden. Keine Freigabe ohne Anmeldung.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(17)
+                .ios27ContentSurface(radius: 22)
+            }
+            .frame(maxWidth: 670)
+            .padding(.horizontal, 18)
+            .padding(.top, 24)
+            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity)
+        }
+        .accessibilityIdentifier("control-center-unconfigured")
     }
 
     private func lockedSurface(message: String, authenticating: Bool) -> some View {
@@ -190,7 +236,7 @@ private struct AdminConfigurationView: View {
             }
             .ownerManagementBackground()
             .background(OwnerBackground())
-            .navigationTitle("Control Center einrichten")
+            .navigationTitle("Owner-Zugang")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

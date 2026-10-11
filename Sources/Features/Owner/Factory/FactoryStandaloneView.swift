@@ -53,6 +53,12 @@ struct FactoryStandaloneView: View {
                 if let error = factory.errorMessage {
                     IOSNextErrorBanner(message: error)
                 }
+                if !factory.hasRestorableSession && factory.phase == .credentialUnavailable {
+                    Label("Schlüsselbund prüfen – keine Factory-Sitzung verfügbar.", systemImage: "key.slash")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("factory-credential-unavailable")
+                }
                 if factory.hasRestorableSession {
                     Button("Factory-Daten aktualisieren", systemImage: "arrow.clockwise") {
                         Task { await factory.refresh() }

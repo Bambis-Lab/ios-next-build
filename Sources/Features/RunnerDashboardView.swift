@@ -17,27 +17,11 @@ struct RunnerDashboardView: View {
         Group {
             switch model.state {
             case .notConfigured:
-                ContentUnavailableView {
-                    Label("Runner nicht eingerichtet", systemImage: "server.rack")
-                } description: {
-                    Text("Verbinde die App mit dem begrenzten Runner-Control-Dienst. SSH- und GitHub-Zugangsdaten bleiben außerhalb der App.")
-                } actions: {
-                    Button("Einrichten") { model.isPresentingConfiguration = true }
-                        .buttonStyle(.glassProminent)
-                }
+                runnerSetupSurface
             case .loading:
                 ProgressView("Runner wird geladen …")
             case let .failed(message):
-                ContentUnavailableView {
-                    Label("Runner nicht erreichbar", systemImage: "exclamationmark.triangle.fill")
-                } description: {
-                    Text(message)
-                } actions: {
-                    Button("Erneut versuchen") { Task { await model.refresh() } }
-                        .buttonStyle(.glassProminent)
-                    Button("Konfiguration öffnen") { model.isPresentingConfiguration = true }
-                        .buttonStyle(.glass)
-                }
+                runnerUnavailableSurface(message: message)
             case let .ready(status):
                 dashboard(status)
             }
@@ -88,6 +72,61 @@ struct RunnerDashboardView: View {
             Button("Abbrechen", role: .cancel) { pendingAction = nil }
         } message: {
             Text("Laufende Jobs werden geschützt. Kritische Aktionen verlangen zusätzlich die Geräteauthentifizierung.")
+        }
+    }
+
+    private var runnerSetupSurface: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("RUNNER · CONTROL", systemImage: "server.rack")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Runner Control")
+                        .font(.largeTitle.bold())
+                    Text("Ressourcen, laufende Jobs und begrenzte Aktionen – nach separater, gesicherter Verbindung.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                OwnerStatusRow(title: "Runner-Control-Dienst", detail: "Noch keine Verbindung eingerichtet", symbol: "server.rack", value: "Setup", tint: .blue)
+                OwnerStatusRow(title: "Master Runtime Live", detail: "Read-only-Ereignisse über eigenen Live-Zugang", symbol: "waveform.path.ecg", value: "Separat", tint: .cyan)
+                VStack(alignment: .leading, spacing: 12) {
+                    Button("Einrichten") { model.isPresentingConfiguration = true }
+                        .buttonStyle(.glassProminent)
+                        .accessibilityIdentifier("runner-setup-action")
+                    Label("SSH- und GitHub-Zugangsdaten werden hier nicht benötigt.", systemImage: "lock.shield")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(17)
+                .ios27ContentSurface(radius: 22)
+            }
+            .frame(maxWidth: 670)
+            .padding(.horizontal, 18)
+            .padding(.top, 24)
+            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity)
+        }
+        .accessibilityIdentifier("runner-unconfigured")
+    }
+
+    private func runnerUnavailableSurface(message: String) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Label("Runner nicht erreichbar", systemImage: "wifi.exclamationmark")
+                    .font(.title2.bold())
+                    .accessibilityIdentifier("runner-offline")
+                OwnerAlertBanner(title: "Verbindung fehlgeschlagen", message: message, symbol: "exclamationmark.triangle")
+                Button("Erneut versuchen") { Task { await model.refresh() } }
+                    .buttonStyle(.glassProminent)
+                Button("Konfiguration öffnen") { model.isPresentingConfiguration = true }
+                    .buttonStyle(.glass)
+            }
+            .frame(maxWidth: 670)
+            .padding(.horizontal, 18)
+            .padding(.top, 32)
+            .frame(maxWidth: .infinity)
         }
     }
 

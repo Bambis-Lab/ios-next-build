@@ -22,7 +22,7 @@ struct FactoryCommandDeck: View {
                         .font(.title2.weight(.bold))
                 }
                 Spacer()
-                Text("\(reportedSources) Quellen")
+                Text(factoryConnected ? "\(reportedSources) Quellen" : "Nicht verbunden")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -80,7 +80,7 @@ struct FactoryCommandDeck: View {
                          active: factoryConnected).position(points[3])
                 }
             }
-            .frame(height: 240)
+            .frame(height: 214)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Factory-Topologie. MCP \(factoryConnected ? "verbunden" : "nicht verbunden"), Owner \(ownerConnected ? "online" : "nicht verfügbar"), Runner \(runnerConnected ? "online" : "nicht verfügbar").")
 
@@ -89,7 +89,7 @@ struct FactoryCommandDeck: View {
                     .fill(factoryConnected ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
                 Text(factoryConnected ? "Factory-Daten werden live abgefragt" :
-                        "Factory-Verbindung kann später eingerichtet werden")
+                        "Live-Daten nur nach autorisierter Verbindung")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
