@@ -40,7 +40,7 @@ for appearance in ("light", "dark"):
         for attachment in test.get("attachments", []):
             name = attachment.get("suggestedHumanReadableName", "")
             match = re.fullmatch(
-                rf"iosnext-162-{appearance}-(\\d{{2}}-[a-z0-9-]+)_\\d+_[0-9A-Fa-f-]+\\.png",
+                rf"iosnext-162-{appearance}-(\d{{2}}-[a-z0-9-]+)_\d+_[0-9A-Fa-f-]+\.png",
                 name,
             )
             if match is None:
