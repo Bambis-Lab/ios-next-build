@@ -95,10 +95,11 @@ final class FactoryMCPService {
 
     init(
         session: URLSession = .shared,
-        credentials: FactoryCredentialStore = .keychain
+        credentials: FactoryCredentialStore? = nil
     ) {
         self.session = session
-        self.credentials = credentials
+        // Resolve the MainActor-isolated keychain on the actor, not in a nonisolated default argument.
+        self.credentials = credentials ?? .keychain
     }
 
     private func secureURL(_ raw: String) throws -> URL {
