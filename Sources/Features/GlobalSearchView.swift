@@ -96,7 +96,7 @@ struct GlobalSearchView: View {
     }
 
     private var normalizedQuery: String {
-        Self.normalize(trimmedQuery)
+        GlobalSearchIndex.normalize(trimmedQuery)
     }
 
     private var hasResults: Bool {
@@ -105,7 +105,7 @@ struct GlobalSearchView: View {
 
     private func scheduleSearch(_ rawQuery: String) {
         searchTask?.cancel()
-        let query = Self.normalize(rawQuery)
+        let query = GlobalSearchIndex.normalize(rawQuery)
         guard !query.isEmpty else {
             results = .empty
             return
