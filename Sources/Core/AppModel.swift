@@ -368,7 +368,7 @@ final class AppModel {
 
         let generation = connectionGeneration
         let entityID = light.entityID
-        _ = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
+        let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: "light.appearance") { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true,
                   lightSegmentBridge(for: entity)?.isReady == true else { return .cancelled }
@@ -397,6 +397,7 @@ final class AppModel {
                 return .outcomeUnknown("Verbindung wechselte während der Segmentaktion.")
             }
         }
+        reportCommandResult(commandResult, entityID: entityID, generation: generation)
     }
 
     func callFireTVCompanionService(
@@ -805,7 +806,7 @@ final class AppModel {
         let entityID = entity.entityID
         let generation = connectionGeneration
         let key = Self.coalescingKey(domain: domain, service: service, data: data)
-        _ = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
+        let commandResult = await deviceCommands.execute(entityID: entityID, coalescingKey: key) { [self] in
             guard generation == connectionGeneration,
                   entity(withID: entityID)?.isAvailable == true else { return .cancelled }
             activeActionEntityIDs.insert(entityID)
@@ -841,6 +842,31 @@ final class AppModel {
                 }
                 return .outcomeUnknown("Verbindung wechselte während der Aktion.")
             }
+        }
+        reportCommandResult(commandResult, entityID: entityID, generation: generation)
+    }
+
+    private func reportCommandResult(
+        _ result: DeviceCommandResult,
+        entityID: String,
+        generation: UInt64
+    ) {
+        switch result {
+        case .executed, .superseded:
+            return
+        case .cancelled:
+            guard generation == connectionGeneration else { return }
+            lastActionError = "Der Gerätebefehl wurde vor der Ausführung abgebrochen."
+        case let .failed(message):
+            guard generation == connectionGeneration else { return }
+            lastActionError = message
+            IOSNextFeedbackCenter.shared.play(.error)
+        case let .outcomeUnknown(message):
+            // The transport may have delivered the request before cancellation.
+            // Never retry automatically; surface uncertainty and request a fresh
+            // authoritative state before the user issues another action.
+            lastActionError = "Ergebnis der Aktion für \(entityID) unbekannt: \(message)"
+            IOSNextFeedbackCenter.shared.play(.error)
         }
     }
 
