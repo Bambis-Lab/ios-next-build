@@ -4,13 +4,13 @@ import UIKit
 
 /// Bounded RAM-only chat-image previews. No original or decrypted image bytes
 /// are ever written to an unencrypted cache directory.
+private struct ChatThumbnailPayload: @unchecked Sendable {
+    let cgImage: CGImage
+}
+
 @MainActor
 final class ChatMediaThumbnailCache {
     static let shared = ChatMediaThumbnailCache()
-
-    private struct ThumbnailPayload: @unchecked Sendable {
-        let cgImage: CGImage
-    }
 
     private let thumbnails = NSCache<NSString, UIImage>()
     private let maxPixelSize = 640
@@ -43,7 +43,7 @@ final class ChatMediaThumbnailCache {
 
     private nonisolated static func makeThumbnail(
         data: Data, maxPixelSize: Int
-    ) -> ThumbnailPayload? {
+    ) -> ChatThumbnailPayload? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -51,6 +51,6 @@ final class ChatMediaThumbnailCache {
                   kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
                   kCGImageSourceShouldCacheImmediately: false
               ] as CFDictionary) else { return nil }
-        return ThumbnailPayload(cgImage: image)
+        return ChatThumbnailPayload(cgImage: image)
     }
 }
