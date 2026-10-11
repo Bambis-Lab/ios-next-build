@@ -25,6 +25,7 @@ final class AppModel {
     var selectedProfile: HomeProfile = .nico
     var connectionState: ConnectionState = .notConfigured
     var entities: [HomeAssistantEntity] = []
+    private(set) var searchRevision: UInt64 = 0
     var floors: [HomeAssistantFloor] = []
     var areas: [HomeAssistantArea] = []
     var devices: [HomeAssistantDevice] = [] {
@@ -677,6 +678,10 @@ final class AppModel {
 
         if requiresReindex {
             sortEntities()
+        } else if !changes.isEmpty {
+            // Search includes a bounded state-text field, so refresh its
+            // debounced snapshot after grouped WebSocket state changes.
+            searchRevision &+= 1
         }
     }
 
@@ -756,6 +761,7 @@ final class AppModel {
     private func sortEntities() {
         entities.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         entityIndexByID = Dictionary(uniqueKeysWithValues: entities.enumerated().map { ($0.element.entityID, $0.offset) })
+        searchRevision &+= 1
     }
 
     private nonisolated static func coalescingKey(
