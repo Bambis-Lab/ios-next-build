@@ -15,7 +15,7 @@ struct DashboardPreferencesView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Anzeigen") {
+                Section {
                     ForEach(orderedOptions) { option in
                         Toggle(isOn: Binding(
                             get: { store.isVisible(option.id) },
@@ -24,11 +24,13 @@ struct DashboardPreferencesView: View {
                             Label(option.title, systemImage: option.symbol)
                         }
                     }
+                } header: {
+                    Text("Anzeigen")
                 } footer: {
                     Text("Einstellungen werden lokal für das ausgewählte App-Profil gespeichert.")
                 }
 
-                Section("Reihenfolge") {
+                Section {
                     ForEach(orderedOptions) { option in
                         let index = orderedOptions.firstIndex(where: { $0.id == option.id }) ?? 0
                         HStack(spacing: 12) {
@@ -53,6 +55,8 @@ struct DashboardPreferencesView: View {
                             .accessibilityLabel("\(option.title) nach unten")
                         }
                     }
+                } header: {
+                    Text("Reihenfolge")
                 }
 
                 Section {
