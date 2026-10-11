@@ -385,7 +385,10 @@ final class FactoryMCPService {
     }
 
     private func openSession(forceRefresh: Bool = false) async throws -> Set<String> {
+        // Inventory may be reused only while the authenticated MCP session
+        // that produced it still exists. A cached list cannot resurrect a session.
         if !forceRefresh,
+           mcpSessionID != nil,
            let cachedToolNames,
            let expiresAt = toolDiscoveryExpiresAt,
            Date() < expiresAt {
