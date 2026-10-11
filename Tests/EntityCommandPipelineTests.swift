@@ -21,8 +21,10 @@ final class EntityCommandPipelineTests: XCTestCase {
                 return .executed
             }
         }
-        XCTAssertEqual(awaitValue(first), .executed)
-        XCTAssertEqual(awaitValue(second), .executed)
+        let firstResult = await first.value
+        let secondResult = await second.value
+        XCTAssertEqual(firstResult, .executed)
+        XCTAssertEqual(secondResult, .executed)
         XCTAssertEqual(events, ["start-A", "end-A", "B"])
     }
 
