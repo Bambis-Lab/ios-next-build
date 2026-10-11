@@ -50,6 +50,7 @@ final class AppModel {
     private var shouldReconnect = false
     private var reconnectAttempt = 0
     private var entityIndexByID: [String: Int] = [:]
+    private var entityIDsByDomain: [String: [String]] = [:]
     @ObservationIgnored var registryIndexCache: HomeAssistantLookupIndex?
     private var pendingStateChanges: [String: HomeAssistantStateChange] = [:]
     private var stateFlushTask: Task<Void, Never>?
@@ -508,7 +509,7 @@ final class AppModel {
     }
 
     func entities(inDomain domain: String) -> [HomeAssistantEntity] {
-        entities.filter { $0.entityID.hasPrefix("\(domain).") }
+        entityIDsByDomain[domain, default: []].compactMap(entity(withID:))
     }
 
     func isFireTVCompanion(_ entity: HomeAssistantEntity) -> Bool {
@@ -661,6 +662,9 @@ final class AppModel {
             entityStateRevisions[change.entityID, default: 0] &+= 1
             if let newState = change.newState {
                 if let index = entityIndexByID[change.entityID], entities.indices.contains(index) {
+                    if entities[index].displayName != newState.displayName {
+                        requiresReindex = true
+                    }
                     entities[index] = newState
                 } else {
                     entities.append(newState)
@@ -761,6 +765,13 @@ final class AppModel {
     private func sortEntities() {
         entities.sort { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
         entityIndexByID = Dictionary(uniqueKeysWithValues: entities.enumerated().map { ($0.element.entityID, $0.offset) })
+        var idsByDomain: [String: [String]] = [:]
+        for entity in entities {
+            let domain = entity.entityID.split(separator: ".", maxSplits: 1).first.map(String.init) ?? ""
+            guard !domain.isEmpty else { continue }
+            idsByDomain[domain, default: []].append(entity.entityID)
+        }
+        entityIDsByDomain = idsByDomain
         searchRevision &+= 1
     }
 
