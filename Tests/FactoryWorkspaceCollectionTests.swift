@@ -6,6 +6,7 @@ final class FactoryWorkspaceCollectionTests: XCTestCase {
     func testTypedFactoryList() throws {
         let json = """
         {"schema_version":"factory.workspace.v1","source":"factory","status":"ok",
+         "observed_at":"\(ISO8601DateFormatter().string(from: Date()))",
          "freshness":{"stale":false},"data":{"items":[
             {"id":"r1","name":"Repository","status":"active"},
             {"id":"r2","title":"Build","status":"success"}]},
