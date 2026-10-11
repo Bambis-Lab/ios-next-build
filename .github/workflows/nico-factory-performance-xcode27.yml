@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/ios-next-opt-01-14-foundation-162
+      - acceptance/iosnext-opt-smoke-606b224
   workflow_dispatch:
     inputs:
       suite:
@@ -34,10 +35,10 @@ jobs:
           python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
-  # Explicit manual run ONLY, never launched by a feature-branch push.
-  # A failed test must not suppress the upload of its .xcresult evidence.
+  # Normal feature-branch pushes run portable checks only. This exact isolated
+  # acceptance branch is allowed to run one bounded smoke; full matrix stays manual.
   xcode27:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-606b224')
     needs: portable
     runs-on: xcode-27
     timeout-minutes: 18
