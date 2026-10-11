@@ -150,6 +150,8 @@ final class AppModel {
         persist: Bool = true,
         failurePrefix: String? = nil
     ) async {
+        let trace = IOSNextPerformance.begin("HA.Connect")
+        defer { IOSNextPerformance.end("HA.Connect", trace) }
         connectionGeneration &+= 1
         deviceCommands.invalidatePending()
         reconnectTask?.cancel()
@@ -638,6 +640,8 @@ final class AppModel {
     }
 
     private func flushStateChanges() {
+        let trace = IOSNextPerformance.begin("HA.FlushStateChanges")
+        defer { IOSNextPerformance.end("HA.FlushStateChanges", trace) }
         let changes = Array(pendingStateChanges.values)
         pendingStateChanges.removeAll(keepingCapacity: true)
         stateFlushTask = nil
