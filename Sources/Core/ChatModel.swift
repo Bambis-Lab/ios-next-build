@@ -256,8 +256,11 @@ final class ChatModel {
     func sendDraft() async {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
-        draft = ""
-        await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
+        let originalDraft = draft
+        let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
+        // A failed preflight/relay request must not erase text the user typed.
+        // Never erase edits made while the send was in flight.
+        if accepted && draft == originalDraft { draft = "" }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -277,14 +280,15 @@ final class ChatModel {
         await send(data, kind: .voice, contentType: "audio/wav")
     }
 
-    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async {
+    @discardableResult
+    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         guard let configuration, let keys, !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
-            return
+            return false
         }
         guard data.count <= (Self.maximumBytes[kind] ?? 0) else {
             lastError = ChatError.contentTooLarge.localizedDescription
-            return
+            return false
         }
         isSending = true
         defer { isSending = false }
@@ -328,9 +332,11 @@ final class ChatModel {
                 }
             }
             updateDelivery(id: groupID, to: .queued)
+            return true
         } catch {
             updateDelivery(id: groupID, to: .failed)
             lastError = error.localizedDescription
+            return false
         }
     }
 
