@@ -249,6 +249,8 @@ final class JarvisEngine {
     private func startRecognitionSession(using recognizer: SFSpeechRecognizer) throws {
         stopAudioSession()
 
+        let audioSessionTrace = IOSNextPerformance.begin("Jarvis.AudioSessionActivate")
+        defer { IOSNextPerformance.end("Jarvis.AudioSessionActivate", audioSessionTrace) }
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -484,6 +486,8 @@ final class JarvisEngine {
             audioEngine.inputNode.removeTap(onBus: 0)
             inputTapInstalled = false
         }
+        let audioSessionTrace = IOSNextPerformance.begin("Jarvis.AudioSessionDeactivate")
+        defer { IOSNextPerformance.end("Jarvis.AudioSessionDeactivate", audioSessionTrace) }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
