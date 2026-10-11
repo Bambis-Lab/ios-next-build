@@ -41,7 +41,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-606b224')
     needs: portable
     runs-on: xcode-27
-    timeout-minutes: 18
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare dependencies and deterministic project
@@ -127,6 +127,50 @@ jobs:
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
+      - name: Build unsigned device IPA candidate (no signing or release)
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="build/IOSNext-IPA-Candidate"
+          DERIVED="$OUT/DerivedData"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/ipa-root/Payload"
+          xcodebuild build \
+            -project IOSNext.xcodeproj \
+            -scheme IOSNext \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$DERIVED" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" MARKETING_VERSION=1.6.2 CURRENT_PROJECT_VERSION=25
+          APP="$DERIVED/Build/Products/Release-iphoneos/IOSNext.app"
+          test -d "$APP"
+          test -f "$APP/Info.plist"
+          EXEC_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          test -x "$APP/$EXEC_NAME"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "de.nicofroeba16.iosnext"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = "1.6.2"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "25"
+          test "$(lipo -archs "$APP/$EXEC_NAME")" = "arm64"
+          ditto "$APP" "$OUT/ipa-root/Payload/IOSNext.app"
+          (cd "$OUT/ipa-root" && zip -qry "$OUT/IOSNext-Free-unsigned.ipa" Payload)
+          unzip -t "$OUT/IOSNext-Free-unsigned.ipa"
+          shasum -a 256 "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.sha256"
+          stat -f '%z' "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.size"
+          cat > "$OUT/BUILD_OK.txt" <<EOF
+          IOSNEXT_UNSIGNED_IPA_BUILD=PASS
+          VERSION=1.6.2
+          BUILD=25
+          BUNDLE_ID=de.nicofroeba16.iosnext
+          ARCH=arm64
+          SIGNED=NO
+          RELEASE=NO
+          SOURCE_COMMIT=$GITHUB_SHA
+          EOF
+          cat "$OUT/BUILD_OK.txt"
+
       - name: Full-suite iPad acceptance (manual full only)
         if: ${{ inputs.suite == 'full' }}
         timeout-minutes: 5
@@ -160,5 +204,9 @@ jobs:
             build/NicoFactoryBuild.log
             build/NicoFactoryiPhone.xcresult
             build/NicoFactoryiPad.xcresult
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.ipa
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.sha256
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.size
+            build/IOSNext-IPA-Candidate/BUILD_OK.txt
           retention-days: 7
           if-no-files-found: warn
