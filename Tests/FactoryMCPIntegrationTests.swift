@@ -41,6 +41,7 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         )
         let model = FactoryConnectionModel(service: FactoryMCPService(credentials: credential))
         XCTAssertEqual(model.phase, .credentialUnavailable)
+        XCTAssertEqual(model.phase.title, "Schlüsselbund nicht verfügbar")
         XCTAssertFalse(model.hasRestorableSession)
         XCTAssertFalse(model.canRefresh)
         XCTAssertNotNil(model.errorMessage)
