@@ -135,7 +135,7 @@ jobs:
       - name: Targeted iPhone unit tests (extended simulator startup budget)
         shell: bash
         env:
-          SUITE: ${{ inputs.suite }}
+          SUITE: ${{ inputs.suite || 'full' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -168,7 +168,7 @@ jobs:
       - name: Targeted iPhone UI acceptance (extended simulator budget)
         shell: bash
         env:
-          SUITE: ${{ inputs.suite }}
+          SUITE: ${{ inputs.suite || 'full' }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -190,7 +190,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
       - name: Full-suite iPad acceptance (manual full only)
-        if: ${{ inputs.suite == 'full' }}
+        if: ${{ inputs.suite == 'full' || github.event_name == 'push' }}
         shell: bash
         run: |
           set -euo pipefail
