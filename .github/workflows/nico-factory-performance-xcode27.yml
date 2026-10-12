@@ -125,11 +125,26 @@ jobs:
           EOF
           cat "$OUT/BUILD_OK.txt"
 
-      - name: Boot iPhone simulator before tests (bounded)
-        timeout-minutes: 3
+      - name: Upload unsigned IPA candidate (not a release)
+        timeout-minutes: 5
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-Unsigned-IPA-Candidate
+          path: |
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.ipa
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.sha256
+            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.size
+            build/IOSNext-IPA-Candidate/BUILD_OK.txt
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Reset and boot iPhone simulator before tests (bounded)
+        timeout-minutes: 6
         shell: bash
         run: |
           set -euo pipefail
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 30 -- xcrun simctl shutdown "$SIM_ID" || true
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl erase "$SIM_ID"
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee -a build/NicoFactoryBoot.log
 
       - name: Targeted iPhone unit tests (bounded; fail fast)
@@ -219,7 +234,7 @@ jobs:
 
       - name: Always upload test evidence (including red tests)
         if: always()
-        timeout-minutes: 2
+        timeout-minutes: 5
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: IOSNext-Nico-Factory-OPT-Diagnostics
@@ -229,9 +244,5 @@ jobs:
             build/NicoFactoryiPhone.xcresult
             build/NicoFactoryiPhone-UI.xcresult
             build/NicoFactoryiPad.xcresult
-            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.ipa
-            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.sha256
-            build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.size
-            build/IOSNext-IPA-Candidate/BUILD_OK.txt
           retention-days: 7
           if-no-files-found: warn
