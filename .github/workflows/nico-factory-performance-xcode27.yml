@@ -32,7 +32,7 @@ jobs:
           python3 Scripts/Acceptance/validate_factory_workspace.py
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
           python3 Scripts/Acceptance/validate_opt_foundation.py
-          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py
+          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py Scripts/Acceptance/run_xcode_tests_verified.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
 
   # Normal feature-branch pushes run portable checks only. This exact isolated
@@ -175,7 +175,10 @@ jobs:
               "-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests"
             )
           fi
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+          python3 Scripts/Acceptance/run_xcode_tests_verified.py --timeout-seconds 240 \
+            --result-bundle build/NicoFactoryiPhone.xcresult \
+            --log-file build/NicoFactoryUnitTests.log -- \
+            xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO "${scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
@@ -202,7 +205,10 @@ jobs:
             )
             ui_timeout=480
           fi
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds "$ui_timeout" -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+          python3 Scripts/Acceptance/run_xcode_tests_verified.py --timeout-seconds "$ui_timeout" \
+            --result-bundle build/NicoFactoryiPhone-UI.xcresult \
+            --log-file build/NicoFactoryUITests.log -- \
+            xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO "${ui_scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone-UI.xcresult \
@@ -241,6 +247,8 @@ jobs:
           path: |
             build/NicoFactoryBoot.log
             build/NicoFactoryBuild.log
+            build/NicoFactoryUnitTests.log
+            build/NicoFactoryUITests.log
             build/NicoFactoryiPhone.xcresult
             build/NicoFactoryiPhone-UI.xcresult
             build/NicoFactoryiPad.xcresult
