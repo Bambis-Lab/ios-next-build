@@ -125,7 +125,7 @@ jobs:
           EOF
           cat "$OUT/BUILD_OK.txt"
 
-      - name: Targeted iPhone tests (bounded; fail fast)
+      - name: Targeted iPhone unit tests (bounded; fail fast)
         timeout-minutes: 5
         shell: bash
         env:
@@ -145,30 +145,45 @@ jobs:
             "-only-testing:IOSNextTests/DashboardPreferencesTests"
             "-only-testing:IOSNextTests/AppAudioCoordinatorTests"
             "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
-            "-only-testing:IOSNextUITests/NicoRoomLayoutUITests/testAccessibilityTypeKeepsActionsAccessible"
           )
           if [[ "$SUITE" == "full" ]]; then
-            scope=(
-              "-only-testing:IOSNextTests/LatestValueCommandQueueTests"
-              "-only-testing:IOSNextTests/EntityCommandPipelineTests"
-              "-only-testing:IOSNextTests/ChatDraftSafetyTests"
-              "-only-testing:IOSNextTests/ChatMediaThumbnailCacheTests"
-              "-only-testing:IOSNextTests/HomeAssistantLookupIndexTests"
-              "-only-testing:IOSNextTests/GlobalSearchIndexTests"
-              "-only-testing:IOSNextTests/DashboardPreferencesTests"
-              "-only-testing:IOSNextTests/AppAudioCoordinatorTests"
-              "-only-testing:IOSNextTests/FactoryWorkspaceContractsTests"
+            scope+=(
               "-only-testing:IOSNextTests/FactoryWorkspaceCollectionTests"
               "-only-testing:IOSNextTests/FactoryWorkspaceEventsTests"
               "-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests"
-              "-only-testing:IOSNextUITests/NicoRoomLayoutUITests"
-              "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
             )
           fi
           python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO "${scope[@]}" \
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+
+      - name: Targeted iPhone UI acceptance (separate watchdog budget)
+        timeout-minutes: 9
+        shell: bash
+        env:
+          SUITE: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
+          test "${#files[@]}" -eq 1
+          ui_scope=(
+            "-only-testing:IOSNextUITests/NicoRoomLayoutUITests/testAccessibilityTypeKeepsActionsAccessible"
+          )
+          ui_timeout=270
+          if [[ "$SUITE" == "full" ]]; then
+            ui_scope=(
+              "-only-testing:IOSNextUITests/NicoRoomLayoutUITests"
+              "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
+            )
+            ui_timeout=480
+          fi
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds "$ui_timeout" -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO "${ui_scope[@]}" \
+            -resultBundlePath build/NicoFactoryiPhone-UI.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
       - name: Full-suite iPad acceptance (manual full only)
@@ -205,6 +220,7 @@ jobs:
             build/NicoFactoryBoot.log
             build/NicoFactoryBuild.log
             build/NicoFactoryiPhone.xcresult
+            build/NicoFactoryiPhone-UI.xcresult
             build/NicoFactoryiPad.xcresult
             build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.ipa
             build/IOSNext-IPA-Candidate/IOSNext-Free-unsigned.sha256
