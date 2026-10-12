@@ -38,7 +38,7 @@ checks={
                             and "run_xcode_tests_verified.py" not in workflow
                             and "timeout-seconds" not in workflow,
     "xcode_commands_are_direct": "xcodebuild build" in workflow
-                                 and "xcodebuild build-for-testing" in workflow
+                                 and "build-for-testing 2>&1 | tee build/NicoFactoryBuild.log" in workflow
                                  and "xcodebuild test-without-building" in workflow,
     "no_xcode_step_timeouts": "timeout-minutes:" not in workflow[workflow.index("  xcode27:"):],
     "xcode_manages_simulator_boot": "boot_simulator.py" in workflow
