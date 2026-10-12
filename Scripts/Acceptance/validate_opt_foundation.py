@@ -42,6 +42,10 @@ checks={
                                       and "ui_timeout=480" in workflow
                                       and '--timeout-seconds "$ui_timeout" -- xcodebuild test-without-building' in workflow
                                       and "build/NicoFactoryiPhone-UI.xcresult" in workflow,
+    "simulator_boot_before_tests": "Boot iPhone simulator before tests (bounded)" in workflow
+                                   and workflow.index("Boot iPhone simulator before tests (bounded)")
+                                   < workflow.index("Targeted iPhone unit tests (bounded; fail fast)")
+                                   and 'timeout-minutes: 3' in workflow,
     "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
