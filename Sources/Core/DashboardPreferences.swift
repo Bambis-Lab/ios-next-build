@@ -21,11 +21,15 @@ final class DashboardPreferencesStore {
     private(set) var hiddenIDs: Set<String>
     let profileID: String
 
-    private var storageKey: String { "iosnext.dashboard.preferences.v1.\(profileID)" }
+    private var storageKey: String { Self.storageKey(for: profileID) }
+
+    private static func storageKey(for profileID: String) -> String {
+        "iosnext.dashboard.preferences.v1.\(profileID)"
+    }
 
     init(profileID: String) {
         self.profileID = profileID
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+        if let data = UserDefaults.standard.data(forKey: Self.storageKey(for: profileID)),
            let payload = try? JSONDecoder().decode(DashboardPreferencePayload.self, from: data) {
             orderedIDs = payload.orderedIDs
             hiddenIDs = payload.hiddenIDs
