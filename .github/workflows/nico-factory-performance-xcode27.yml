@@ -32,8 +32,9 @@ jobs:
           python3 Scripts/Acceptance/validate_factory_workspace.py
           python3 Scripts/Acceptance/validate_nico_factory_ui.py
           python3 Scripts/Acceptance/validate_opt_foundation.py
-          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py Scripts/Acceptance/run_xcode_tests_verified.py
+          python3 -m py_compile Scripts/Acceptance/xcode_watchdog.py Scripts/Acceptance/boot_simulator.py Scripts/Acceptance/run_xcode_tests_verified.py Scripts/Acceptance/test_run_xcode_tests_verified.py
           python3 -m unittest discover -s Scripts/Acceptance -p 'test_compare_performance.py'
+          python3 -m unittest discover -s Scripts/Acceptance -p 'test_run_xcode_tests_verified.py'
 
   # Normal feature-branch pushes run portable checks only. This exact isolated
   # acceptance branch is allowed to run one bounded smoke; full matrix stays manual.
