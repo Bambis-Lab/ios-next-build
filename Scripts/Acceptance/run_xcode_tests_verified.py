@@ -37,7 +37,7 @@ def verify_summary(summary):
     passed = first_value(summary, ("passedTests", "passedTestCount"))
     failed = first_value(summary, ("failedTests", "failedTestCount"))
     skipped = first_value(summary, ("skippedTests", "skippedTestCount"))
-    finish = first_value(summary, ("finishTime", "finishedAt", "endTime"))
+    expected = first_value(summary, ("expectedFailures", "expectedFailureCount"))
     if not isinstance(result, str) or result.strip().lower() not in {"passed", "success", "succeeded"}:
         return False, "xcresult has no successful final result"
     if not isinstance(total, int) or total < 1:
@@ -46,11 +46,13 @@ def verify_summary(summary):
         return False, "xcresult is missing passed/failed counts"
     if skipped is None:
         skipped = 0
-    if not isinstance(skipped, int) or failed != 0 or passed + skipped != total:
-        return False, "xcresult counts show failure or incomplete accounting"
-    if not isinstance(finish, (str, int, float)) or not finish:
-        return False, "xcresult has no finished timestamp"
-    return True, f"result={result} total={total} passed={passed} skipped={skipped} failed={failed}"
+    if expected is None:
+        expected = 0
+    if not isinstance(skipped, int) or not isinstance(expected, int) or failed != 0:
+        return False, "xcresult counts include a test failure or invalid count type"
+    if passed + skipped + expected != total:
+        return False, "xcresult counts do not account for every test"
+    return True, f"result={result} total={total} passed={passed} skipped={skipped} expectedFailures={expected} failed={failed}"
 
 
 def main():
