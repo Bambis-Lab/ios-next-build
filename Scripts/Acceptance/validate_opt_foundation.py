@@ -48,7 +48,7 @@ checks={
     "ui_test_has_separate_watchdog": "Targeted iPhone UI acceptance (separate watchdog budget)" in workflow
                                       and "ui_timeout=270" in workflow
                                       and "ui_timeout=480" in workflow
-                                      and '--timeout-seconds "$ui_timeout" -- xcodebuild test-without-building' in workflow
+                                      and 'run_xcode_tests_verified.py --timeout-seconds "$ui_timeout"' in workflow
                                       and "build/NicoFactoryiPhone-UI.xcresult" in workflow,
     "simulator_boot_before_tests": "Reset and boot iPhone simulator before tests (bounded)" in workflow
                                    and workflow.index("Reset and boot iPhone simulator before tests (bounded)")
