@@ -139,13 +139,12 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Reset and boot iPhone simulator before tests (bounded)
-        timeout-minutes: 6
+      - name: Restart iPhone simulator before tests (bounded; no erase)
+        timeout-minutes: 4
         shell: bash
         run: |
           set -euo pipefail
           python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 30 -- xcrun simctl shutdown "$SIM_ID" || true
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl erase "$SIM_ID"
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee -a build/NicoFactoryBoot.log
 
       - name: Targeted iPhone unit tests (bounded; fail fast)
