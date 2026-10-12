@@ -125,6 +125,13 @@ jobs:
           EOF
           cat "$OUT/BUILD_OK.txt"
 
+      - name: Boot iPhone simulator before tests (bounded)
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee -a build/NicoFactoryBoot.log
+
       - name: Targeted iPhone unit tests (bounded; fail fast)
         timeout-minutes: 5
         shell: bash
