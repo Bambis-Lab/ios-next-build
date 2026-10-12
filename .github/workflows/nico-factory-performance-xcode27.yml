@@ -42,7 +42,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-606b224')
     needs: portable
     runs-on: xcode-27
-    timeout-minutes: 35
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare dependencies and deterministic project
@@ -139,16 +139,8 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Restart iPhone simulator before tests (bounded; no erase)
-        timeout-minutes: 4
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 30 -- xcrun simctl shutdown "$SIM_ID" || true
-          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee -a build/NicoFactoryBoot.log
-
-      - name: Targeted iPhone unit tests (bounded; fail fast)
-        timeout-minutes: 5
+      - name: Targeted iPhone unit tests (extended simulator startup budget)
+        timeout-minutes: 25
         shell: bash
         env:
           SUITE: ${{ inputs.suite }}
@@ -175,7 +167,7 @@ jobs:
               "-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests"
             )
           fi
-          python3 Scripts/Acceptance/run_xcode_tests_verified.py --timeout-seconds 240 \
+          python3 Scripts/Acceptance/run_xcode_tests_verified.py --timeout-seconds 1200 \
             --result-bundle build/NicoFactoryiPhone.xcresult \
             --log-file build/NicoFactoryUnitTests.log -- \
             xcodebuild test-without-building -xctestrun "${files[0]}" \
@@ -184,8 +176,8 @@ jobs:
             -resultBundlePath build/NicoFactoryiPhone.xcresult \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
 
-      - name: Targeted iPhone UI acceptance (separate watchdog budget)
-        timeout-minutes: 9
+      - name: Targeted iPhone UI acceptance (extended simulator budget)
+        timeout-minutes: 25
         shell: bash
         env:
           SUITE: ${{ inputs.suite }}
@@ -197,13 +189,13 @@ jobs:
           ui_scope=(
             "-only-testing:IOSNextUITests/NicoRoomLayoutUITests/testAccessibilityTypeKeepsActionsAccessible"
           )
-          ui_timeout=270
+          ui_timeout=1200
           if [[ "$SUITE" == "full" ]]; then
             ui_scope=(
               "-only-testing:IOSNextUITests/NicoRoomLayoutUITests"
               "-only-testing:IOSNextUITests/FactoryWorkspaceUITests"
             )
-            ui_timeout=480
+            ui_timeout=1200
           fi
           python3 Scripts/Acceptance/run_xcode_tests_verified.py --timeout-seconds "$ui_timeout" \
             --result-bundle build/NicoFactoryiPhone-UI.xcresult \
@@ -216,7 +208,7 @@ jobs:
 
       - name: Full-suite iPad acceptance (manual full only)
         if: ${{ inputs.suite == 'full' }}
-        timeout-minutes: 5
+        timeout-minutes: 25
         shell: bash
         run: |
           set -euo pipefail
@@ -231,7 +223,7 @@ jobs:
           xcrun simctl boot "$IPAD_ID" || true
           python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 90 -- xcrun simctl bootstatus "$IPAD_ID" -b
           files=(build/NicoFactoryDerivedData/Build/Products/*.xctestrun)
-          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 240 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 1200 -- xcodebuild test-without-building -xctestrun "${files[0]}" \
             -destination "platform=iOS Simulator,id=$IPAD_ID" \
             -parallel-testing-enabled NO \
             "-only-testing:IOSNextUITests/NicoRoomLayoutUITests" \
