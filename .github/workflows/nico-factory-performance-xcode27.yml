@@ -91,7 +91,7 @@ jobs:
           DERIVED="$OUT/DerivedData"
           rm -rf "$OUT"
           mkdir -p "$OUT/ipa-root/Payload"
-          xcodebuild build \
+          python3 Scripts/Acceptance/xcode_watchdog.py --timeout-seconds 540 -- xcodebuild build \
             -project IOSNext.xcodeproj \
             -scheme IOSNext \
             -configuration Release \
