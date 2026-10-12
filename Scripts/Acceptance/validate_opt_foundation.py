@@ -42,7 +42,8 @@ checks={
                                  and "xcodebuild test-without-building" in workflow,
     "no_xcode_step_timeouts": "timeout-minutes:" not in workflow[workflow.index("  xcode27:"):],
     "full_matrix_on_acceptance_push": workflow.count("SUITE: ${{ inputs.suite || 'full' }}") == 2
-                                  and "inputs.suite == 'full' || github.event_name == 'push'" in workflow,
+                                  and "github.event_name == 'push' && github.ref == 'refs/heads/acceptance/iosnext-opt-smoke-606b224'" in workflow
+                                  and "github.event_name == 'workflow_dispatch' && inputs.suite == 'full'" in workflow,
     "xcode_manages_simulator_boot": "boot_simulator.py" in workflow
                                     and "--resolve-only" in workflow
                                     and "Restart iPhone simulator" not in workflow
