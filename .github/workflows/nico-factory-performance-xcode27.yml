@@ -109,7 +109,7 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = "25"
           test "$(lipo -archs "$APP/$EXEC_NAME")" = "arm64"
           ditto "$APP" "$OUT/ipa-root/Payload/IOSNext.app"
-          (cd "$OUT/ipa-root" && zip -qry "$OUT/IOSNext-Free-unsigned.ipa" Payload)
+          (cd "$OUT/ipa-root" && zip -qry "../IOSNext-Free-unsigned.ipa" Payload)
           unzip -t "$OUT/IOSNext-Free-unsigned.ipa"
           shasum -a 256 "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.sha256"
           stat -f '%z' "$OUT/IOSNext-Free-unsigned.ipa" | tee "$OUT/IOSNext-Free-unsigned.size"
