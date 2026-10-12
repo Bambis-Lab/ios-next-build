@@ -64,6 +64,8 @@ checks={
                                   and workflow.index("Always upload test evidence (including red tests)") < len(workflow)
                                   and "timeout-minutes: 5" in workflow,
     "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
+    "bounded_device_ipa_compile": "xcode_watchdog.py --timeout-seconds 540 -- xcodebuild build" in workflow
+                                 and "Build unsigned device IPA candidate (no signing or release)" in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
     "no_automatic_xcode_push": "on:" in workflow and "needs: portable" in workflow,
