@@ -42,10 +42,18 @@ checks={
                                       and "ui_timeout=480" in workflow
                                       and '--timeout-seconds "$ui_timeout" -- xcodebuild test-without-building' in workflow
                                       and "build/NicoFactoryiPhone-UI.xcresult" in workflow,
-    "simulator_boot_before_tests": "Boot iPhone simulator before tests (bounded)" in workflow
-                                   and workflow.index("Boot iPhone simulator before tests (bounded)")
+    "simulator_boot_before_tests": "Reset and boot iPhone simulator before tests (bounded)" in workflow
+                                   and workflow.index("Reset and boot iPhone simulator before tests (bounded)")
                                    < workflow.index("Targeted iPhone unit tests (bounded; fail fast)")
-                                   and 'timeout-minutes: 3' in workflow,
+                                   and 'timeout-minutes: 6' in workflow
+                                   and 'simctl erase "$SIM_ID"' in workflow,
+    "ipa_candidate_uploaded_before_tests": "Upload unsigned IPA candidate (not a release)" in workflow
+                                           and workflow.index("Upload unsigned IPA candidate (not a release)")
+                                           < workflow.index("Reset and boot iPhone simulator before tests (bounded)")
+                                           and "IOSNext-Unsigned-IPA-Candidate" in workflow,
+    "diagnostic_upload_has_room": "Always upload test evidence (including red tests)" in workflow
+                                  and workflow.index("Always upload test evidence (including red tests)") < len(workflow)
+                                  and "timeout-minutes: 5" in workflow,
     "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
     "evidence_on_failure": "if: always()" in workflow
                            and "build/NicoFactoryiPhone.xcresult" in workflow,
