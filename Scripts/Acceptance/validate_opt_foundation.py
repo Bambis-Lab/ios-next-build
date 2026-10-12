@@ -36,7 +36,15 @@ color=read("Sources/Design/LightControlSheet.swift")
 checks={
     "manual_xcode_only": "if: github.event_name == 'workflow_dispatch'" in workflow,
     "bounded_job_timeout": "timeout-minutes: 35" in workflow and "timeout-minutes: 3" in workflow,
-    "bounded_test_timeout": "--timeout-seconds 240 -- xcodebuild test-without-building" in workflow,
+    "bounded_test_timeout": "run_xcode_tests_verified.py --timeout-seconds 240" in workflow
+                          and "--result-bundle build/NicoFactoryiPhone.xcresult" in workflow
+                          and "--log-file build/NicoFactoryUnitTests.log" in workflow,
+    "ui_test_result_bundle_verification": 'run_xcode_tests_verified.py --timeout-seconds "$ui_timeout"' in workflow
+                                          and "--result-bundle build/NicoFactoryiPhone-UI.xcresult" in workflow
+                                          and "--log-file build/NicoFactoryUITests.log" in workflow,
+    "result_verifier_compiled": "Scripts/Acceptance/run_xcode_tests_verified.py" in workflow
+                                and "WATCHDOG_TIMEOUT" in read("Scripts/Acceptance/xcode_watchdog.py")
+                                and "xcresulttool" in read("Scripts/Acceptance/run_xcode_tests_verified.py"),
     "ui_test_has_separate_watchdog": "Targeted iPhone UI acceptance (separate watchdog budget)" in workflow
                                       and "ui_timeout=270" in workflow
                                       and "ui_timeout=480" in workflow
