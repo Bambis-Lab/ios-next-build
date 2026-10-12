@@ -55,6 +55,11 @@ checks={
     "diagnostic_evidence_uploaded_on_failure": "if: always()" in workflow
                                                and "Always upload test evidence (including red tests)" in workflow
                                                and "build/NicoFactoryiPhone.xcresult" in workflow,
+    "ipad_acceptance_isolated_job": "xcode27-ipad:" in workflow
+                                   and "needs: xcode27" in workflow
+                                   and "build/NicoFactoryiPadDerivedData" in workflow
+                                   and "IOSNext-iPad-Acceptance-Diagnostics" in workflow
+                                   and "Full-suite iPad acceptance (manual full only)" not in workflow,
     "no_automatic_xcode_push": "on:" in workflow and "needs: portable" in workflow,
     "lazy_scroll_test": "reveal(desk, in: app)" in tests
                         and "Nico-Accessibility-Hierarchy-ON-FAIL" in tests,
