@@ -7,7 +7,6 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 workflow=read(".github/workflows/nico-factory-performance-xcode27.yml")
-watchdog=read("Scripts/Acceptance/xcode_watchdog.py")
 tests=read("UITests/NicoRoomLayoutUITests.swift")
 model=read("Sources/Core/AppModel.swift")
 chat=read("Sources/Core/ChatModel.swift")
@@ -35,43 +34,26 @@ color=read("Sources/Design/LightControlSheet.swift")
 
 checks={
     "manual_xcode_only": "if: github.event_name == 'workflow_dispatch'" in workflow,
-    "bounded_job_timeout": "timeout-minutes: 35" in workflow and "timeout-minutes: 3" in workflow,
-    "bounded_test_timeout": "run_xcode_tests_verified.py --timeout-seconds 240" in workflow
-                          and "--result-bundle build/NicoFactoryiPhone.xcresult" in workflow
-                          and "--log-file build/NicoFactoryUnitTests.log" in workflow,
-    "ui_test_result_bundle_verification": 'run_xcode_tests_verified.py --timeout-seconds "$ui_timeout"' in workflow
-                                          and "--result-bundle build/NicoFactoryiPhone-UI.xcresult" in workflow
-                                          and "--log-file build/NicoFactoryUITests.log" in workflow,
-    "result_verifier_compiled": "Scripts/Acceptance/run_xcode_tests_verified.py" in workflow
-                                and "WATCHDOG_TIMEOUT" in read("Scripts/Acceptance/xcode_watchdog.py")
-                                and "xcresulttool" in read("Scripts/Acceptance/run_xcode_tests_verified.py"),
-    "ui_test_has_separate_watchdog": "Targeted iPhone UI acceptance (separate watchdog budget)" in workflow
-                                      and "ui_timeout=270" in workflow
-                                      and "ui_timeout=480" in workflow
-                                      and 'run_xcode_tests_verified.py --timeout-seconds "$ui_timeout"' in workflow
-                                      and "build/NicoFactoryiPhone-UI.xcresult" in workflow,
-    "simulator_boot_before_tests": "Restart iPhone simulator before tests (bounded; no erase)" in workflow
-                                   and workflow.index("Restart iPhone simulator before tests (bounded; no erase)")
-                                   < workflow.index("Targeted iPhone unit tests (bounded; fail fast)")
-                                   and 'timeout-minutes: 4' in workflow
-                                   and 'simctl shutdown "$SIM_ID"' in workflow
-                                   and 'simctl erase "$SIM_ID"' not in workflow,
+    "no_process_watchdogs": "xcode_watchdog.py" not in workflow
+                            and "run_xcode_tests_verified.py" not in workflow
+                            and "timeout-seconds" not in workflow,
+    "xcode_commands_are_direct": "xcodebuild build" in workflow
+                                 and "xcodebuild build-for-testing" in workflow
+                                 and "xcodebuild test-without-building" in workflow,
+    "no_xcode_step_timeouts": "timeout-minutes:" not in workflow[workflow.index("  xcode27:"):],
+    "xcode_manages_simulator_boot": "boot_simulator.py" in workflow
+                                    and "--resolve-only" in workflow
+                                    and "Restart iPhone simulator" not in workflow
+                                    and "simctl erase" not in workflow
+                                    and "simctl bootstatus" not in workflow,
     "ipa_candidate_uploaded_before_tests": "Upload unsigned IPA candidate (not a release)" in workflow
                                            and workflow.index("Upload unsigned IPA candidate (not a release)")
-                                           < workflow.index("Restart iPhone simulator before tests (bounded; no erase)")
+                                           < workflow.index("Targeted iPhone unit tests")
                                            and "IOSNext-Unsigned-IPA-Candidate" in workflow,
-    "diagnostic_upload_has_room": "Always upload test evidence (including red tests)" in workflow
-                                  and workflow.index("Always upload test evidence (including red tests)") < len(workflow)
-                                  and "timeout-minutes: 5" in workflow,
-    "bounded_compile_timeout": "--timeout-seconds 600 -- xcodebuild -project IOSNext.xcodeproj" in workflow,
-    "bounded_device_ipa_compile": "xcode_watchdog.py --timeout-seconds 540 -- xcodebuild build" in workflow
-                                 and "Build unsigned device IPA candidate (no signing or release)" in workflow,
-    "evidence_on_failure": "if: always()" in workflow
-                           and "build/NicoFactoryiPhone.xcresult" in workflow,
+    "diagnostic_evidence_uploaded_on_failure": "if: always()" in workflow
+                                               and "Always upload test evidence (including red tests)" in workflow
+                                               and "build/NicoFactoryiPhone.xcresult" in workflow,
     "no_automatic_xcode_push": "on:" in workflow and "needs: portable" in workflow,
-    "process_group_watchdog": "communicate(timeout=" not in watchdog
-                             and "wait(timeout=args.timeout_seconds)" in watchdog
-                             and "os.killpg(process.pid, signal.SIGKILL)" in watchdog,
     "lazy_scroll_test": "reveal(desk, in: app)" in tests
                         and "Nico-Accessibility-Hierarchy-ON-FAIL" in tests,
     "entity_serial_lane": "deviceCommands.execute(entityID:" in model,
