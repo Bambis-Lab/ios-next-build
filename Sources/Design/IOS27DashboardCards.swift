@@ -717,6 +717,7 @@ private struct IOS27ConfirmedSlider: View {
         }
         .onDisappear {
             confirmationTask?.cancel()
+            commandTask?.cancel()
             revision &+= 1
         }
     }
