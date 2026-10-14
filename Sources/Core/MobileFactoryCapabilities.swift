@@ -18,6 +18,23 @@ struct MobileFactoryCapability: Codable, Equatable, Identifiable, Sendable {
         case id, tool, backend, capability, available, enabled, authorized, reason
         case requiresApproval = "requires_approval"
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(backend, forKey: .backend)
+        try container.encode(capability, forKey: .capability)
+        try container.encode(available, forKey: .available)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(authorized, forKey: .authorized)
+        try container.encode(requiresApproval, forKey: .requiresApproval)
+        if let reason {
+            try container.encode(reason, forKey: .reason)
+        } else {
+            try container.encodeNil(forKey: .reason)
+        }
+    }
 }
 
 struct MobileFactoryBackend: Codable, Equatable, Sendable {
