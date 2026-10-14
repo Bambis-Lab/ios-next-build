@@ -1,0 +1,146 @@
+name: iOS Next 1.6.4 slider iPhone and iPad acceptance
+
+on:
+  push:
+    branches:
+      - feature/iosnext-164-slider-p0-build27
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iosnext-slider-164-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify isolated slider patch and regression coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          reconciler = Path('Sources/Core/SliderValueReconciler.swift').read_text()
+          tests = Path('Tests/SliderValueReconcilerTests.swift').read_text()
+          assert 'isAwaitingConfirmation' in reconciler
+          assert 'revision == expectedRevision' in reconciler
+          assert 'testStaleRemoteUpdateDoesNotUndoCommittedValue' in tests
+          for path in ('Sources/Design/MediaControlSheet.swift','Sources/Design/LightControlSheet.swift','Sources/Features/RoomsView.swift'):
+              assert 'SliderValueReconciler()' in Path(path).read_text(), path
+          print('SLIDER_SOURCE_CONTRACT=PASS')
+          PY
+
+  xcode27-iphone:
+    needs: source-check
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27 project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.2"
+          export EXPECTED_BUILD="25"
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build
+      - name: Resolve iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/SlideriPhoneBoot.log
+      - name: Build and test slider regression on iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/SlideriPhoneDerivedData \
+            -resultBundlePath build/SlideriPhone.xcresult \
+            '-only-testing:IOSNextTests/SliderValueReconcilerTests' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/SlideriPhone.log
+      - name: Preserve iPhone evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-164-Slider-iPhone-Evidence
+          path: |
+            build/SlideriPhoneBoot.log
+            build/SlideriPhone.log
+            build/SlideriPhone.xcresult
+          retention-days: 14
+          if-no-files-found: warn
+
+  xcode27-ipad:
+    needs: source-check
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27 project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.2"
+          export EXPECTED_BUILD="25"
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build
+      - name: Resolve available iPad simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPAD_ID="$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          ds=json.load(sys.stdin)["devices"]
+          candidates=[d["udid"] for runtime,devices in ds.items() if "iOS-27" in runtime
+                      for d in devices if d["name"].startswith("iPad") and d.get("isAvailable",True)]
+          assert candidates, "iOS 27 iPad simulator required"
+          print(candidates[0])
+          ')"
+          echo "IPAD_ID=$IPAD_ID" >> "$GITHUB_ENV"
+      - name: Build and test slider regression on iPad
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/SlideriPadDerivedData \
+            -resultBundlePath build/SlideriPad.xcresult \
+            '-only-testing:IOSNextTests/SliderValueReconcilerTests' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/SlideriPad.log
+      - name: Preserve iPad evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-164-Slider-iPad-Evidence
+          path: |
+            build/SlideriPad.log
+            build/SlideriPad.xcresult
+          retention-days: 14
+          if-no-files-found: warn
