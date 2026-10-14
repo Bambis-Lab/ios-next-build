@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/iosnext-164-slider-p0-build27
+      - fix/iosnext-164-dashboard-sliders-fix01-05
 
 permissions:
   contents: read
