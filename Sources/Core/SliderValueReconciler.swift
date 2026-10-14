@@ -57,11 +57,13 @@ struct SliderValueReconciler {
 
     /// Reconcile an unacknowledged command after the bounded UI grace period.
     /// A late timer from an older gesture cannot roll back a newer gesture.
-    mutating func settle(revision expectedRevision: Int, range: ClosedRange<Double>) {
-        guard revision == expectedRevision, isAwaitingConfirmation, !isEditing else { return }
+    @discardableResult
+    mutating func settle(revision expectedRevision: Int, range: ClosedRange<Double>) -> Bool {
+        guard revision == expectedRevision, isAwaitingConfirmation, !isEditing else { return false }
         isAwaitingConfirmation = false
         pendingValue = nil
         if let lastObservedValue { value = clamp(lastObservedValue, range) }
+        return true
     }
 
     private func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {
