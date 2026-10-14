@@ -949,8 +949,17 @@ private struct NicoMicroActionTile: View {
 
 private struct NicoPrimaryLightTile: View {
     @State private var showControls = false
-    @State private var draftBrightness = 0.0
-    @State private var isEditingBrightness = false
+    @State private var brightnessSlider = SliderValueReconciler()
+    @State private var brightnessSettlement: Task<Void, Never>?
+
+    private func scheduleBrightnessSettlement(revision: Int) {
+        brightnessSettlement?.cancel()
+        brightnessSettlement = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            brightnessSlider.settle(revision: revision, range: 0...1)
+        }
+    }
     let entity: HomeAssistantEntity
     let appModel: AppModel
 
@@ -984,20 +993,26 @@ private struct NicoPrimaryLightTile: View {
             }
 
             if let brightness = entity.brightness {
-                Slider(value: $draftBrightness, in: 0...1) { editing in
-                    isEditingBrightness = editing
-                    if !editing {
-                        Task { await appModel.setBrightness(draftBrightness, for: entity) }
+                Slider(value: Binding(
+                    get: { brightnessSlider.value },
+                    set: { brightnessSlider.updateDraft($0, range: 0...1) }
+                ), in: 0...1) { editing in
+                    if editing {
+                        brightnessSettlement?.cancel()
+                        brightnessSlider.beginEditing()
+                    } else {
+                        let command = brightnessSlider.endEditing(range: 0...1)
+                        Task { await appModel.setBrightness(command.value, for: entity) }
+                        scheduleBrightnessSettlement(revision: command.revision)
                     }
                 }
-                .onAppear { draftBrightness = min(max(brightness, 0), 1) }
+                .onAppear { brightnessSlider.initialize(from: brightness, range: 0...1) }
                 .onChange(of: brightness) { _, value in
-                    if !isEditingBrightness {
-                        draftBrightness = min(max(value, 0), 1)
-                    }
+                    brightnessSlider.observe(value, range: 0...1)
                 }
+                .onDisappear { brightnessSettlement?.cancel() }
                 .accessibilityLabel("Helligkeit \(entity.displayName)")
-                .accessibilityValue("\(Int(draftBrightness * 100)) Prozent")
+                .accessibilityValue("\(Int(brightnessSlider.value * 100)) Prozent")
             }
         }
         .padding(16)
