@@ -639,67 +639,54 @@ private struct IOS27ConfirmedSlider: View {
     let label: String
     let apply: @MainActor (Double) async -> DeviceCommandResult
 
-    @State private var draft = 0.0
-    @State private var editing = false
-    @State private var pending: Double?
-    @State private var revision = 0
+    @State private var reconciler = SliderValueReconciler()
     @State private var confirmationTask: Task<Void, Never>?
-    @State private var timedOut = false
-    @State private var transportError: String?
 
-    private var boundedRemote: Double { min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1) }
+    private var boundedRemote: Double {
+        min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Slider(value: $draft, in: 0...1, onEditingChanged: { active in
-                if active {
-                    confirmationTask?.cancel()
-                    revision &+= 1
-                    editing = true
-                    pending = nil
-                    timedOut = false
-                    transportError = nil
-                } else {
-                    editing = false
-                    let target = draft
-                    if abs(target - boundedRemote) <= 0.005 {
-                        pending = nil
-                        return
-                    }
-                    pending = target
-                    revision &+= 1
-                    let current = revision
-                    confirmationTask?.cancel()
-                    confirmationTask = Task {
-                        // Confirmation timeout starts independently of transport completion.
-                        try? await Task.sleep(for: .seconds(3))
-                        guard !Task.isCancelled, revision == current, pending != nil else { return }
-                        pending = nil
-                        timedOut = true
-                        draft = boundedRemote
-                    }
-                    Task {
-                        let result = await apply(target)
-                        guard revision == current, pending != nil else { return }
-                        switch result {
-                        case .executed, .superseded:
-                            break // WebSocket state, not transport success, confirms the device.
-                        case .cancelled:
-                            transportError = "Gerätebefehl abgebrochen"
-                        case let .failed(message), let .outcomeUnknown(message):
-                            transportError = message
+            Slider(
+                value: Binding(
+                    get: { reconciler.value },
+                    set: { reconciler.updateDraft($0, range: 0...1) }
+                ),
+                in: 0...1,
+                onEditingChanged: { active in
+                    if active {
+                        confirmationTask?.cancel()
+                        reconciler.beginEditing()
+                    } else {
+                        guard reconciler.isEditing else { return }
+                        let command = reconciler.endEditing(range: 0...1)
+                        if abs(command.value - boundedRemote) <= 0.005 {
+                            reconciler.observe(boundedRemote, range: 0...1)
+                            return
+                        }
+                        confirmationTask?.cancel()
+                        confirmationTask = Task {
+                            try? await Task.sleep(for: .seconds(3))
+                            guard !Task.isCancelled else { return }
+                            _ = reconciler.settle(revision: command.revision, range: 0...1)
+                        }
+                        Task {
+                            let result = await apply(command.value)
+                            reconciler.finishTransport(result, revision: command.revision)
                         }
                     }
                 }
-            })
+            )
             .accessibilityLabel(label)
-            .accessibilityValue("\(Int((draft * 100).rounded())) Prozent")
-            if let transportError {
-                Text(transportError)
+            .accessibilityValue("\(Int((reconciler.value * 100).rounded())) Prozent")
+            if let issue = reconciler.issue {
+                Text(issue)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.updatesFrequently)
             }
-            if timedOut {
+            if reconciler.didTimeOut {
                 Text("Gerätebestätigung ausstehend")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -708,42 +695,21 @@ private struct IOS27ConfirmedSlider: View {
         }
         .onAppear {
             confirmationTask?.cancel()
-            revision &+= 1
-            pending = nil
-            editing = false
-            timedOut = false
-            transportError = nil
-            draft = boundedRemote
+            reconciler.reset(from: boundedRemote, range: 0...1)
         }
         .onChange(of: remoteValue) { _, _ in
-            guard !editing else { return }
-            if let pending {
-                if abs(boundedRemote - pending) <= 0.015 {
-                    confirmationTask?.cancel()
-                    self.pending = nil
-                    timedOut = false
-                    transportError = nil
-                    draft = boundedRemote
-                }
-            } else {
-                draft = boundedRemote
-                timedOut = false
+            reconciler.observe(boundedRemote, range: 0...1)
+            if !reconciler.isAwaitingConfirmation {
+                confirmationTask?.cancel()
             }
         }
         .onChange(of: entityID) { _, _ in
             confirmationTask?.cancel()
-            revision &+= 1
-            pending = nil
-            editing = false
-            timedOut = false
-            transportError = nil
-            draft = boundedRemote
+            reconciler.reset(from: boundedRemote, range: 0...1)
         }
         .onDisappear {
             confirmationTask?.cancel()
-            revision &+= 1
-            pending = nil
-            editing = false
+            reconciler.reset(from: boundedRemote, range: 0...1)
         }
     }
 }
