@@ -39,6 +39,16 @@ final class SliderValueReconcilerTests: XCTestCase {
         XCTAssertFalse(slider.isAwaitingConfirmation)
     }
 
+    func testTimeoutWithoutPostGestureStateDoesNotRevertToOldValue() {
+        var slider = SliderValueReconciler()
+        slider.initialize(from: 0.09, range: 0...1)
+        slider.beginEditing()
+        slider.updateDraft(0.70, range: 0...1)
+        let command = slider.endEditing(range: 0...1)
+        slider.settle(revision: command.revision, range: 0...1)
+        XCTAssertEqual(slider.value, 0.70, accuracy: 0.0001)
+    }
+
     func testOldTimerCannotRollbackNewerGesture() {
         var slider = SliderValueReconciler()
         slider.initialize(from: 0.09, range: 0...1)
