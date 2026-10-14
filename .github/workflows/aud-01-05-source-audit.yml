@@ -1,0 +1,46 @@
+name: IOS Next AUD-01-05 Source Audit
+
+on:
+  push:
+    branches:
+      - feature/iosnext-164-slider-p0-build27
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Full Swift source lock and risk-signal report
+        run: python3 Scripts/Audit/source_audit.py --out build/source-audit
+      - name: Validate complete inventory and known regression signals
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base=Path("build/source-audit")
+          lock=json.loads((base/"source-lock.json").read_text())
+          signals=json.loads((base/"risk-signals.json").read_text())
+          files={x["path"] for x in lock["files"]}
+          assert lock["summary"]["source_count"] >= 130
+          assert len(files)==len(lock["files"])
+          assert len(files) >= 162
+          assert "Sources/Core/SliderValueReconciler.swift" in files
+          assert "Sources/Design/IOS27DashboardCards.swift" in files
+          slider=[x for x in signals["findings"] if x["id"]=="AUD-GESTURE-001" and x["path"]=="Sources/Design/IOS27DashboardCards.swift"]
+          assert len(slider)==4, f"Expected 4 unresolved dashboard slider bindings, found {len(slider)}"
+          print("AUD_01_05_SOURCE_LOCK_AND_KNOWN_REGRESSIONS=PASS")
+          PY
+      - name: Upload complete immutable audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-AUD-01-05-Source-Audit
+          path: build/source-audit/
+          retention-days: 30
+          if-no-files-found: warn
