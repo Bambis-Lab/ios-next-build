@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/g99-ios-next-164-acceptance.yml'
   workflow_dispatch:
+# G99 acceptance retry: preserve workflow behavior; trigger branch-scoped acceptance.
 permissions:
   contents: read
 concurrency:
