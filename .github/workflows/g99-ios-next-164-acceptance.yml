@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -disable-concurrent-destination-testing -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
+          xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -disable-concurrent-destination-testing -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
       - name: Evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -79,7 +79,7 @@ jobs:
           retention-days: 14
   g99-ui:
     needs: [g99-a, g99-b]
-    if: always() && needs.g99-a.result == 'success'
+    if: needs.g99-a.result == 'success' && needs.g99-b.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,7 @@ jobs:
           set -euo pipefail
           for MODE in light dark; do
             xcrun simctl ui "$SIM_ID" appearance "$MODE"
-            xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIPadPortraitLandscapeCoreScreens' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
+            xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIPadPortraitLandscapeCoreScreens' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
             mkdir -p "build/g99/screenshots/$MODE"
             xcrun xcresulttool export attachments --path "build/g99/UI-$MODE.xcresult" --output-path "build/g99/screenshots/$MODE"
           done
