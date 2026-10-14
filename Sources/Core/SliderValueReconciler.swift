@@ -9,7 +9,9 @@ struct SliderValueReconciler {
     private(set) var isAwaitingConfirmation = false
     private var pendingValue: Double?
     private var lastObservedValue: Double?
-    private var revision = 0
+    private(set) var revision = 0
+    private(set) var issue: String?
+    private(set) var didTimeOut = false
 
     mutating func initialize(from remote: Double, range: ClosedRange<Double>) {
         let remote = clamp(remote, range)
@@ -23,6 +25,8 @@ struct SliderValueReconciler {
         isAwaitingConfirmation = false
         pendingValue = nil
         lastObservedValue = nil
+        issue = nil
+        didTimeOut = false
         revision &+= 1
     }
 
@@ -36,6 +40,8 @@ struct SliderValueReconciler {
         value = clamp(value, range)
         pendingValue = value
         isAwaitingConfirmation = true
+        issue = nil
+        didTimeOut = false
         revision &+= 1
         return (value, revision)
     }
@@ -49,6 +55,8 @@ struct SliderValueReconciler {
                 value = remote
                 self.pendingValue = nil
                 isAwaitingConfirmation = false
+                issue = nil
+                didTimeOut = false
             }
             return
         }
@@ -62,8 +70,38 @@ struct SliderValueReconciler {
         guard revision == expectedRevision, isAwaitingConfirmation, !isEditing else { return false }
         isAwaitingConfirmation = false
         pendingValue = nil
+        didTimeOut = true
         if let lastObservedValue { value = clamp(lastObservedValue, range) }
         return true
+    }
+
+    /// Preserve late transport errors for the current revision, even after a UI timeout.
+    mutating func finishTransport(_ result: DeviceCommandResult, revision expectedRevision: Int) {
+        guard revision == expectedRevision, !isEditing else { return }
+        switch result {
+        case .executed:
+            break // Only a device observation can confirm a value.
+        case .superseded:
+            issue = "Gerätebefehl durch neueren Wert ersetzt"
+            isAwaitingConfirmation = false
+        case .cancelled:
+            issue = "Gerätebefehl abgebrochen"
+            isAwaitingConfirmation = false
+        case let .failed(message), let .outcomeUnknown(message):
+            issue = message
+            isAwaitingConfirmation = false
+        }
+    }
+
+    mutating func reset(from remote: Double, range: ClosedRange<Double>) {
+        revision &+= 1
+        isEditing = false
+        isAwaitingConfirmation = false
+        pendingValue = nil
+        lastObservedValue = nil
+        issue = nil
+        didTimeOut = false
+        value = clamp(remote, range)
     }
 
     private func clamp(_ value: Double, _ range: ClosedRange<Double>) -> Double {
