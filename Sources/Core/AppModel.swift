@@ -310,7 +310,8 @@ final class AppModel {
         await performService(domain: "scene", service: "turn_on", entity: scene, feedback: .success)
     }
 
-    func setBrightness(_ value: Double, for light: HomeAssistantEntity) async {
+    @discardableResult
+    func setBrightness(_ value: Double, for light: HomeAssistantEntity) async -> DeviceCommandResult {
         await performService(
             domain: "light",
             service: "turn_on",
@@ -413,6 +414,7 @@ final class AppModel {
             }
         }
         reportCommandResult(commandResult, entityID: entityID, generation: generation)
+        return commandResult
     }
 
     func callFireTVCompanionService(
@@ -465,7 +467,8 @@ final class AppModel {
         await performService(domain: "media_player", service: service, entity: player, feedback: .stateChanged)
     }
 
-    func setVolume(_ value: Double, for player: HomeAssistantEntity) async {
+    @discardableResult
+    func setVolume(_ value: Double, for player: HomeAssistantEntity) async -> DeviceCommandResult {
         await performService(
             domain: "media_player",
             service: "volume_set",
@@ -861,10 +864,10 @@ final class AppModel {
         data: [String: JSONValue] = [:],
         optimisticState: String? = nil,
         feedback: IOSNextFeedbackEvent? = nil
-    ) async {
+    ) async -> DeviceCommandResult {
         guard acceptsDeviceCommands, entity.isAvailable else {
             lastActionError = "Home Assistant ist nicht verbunden oder das Gerät ist nicht verfügbar."
-            return
+            return .failed(lastActionError ?? "Gerät nicht verfügbar")
         }
         let entityID = entity.entityID
         let generation = connectionGeneration
