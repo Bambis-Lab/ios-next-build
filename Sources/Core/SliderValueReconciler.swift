@@ -22,6 +22,7 @@ struct SliderValueReconciler {
         isEditing = true
         isAwaitingConfirmation = false
         pendingValue = nil
+        lastObservedValue = nil
         revision &+= 1
     }
 
