@@ -637,7 +637,7 @@ private struct IOS27ConfirmedSlider: View {
     let remoteValue: Double
     let entityID: String
     let label: String
-    let apply: @MainActor (Double) async -> Void
+    let apply: @MainActor (Double) async -> DeviceCommandResult
 
     @State private var draft = 0.0
     @State private var editing = false
@@ -645,6 +645,7 @@ private struct IOS27ConfirmedSlider: View {
     @State private var revision = 0
     @State private var confirmationTask: Task<Void, Never>?
     @State private var timedOut = false
+    @State private var transportError: String?
 
     private var boundedRemote: Double { min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1) }
 
@@ -657,6 +658,7 @@ private struct IOS27ConfirmedSlider: View {
                     editing = true
                     pending = nil
                     timedOut = false
+                    transportError = nil
                 } else {
                     editing = false
                     let target = draft
@@ -677,12 +679,26 @@ private struct IOS27ConfirmedSlider: View {
                         draft = boundedRemote
                     }
                     Task {
-                        await apply(target)
+                        let result = await apply(target)
+                        guard revision == current, pending != nil else { return }
+                        switch result {
+                        case .executed, .superseded:
+                            break // WebSocket state, not transport success, confirms the device.
+                        case .cancelled:
+                            transportError = "Gerätebefehl abgebrochen"
+                        case let .failed(message), let .outcomeUnknown(message):
+                            transportError = message
+                        }
                     }
                 }
             })
             .accessibilityLabel(label)
             .accessibilityValue("\(Int((draft * 100).rounded())) Prozent")
+            if let transportError {
+                Text(transportError)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if timedOut {
                 Text("Gerätebestätigung ausstehend")
                     .font(.caption2)
@@ -698,6 +714,7 @@ private struct IOS27ConfirmedSlider: View {
                     confirmationTask?.cancel()
                     self.pending = nil
                     timedOut = false
+                    transportError = nil
                     draft = boundedRemote
                 }
             } else {
@@ -711,6 +728,7 @@ private struct IOS27ConfirmedSlider: View {
             pending = nil
             editing = false
             timedOut = false
+            transportError = nil
             draft = boundedRemote
         }
         .onDisappear {
