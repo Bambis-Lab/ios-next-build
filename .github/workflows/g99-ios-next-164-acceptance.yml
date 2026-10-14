@@ -48,6 +48,23 @@ jobs:
           mkdir -p build/g99
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+      - name: Start isolated Fake HA integration server
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/g99/fake-ha.log 2>&1 &
+          echo $! > build/g99/fake-ha.pid
+          python3 - <<'PY'
+          import socket,time
+          for i in range(60):
+              try:
+                  with socket.create_connection(('127.0.0.1',18765),timeout=1):
+                      print('G99_FAKE_HA_READY=PASS');break
+              except OSError:
+                  time.sleep(0.5)
+          else:
+              raise SystemExit('G99_FAKE_HA_READY=FAIL')
+          PY
       - name: Compile and full unit tests
         shell: bash
         run: |
@@ -61,7 +78,8 @@ jobs:
           path: build/g99/
           retention-days: 14
   g99-ui:
-    needs: g99-b
+    needs: [g99-a, g99-b]
+    if: always() && needs.g99-a.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -81,7 +99,7 @@ jobs:
           export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build/g99
-          SIM_ID="$(DEVICE='${{ matrix.device }}' xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; device="${{ matrix.device }}"; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and (x["name"]=="iPhone 18 Pro Max" if device=="iphone" else x["name"].startswith("iPad"))]; assert a; print(a[0])')"
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; device="${{ matrix.device }}"; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and (x["name"]=="iPhone 18 Pro Max" if device=="iphone" else x["name"].startswith("iPad"))]; assert a; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
       - name: UI interaction, light and dark, accessibility
         shell: bash
@@ -89,7 +107,7 @@ jobs:
           set -euo pipefail
           for MODE in light dark; do
             xcrun simctl ui "$SIM_ID" appearance "$MODE"
-            xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
+            xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIPadPortraitLandscapeCoreScreens' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
             mkdir -p "build/g99/screenshots/$MODE"
             xcrun xcresulttool export attachments --path "build/g99/UI-$MODE.xcresult" --output-path "build/g99/screenshots/$MODE"
           done
