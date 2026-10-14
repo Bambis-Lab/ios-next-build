@@ -64,7 +64,7 @@ actor LiveOperationsClient {
         lastMCPSequence: Int64?,
         lastSentinelSequence: Int64?
     ) -> URL? {
-        let endpoint = configuration.baseURL.appending(path: "v1/operations")
+        let endpoint = configuration.baseURL.appending(path: "v1/live")
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return nil }
         switch components.scheme?.lowercased() {
         case "https": components.scheme = "wss"
