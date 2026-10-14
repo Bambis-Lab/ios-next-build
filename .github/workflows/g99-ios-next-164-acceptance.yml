@@ -101,6 +101,7 @@ jobs:
           mkdir -p build/g99
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; device="${{ matrix.device }}"; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and (x["name"]=="iPhone 18 Pro Max" if device=="iphone" else x["name"].startswith("iPad"))]; assert a; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          export SIM_ID
           STATE="$(xcrun simctl list devices -j | python3 -c 'import json,sys,os; d=json.load(sys.stdin)["devices"]; uid=os.environ["SIM_ID"]; print(next((x.get("state","") for v in d.values() for x in v if x["udid"]==uid),""))' )"
           if [ "$STATE" != "Booted" ]; then xcrun simctl boot "$SIM_ID"; fi
           xcrun simctl bootstatus "$SIM_ID" -b
