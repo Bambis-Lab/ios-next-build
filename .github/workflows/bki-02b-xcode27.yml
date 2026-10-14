@@ -1,0 +1,139 @@
+name: BKI-02B iOS 1.6.4 capability contract acceptance
+
+on:
+  push:
+    branches:
+      - bki/02b-capability-client-164
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bki02b-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate pinned source and capability contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          models=Path('Sources/Core/MobileFactoryCapabilities.swift').read_text()
+          service=Path('Sources/Features/Owner/Factory/FactoryMCPService.swift').read_text()
+          tests=Path('Tests/MobileFactoryCapabilitiesTests.swift').read_text()
+          integration=Path('Tests/FactoryMCPIntegrationTests.swift').read_text()
+          assert 'enum MobileFactoryCapabilityProjector' in models
+          assert 'schemaVersion: version' in models
+          assert 'operationAuthorization[row.tool] == true' in models
+          assert 'try container.encodeNil(forKey: .reason)' in models
+          assert 'func mobileCapabilities() async throws' in service
+          assert 'let tools = try await openSession()' in service
+          assert 'let response = try await call("factory_status")' in service
+          for marker in ('testHostControlPolicyDoesNotImplyPerOperationApproval',
+                         'testScopedProofNeverAppliesToOtherTools',
+                         'testMissingBackendFailsClosed'):
+              assert marker in tests
+          assert 'testMobileCapabilitiesReuseOAuthAndFailClosedWithoutPolicyFlags' in integration
+          print('BKI_02B_SOURCE_CONTRACT=PASS')
+          PY
+
+  iphone:
+    needs: source-check
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.4"
+          export EXPECTED_BUILD="27"
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=json.load(sys.stdin)["devices"]; a=[x["udid"] for v in ds.values() for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+      - name: Targeted BKI-02B iPhone unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o pipefail
+          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/BKI02BiPhone \
+            -resultBundlePath build/BKI02BiPhone.xcresult \
+            '-only-testing:IOSNextTests/MobileFactoryCapabilitiesTests' \
+            '-only-testing:IOSNextTests/FactoryMCPIntegrationTests' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/BKI02BiPhone.log
+      - name: Upload iPhone diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: BKI02B-iPhone
+          path: |
+            build/BKI02BiPhone.log
+            build/BKI02BiPhone.xcresult
+          retention-days: 7
+          if-no-files-found: warn
+
+  ipad:
+    needs: source-check
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27 iPad
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)"
+          export EXPECTED_VERSION="1.6.4"
+          export EXPECTED_BUILD="27"
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build
+          IPAD_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; ds=json.load(sys.stdin)["devices"]; a=[x["udid"] for v,devices in ds.items() if "iOS-27" in v for x in devices if x["name"].startswith("iPad") and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "IPAD_ID=$IPAD_ID" >> "$GITHUB_ENV"
+      - name: Targeted BKI-02B iPad unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$IPAD_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/BKI02BiPad \
+            -resultBundlePath build/BKI02BiPad.xcresult \
+            '-only-testing:IOSNextTests/MobileFactoryCapabilitiesTests' \
+            '-only-testing:IOSNextTests/FactoryMCPIntegrationTests' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/BKI02BiPad.log
+      - name: Upload iPad diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: BKI02B-iPad
+          path: |
+            build/BKI02BiPad.log
+            build/BKI02BiPad.xcresult
+          retention-days: 7
+          if-no-files-found: warn
