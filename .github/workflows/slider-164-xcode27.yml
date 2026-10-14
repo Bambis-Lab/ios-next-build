@@ -52,8 +52,8 @@ jobs:
           fi
           bash Scripts/prepare_wireguard_dependency.sh
           export CM_COMMIT="$(git rev-parse HEAD)"
-          export EXPECTED_VERSION="1.6.2"
-          export EXPECTED_BUILD="25"
+          export EXPECTED_VERSION="1.6.4"
+          export EXPECTED_BUILD="27"
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build
       - name: Resolve iPhone simulator
@@ -61,6 +61,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/SlideriPhoneBoot.log
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for v in d.values() for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
       - name: Build and test slider regression on iPhone
         shell: bash
         run: |
@@ -73,6 +75,7 @@ jobs:
             -derivedDataPath build/SlideriPhoneDerivedData \
             -resultBundlePath build/SlideriPhone.xcresult \
             '-only-testing:IOSNextTests/SliderValueReconcilerTests' \
+            '-only-testing:IOSNextTests/SliderValueReconcilerFixTests' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee build/SlideriPhone.log
       - name: Preserve iPhone evidence
@@ -104,8 +107,8 @@ jobs:
           fi
           bash Scripts/prepare_wireguard_dependency.sh
           export CM_COMMIT="$(git rev-parse HEAD)"
-          export EXPECTED_VERSION="1.6.2"
-          export EXPECTED_BUILD="25"
+          export EXPECTED_VERSION="1.6.4"
+          export EXPECTED_BUILD="27"
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build
       - name: Resolve available iPad simulator
@@ -133,6 +136,7 @@ jobs:
             -derivedDataPath build/SlideriPadDerivedData \
             -resultBundlePath build/SlideriPad.xcresult \
             '-only-testing:IOSNextTests/SliderValueReconcilerTests' \
+            '-only-testing:IOSNextTests/SliderValueReconcilerFixTests' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee build/SlideriPad.log
       - name: Preserve iPad evidence
