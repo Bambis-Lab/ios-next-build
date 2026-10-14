@@ -414,7 +414,6 @@ final class AppModel {
             }
         }
         reportCommandResult(commandResult, entityID: entityID, generation: generation)
-        return commandResult
     }
 
     func callFireTVCompanionService(
