@@ -152,8 +152,17 @@ private struct MediaVolumeControl: View {
     let setVolume: (Double) -> Void
     let toggleMute: () -> Void
 
-    @State private var draftVolume = 0.0
-    @State private var isEditingVolume = false
+    @State private var slider = SliderValueReconciler()
+    @State private var settlementTask: Task<Void, Never>?
+
+    private func scheduleSettlement(revision: Int) {
+        settlementTask?.cancel()
+        settlementTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            slider.settle(revision: revision, range: 0...1)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -161,20 +170,26 @@ private struct MediaVolumeControl: View {
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             if canSetVolume, let volume {
-                Slider(value: $draftVolume, in: 0...1) { editing in
-                    isEditingVolume = editing
-                    if !editing {
-                        setVolume(draftVolume)
+                Slider(value: Binding(
+                    get: { slider.value },
+                    set: { slider.updateDraft($0, range: 0...1) }
+                ), in: 0...1) { editing in
+                    if editing {
+                        settlementTask?.cancel()
+                        slider.beginEditing()
+                    } else {
+                        let command = slider.endEditing(range: 0...1)
+                        setVolume(command.value)
+                        scheduleSettlement(revision: command.revision)
                     }
                 }
-                .onAppear { draftVolume = min(max(volume, 0), 1) }
+                .onAppear { slider.initialize(from: volume, range: 0...1) }
                 .onChange(of: volume) { _, value in
-                    if !isEditingVolume {
-                        draftVolume = min(max(value, 0), 1)
-                    }
+                    slider.observe(value, range: 0...1)
                 }
+                .onDisappear { settlementTask?.cancel() }
                 .accessibilityLabel("Lautstärke")
-                .accessibilityValue("\(Int(draftVolume * 100)) Prozent")
+                .accessibilityValue("\(Int(slider.value * 100)) Prozent")
             }
             if canMute {
                 Button(action: toggleMute) {
@@ -194,22 +209,39 @@ private struct MediaSeekControl: View {
     let duration: Double
     let seek: (Double) -> Void
 
-    @State private var draftPosition = 0.0
-    @State private var isEditing = false
+    @State private var slider = SliderValueReconciler()
+    @State private var settlementTask: Task<Void, Never>?
+
+    private var range: ClosedRange<Double> { 0...max(duration, 0) }
+
+    private func scheduleSettlement(revision: Int) {
+        settlementTask?.cancel()
+        settlementTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            slider.settle(revision: revision, range: range)
+        }
+    }
 
     var body: some View {
-        Slider(value: $draftPosition, in: 0...duration) { editing in
-            isEditing = editing
-            if !editing {
-                seek(draftPosition)
+        Slider(value: Binding(
+            get: { slider.value },
+            set: { slider.updateDraft($0, range: range) }
+        ), in: range) { editing in
+            if editing {
+                settlementTask?.cancel()
+                slider.beginEditing()
+            } else {
+                let command = slider.endEditing(range: range)
+                seek(command.value)
+                scheduleSettlement(revision: command.revision)
             }
         }
-        .onAppear { draftPosition = min(max(position, 0), duration) }
+        .onAppear { slider.initialize(from: position, range: range) }
         .onChange(of: position) { _, value in
-            if !isEditing {
-                draftPosition = min(max(value, 0), duration)
-            }
+            slider.observe(value, range: range, tolerance: 1.5)
         }
+        .onDisappear { settlementTask?.cancel() }
         .accessibilityLabel("Wiedergabeposition")
     }
 }
