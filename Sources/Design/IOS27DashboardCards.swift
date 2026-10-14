@@ -706,7 +706,15 @@ private struct IOS27ConfirmedSlider: View {
                     .accessibilityAddTraits(.updatesFrequently)
             }
         }
-        .onAppear { draft = boundedRemote }
+        .onAppear {
+            confirmationTask?.cancel()
+            revision &+= 1
+            pending = nil
+            editing = false
+            timedOut = false
+            transportError = nil
+            draft = boundedRemote
+        }
         .onChange(of: remoteValue) { _, _ in
             guard !editing else { return }
             if let pending {
@@ -734,6 +742,8 @@ private struct IOS27ConfirmedSlider: View {
         .onDisappear {
             confirmationTask?.cancel()
             revision &+= 1
+            pending = nil
+            editing = false
         }
     }
 }
