@@ -48,6 +48,16 @@ extension AppModel {
         model.entities = fixture.entities.map {
             .init(entityID: $0.entityID, state: $0.state, attributes: $0.attributes)
         }
+        // Preview-only normalization; the captured HA fixture remains untouched.
+        if let index = model.entities.firstIndex(where: { $0.entityID == "media_player.fire_tv_companion" }) {
+            let original = model.entities[index]
+            var attributes = original.attributes
+            attributes["media_title"] = .string("Companion Testfilm")
+            attributes["media_content_type"] = .string("video")
+            attributes["volume_level"] = .number(0.52)
+            attributes["skip_interval_seconds"] = .number(10)
+            model.entities[index] = HomeAssistantEntity(entityID: original.entityID, state: "playing", attributes: attributes)
+        }
         return model
     }
 
