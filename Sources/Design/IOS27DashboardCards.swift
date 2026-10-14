@@ -646,7 +646,6 @@ private struct IOS27ConfirmedSlider: View {
     @State private var confirmationTask: Task<Void, Never>?
     @State private var commandTask: Task<Void, Never>?
     @State private var timedOut = false
-    @State private var commandError: String?
 
     private var boundedRemote: Double { min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1) }
 
@@ -659,7 +658,6 @@ private struct IOS27ConfirmedSlider: View {
                     editing = true
                     pending = nil
                     timedOut = false
-                    commandError = nil
                 } else {
                     editing = false
                     let target = draft
@@ -715,7 +713,6 @@ private struct IOS27ConfirmedSlider: View {
             pending = nil
             editing = false
             timedOut = false
-            commandError = nil
             draft = boundedRemote
         }
         .onDisappear {
