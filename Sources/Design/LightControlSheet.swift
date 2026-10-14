@@ -422,14 +422,10 @@ struct LightControlSheet: View {
         if let remoteBrightness = entity.brightnessFraction {
             brightnessSlider.observe(remoteBrightness, range: 0...1)
             brightness = brightnessSlider.value
-        } else if !brightnessSlider.isEditing && !brightnessSlider.isAwaitingConfirmation {
-            brightnessSlider.initialize(from: brightness, range: 0...1)
         }
         if let remoteTemperature = entity.colorTemperatureKelvin {
             temperatureSlider.observe(remoteTemperature, range: temperatureRange(for: entity), tolerance: 50)
             colorTemperature = temperatureSlider.value
-        } else if !temperatureSlider.isEditing && !temperatureSlider.isAwaitingConfirmation {
-            temperatureSlider.initialize(from: colorTemperature, range: temperatureRange(for: entity))
         }
         favorites = LightColorFavoritesStore.favorites(for: entity.entityID)
         if let color = entity.lightColor {
