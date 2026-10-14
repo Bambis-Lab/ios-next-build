@@ -57,12 +57,9 @@ struct IOS27LightCard: View {
             if let brightness = entity.brightness {
                 HStack(spacing: 10) {
                     Image(systemName: "sun.min.fill").foregroundStyle(.secondary).accessibilityHidden(true)
-                    Slider(value: Binding(
-                        get: { min(max(brightness, 0), 1) },
-                        set: { value in Task { await appModel.setBrightness(value, for: entity) } }
-                    ))
-                    .accessibilityLabel("Helligkeit")
-                    .accessibilityValue("\(Int((brightness) * 100)) Prozent")
+                    IOS27ConfirmedSlider(remoteValue: brightness, entityID: entity.entityID, label: "Helligkeit") { value in
+                        await appModel.setBrightness(value, for: entity)
+                    }
                     Image(systemName: "sun.max.fill").foregroundStyle(entity.ios27LightTint).accessibilityHidden(true)
                 }
             }
@@ -134,12 +131,9 @@ struct IOS27MediaCard: View {
             if player.isAvailable, effectiveVolumePlayer.isAvailable, let volume = effectiveVolumePlayer.volumeLevel {
                 HStack(spacing: 10) {
                     Image(systemName: "speaker.fill").foregroundStyle(.secondary).accessibilityHidden(true)
-                    Slider(value: Binding(
-                        get: { volume },
-                        set: { value in Task { await appModel.setVolume(value, for: effectiveVolumePlayer) } }
-                    ))
-                    .accessibilityLabel("Lautstärke")
-                    .accessibilityValue("\(Int(volume * 100)) Prozent")
+                    IOS27ConfirmedSlider(remoteValue: volume, entityID: effectiveVolumePlayer.entityID, label: "Lautstärke") { value in
+                        await appModel.setVolume(value, for: effectiveVolumePlayer)
+                    }
                     if effectiveVolumePlayer.supportsVolumeMute {
                         Button {
                             Task {
@@ -432,12 +426,9 @@ struct IOS27MediaZoneCard: View {
                 HStack(spacing: 10) {
                     Image(systemName: "speaker.fill").foregroundStyle(.secondary).accessibilityHidden(true)
                     if player.supportsVolumeSet, let volume = player.volumeLevel {
-                        Slider(value: Binding(
-                            get: { volume },
-                            set: { value in Task { await appModel.setVolume(value, for: player) } }
-                        ))
-                        .accessibilityLabel("Lautstärke \(playerNameOverrides[player.entityID] ?? player.displayName)")
-                        .accessibilityValue("\(Int(volume * 100)) Prozent")
+                        IOS27ConfirmedSlider(remoteValue: volume, entityID: player.entityID, label: "Lautstärke \(playerNameOverrides[player.entityID] ?? player.displayName)") { value in
+                            await appModel.setVolume(value, for: player)
+                        }
                     }
                     Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary).accessibilityHidden(true)
                     if player.supportsVolumeMute {
@@ -585,12 +576,9 @@ struct IOS27FireTVCompanionCard: View {
             if player.isAvailable, player.supportsVolumeSet, let volume = player.volumeLevel {
                 HStack(spacing: 10) {
                     Image(systemName: "speaker.fill").foregroundStyle(.secondary).accessibilityHidden(true)
-                    Slider(value: Binding(
-                        get: { volume },
-                        set: { value in Task { await appModel.setVolume(value, for: player) } }
-                    ))
-                    .accessibilityLabel("Lautstärke")
-                    .accessibilityValue("\(Int(volume * 100)) Prozent")
+                    IOS27ConfirmedSlider(remoteValue: volume, entityID: player.entityID, label: "Lautstärke") { value in
+                        await appModel.setVolume(value, for: player)
+                    }
                     if player.companionSupportsMuteControl, player.supportsVolumeMute {
                         Button {
                             Task { await appModel.callService(for: player, service: "volume_mute", data: ["is_volume_muted": player.isMuted != true]) }
@@ -638,5 +626,90 @@ struct IOS27FireTVCompanionCard: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .accessibilityLabel("Unterstützt: \(text)")
+    }
+}
+
+ 
+/// Keeps a gesture local until release, then waits for the device's reported value.
+/// Only the final value is sent; late completions never overwrite a newer gesture.
+@MainActor
+private struct IOS27ConfirmedSlider: View {
+    let remoteValue: Double
+    let entityID: String
+    let label: String
+    let apply: @MainActor (Double) async -> Void
+
+    @State private var draft = 0.0
+    @State private var editing = false
+    @State private var pending: Double?
+    @State private var revision = 0
+    @State private var confirmationTask: Task<Void, Never>?
+    @State private var timedOut = false
+
+    private var boundedRemote: Double { min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Slider(value: $draft, in: 0...1, onEditingChanged: { active in
+                if active {
+                    confirmationTask?.cancel()
+                    revision &+= 1
+                    editing = true
+                    pending = nil
+                    timedOut = false
+                } else {
+                    editing = false
+                    let target = draft
+                    pending = target
+                    revision &+= 1
+                    let current = revision
+                    confirmationTask?.cancel()
+                    confirmationTask = Task {
+                        await apply(target)
+                        guard !Task.isCancelled, revision == current else { return }
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled, revision == current, pending != nil else { return }
+                        pending = nil
+                        timedOut = true
+                        draft = boundedRemote
+                    }
+                }
+            })
+            .accessibilityLabel(label)
+            .accessibilityValue("\(Int((draft * 100).rounded())) Prozent")
+            if timedOut {
+                Text("Gerätebestätigung ausstehend")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.updatesFrequently)
+            }
+        }
+        .onAppear { draft = boundedRemote }
+        .onChange(of: remoteValue) { _, _ in
+            guard !editing else { return }
+            if let pending {
+                if abs(boundedRemote - pending) <= 0.015 {
+                    confirmationTask?.cancel()
+                    self.pending = nil
+                    timedOut = false
+                    draft = boundedRemote
+                }
+            } else {
+                draft = boundedRemote
+                timedOut = false
+            }
+        }
+        .onChange(of: entityID) { _, _ in
+            confirmationTask?.cancel()
+            revision &+= 1
+            pending = nil
+            editing = false
+            timedOut = false
+            draft = boundedRemote
+        }
+        .onDisappear {
+            confirmationTask?.cancel()
+            revision &+= 1
+        }
     }
 }
