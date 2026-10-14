@@ -41,8 +41,8 @@ struct SliderValueReconciler {
 
     mutating func observe(_ remote: Double, range: ClosedRange<Double>, tolerance: Double = 0.015) {
         let remote = clamp(remote, range)
-        lastObservedValue = remote
         guard !isEditing else { return }
+        lastObservedValue = remote
         if let pendingValue, isAwaitingConfirmation {
             if abs(remote - pendingValue) <= tolerance {
                 value = remote
