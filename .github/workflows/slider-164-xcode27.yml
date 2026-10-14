@@ -32,6 +32,16 @@ jobs:
           assert 'testStaleRemoteUpdateDoesNotUndoCommittedValue' in tests
           for path in ('Sources/Design/MediaControlSheet.swift','Sources/Design/LightControlSheet.swift','Sources/Features/RoomsView.swift'):
               assert 'SliderValueReconciler()' in Path(path).read_text(), path
+          dashboard = Path('Sources/Design/IOS27DashboardCards.swift').read_text()
+          assert dashboard.count('IOS27ConfirmedSlider(remoteValue:') == 4
+          assert '@State private var reconciler = SliderValueReconciler()' in dashboard
+          assert 'reconciler.finishTransport(result, revision: command.revision)' in dashboard
+          fixes = Path('Tests/SliderValueReconcilerFixTests.swift').read_text()
+          for name in ('testLateTransportFailureRemainsVisibleAfterTimeout',
+                       'testOldTransportFailureCannotReplaceNewGesture',
+                       'testDisconnectReportsUncertainOutcome',
+                       'testResetInvalidatesPendingRevisionAndLateResponse'):
+              assert name in fixes, name
           print('SLIDER_SOURCE_CONTRACT=PASS')
           PY
 
