@@ -77,6 +77,27 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         XCTAssertTrue(FactoryMockProtocol.calledMethods.contains("tools/list"))
     }
 
+    func testMobileCapabilitiesReuseOAuthAndFailClosedWithoutPolicyFlags() async throws {
+        FactoryMockProtocol.configure(expiresIn: 3600, useSSE: true)
+        let client = service()
+        defer { client.clear() }
+
+        let pending = try await client.beginAuthorization(endpoint: resource,
+                                                           registeredClientID: "test-manual-client")
+        let callback = try XCTUnwrap(URL(
+            string: "iosnext://factory-oauth?code=mock-code&state=\(pending.state)"))
+        try await client.completeAuthorization(callback, original: pending)
+        let manifest = try await client.mobileCapabilities()
+
+        XCTAssertEqual(manifest.schemaVersion, "1.0")
+        XCTAssertTrue(manifest.snapshotComplete)
+        // Existing fixture intentionally has no Factory capability-policy flags.
+        XCTAssertFalse(manifest.allowsDisplay("runner.job_submit"))
+        XCTAssertTrue(manifest.capabilities.allSatisfy { !$0.authorized })
+        XCTAssertEqual(FactoryMockProtocol.calledTools, ["factory_status"])
+        XCTAssertFalse(FactoryMockProtocol.calledTools.contains("dangerous_host_write"))
+    }
+
     func testWrongOAuthStateCannotCreateSession() async throws {
         let client = service()
         defer { client.clear() }
