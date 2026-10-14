@@ -61,6 +61,7 @@ struct SliderValueReconciler {
             return
         }
         value = remote
+        didTimeOut = false
     }
 
     /// Reconcile an unacknowledged command after the bounded UI grace period.
