@@ -660,18 +660,24 @@ private struct IOS27ConfirmedSlider: View {
                 } else {
                     editing = false
                     let target = draft
+                    if abs(target - boundedRemote) <= 0.005 {
+                        pending = nil
+                        return
+                    }
                     pending = target
                     revision &+= 1
                     let current = revision
                     confirmationTask?.cancel()
                     confirmationTask = Task {
-                        await apply(target)
-                        guard !Task.isCancelled, revision == current else { return }
+                        // Confirmation timeout starts independently of transport completion.
                         try? await Task.sleep(for: .seconds(3))
                         guard !Task.isCancelled, revision == current, pending != nil else { return }
                         pending = nil
                         timedOut = true
                         draft = boundedRemote
+                    }
+                    Task {
+                        await apply(target)
                     }
                 }
             })
