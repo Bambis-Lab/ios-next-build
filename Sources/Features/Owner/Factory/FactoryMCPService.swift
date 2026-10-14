@@ -482,6 +482,31 @@ final class FactoryMCPService {
         return try await call(name, arguments: arguments)
     }
 
+    /// BKI-02B: read-only capability observation via the EXISTING OAuth/MCP session.
+    /// This does not invoke approval or mutation tools and does not mint consent.
+    /// Failure to discover or read status must never produce a permissive UI state.
+    func mobileCapabilities() async throws -> MobileFactoryCapabilityManifest {
+        let tools = try await openSession()
+        guard tools.contains("factory_status") else {
+            return MobileFactoryCapabilityProjector.project(
+                status: nil, registeredTools: tools, backendOnline: false)
+        }
+        do {
+            let response = try await call("factory_status")
+            let decoded = try JSONSerialization.jsonObject(with: Data(response.utf8))
+            guard let status = decoded as? [String: Any] else {
+                throw FactoryConnectionError.unexpectedResponse
+            }
+            return MobileFactoryCapabilityProjector.project(
+                status: status, registeredTools: tools, backendOnline: true)
+        } catch {
+            // A read error is not a capability grant. Caller can still render
+            // the disabled manifest rather than stale authorization state.
+            return MobileFactoryCapabilityProjector.project(
+                status: nil, registeredTools: tools, backendOnline: false)
+        }
+    }
+
     func snapshot() async throws -> FactorySnapshot {
         let available = try await openSession()
         guard !available.intersection(Set(allowedTools)).isEmpty else {
