@@ -646,7 +646,6 @@ private struct IOS27ConfirmedSlider: View {
     @State private var confirmationTask: Task<Void, Never>?
     @State private var commandTask: Task<Void, Never>?
     @State private var timedOut = false
-    @State private var latestCommandGeneration: UInt64 = 0
 
     private var boundedRemote: Double { min(max(remoteValue.isFinite ? remoteValue : 0, 0), 1) }
 
@@ -656,7 +655,6 @@ private struct IOS27ConfirmedSlider: View {
                 if active {
                     confirmationTask?.cancel()
                     revision &+= 1
-                    latestCommandGeneration &+= 1
                     editing = true
                     pending = nil
                     timedOut = false
@@ -679,7 +677,6 @@ private struct IOS27ConfirmedSlider: View {
                         timedOut = true
                         draft = boundedRemote
                     }
-                    latestCommandGeneration &+= 1
                     commandTask = Task {
                         await apply(target)
                     }
@@ -712,7 +709,6 @@ private struct IOS27ConfirmedSlider: View {
         .onChange(of: entityID) { _, _ in
             confirmationTask?.cancel()
             commandTask?.cancel()
-            latestCommandGeneration &+= 1
             revision &+= 1
             pending = nil
             editing = false
