@@ -1005,57 +1005,36 @@ final class IOSNextTests: XCTestCase {
     }
 
     func testStartupMotionKeyframesAreDeterministic() {
+        // Motion V2 replaces the V1 halo/logo/glass sequence with immediate content reveal.
         let start = IOSNextMasterMotion.startup(frame: 0)
-        XCTAssertEqual(start.contentOpacity, 0, accuracy: 0.000001)
-        XCTAssertEqual(start.backdropOpacity, 1, accuracy: 0.000001)
-        XCTAssertEqual(start.logoScale, 1, accuracy: 0.000001)
+        XCTAssertEqual(start.contentOpacity, 0.82, accuracy: 0.000001)
+        XCTAssertEqual(start.backdropOpacity, 0.20, accuracy: 0.000001)
+        XCTAssertEqual(start.haloOpacity, 0, accuracy: 0.000001)
         XCTAssertEqual(start.logoOpacity, 0, accuracy: 0.000001)
+        XCTAssertEqual(start.glassOpacity, 0, accuracy: 0.000001)
 
-        let logoVisible = IOSNextMasterMotion.startup(frame: 14)
-        XCTAssertEqual(logoVisible.logoOpacity, 1, accuracy: 0.000001)
-
-        let halo = IOSNextMasterMotion.startup(frame: 22)
-        XCTAssertEqual(halo.haloOpacity, 0.14, accuracy: 0.000001)
-        XCTAssertEqual(halo.haloDiameter, 184, accuracy: 0.000001)
-
-        let compressed = IOSNextMasterMotion.startup(frame: 32)
-        XCTAssertEqual(compressed.logoScale, 0.965, accuracy: 0.000001)
-
-        let expanded = IOSNextMasterMotion.startup(frame: 45)
-        XCTAssertEqual(expanded.logoScale, 1, accuracy: 0.000001)
-        XCTAssertEqual(expanded.glassWidthFraction, 0.93, accuracy: 0.000001)
-
-        let revealed = IOSNextMasterMotion.startup(frame: 72)
+        let revealed = IOSNextMasterMotion.startup(frame: 42)
         XCTAssertEqual(revealed.contentOpacity, 1, accuracy: 0.000001)
         XCTAssertEqual(revealed.backdropOpacity, 0, accuracy: 0.000001)
-        XCTAssertEqual(revealed.glassOpacity, 0, accuracy: 0.000001)
+        XCTAssertEqual(revealed.contentYOffset, 0, accuracy: 0.000001)
+        XCTAssertEqual(IOSNextMasterMotion.startup(frame: 86), IOSNextMasterMotion.startup(frame: 999))
     }
 
     func testControlCenterUnlockKeyframesAreDeterministic() {
+        // Motion V2 uses an authenticated handoff and module settle instead of the V1 lock morph.
         let start = IOSNextMasterMotion.controlCenterUnlock(frame: 0)
         XCTAssertEqual(start.lockScale, 1, accuracy: 0.000001)
-        XCTAssertEqual(start.lockOpacity, 1, accuracy: 0.000001)
+        XCTAssertEqual(start.lockOpacity, 0, accuracy: 0.000001)
+        XCTAssertEqual(start.lockOpenProgress, 1, accuracy: 0.000001)
+        XCTAssertEqual(start.glassOpacity, 0, accuracy: 0.000001)
 
-        let compressed = IOSNextMasterMotion.controlCenterUnlock(frame: 8)
-        XCTAssertEqual(compressed.lockScale, 0.94, accuracy: 0.000001)
-
-        let opened = IOSNextMasterMotion.controlCenterUnlock(frame: 20)
-        XCTAssertEqual(opened.lockOpenProgress, 1, accuracy: 0.000001)
-
-        let dissolved = IOSNextMasterMotion.controlCenterUnlock(frame: 38)
-        XCTAssertEqual(dissolved.lockOpacity, 0, accuracy: 0.000001)
-        XCTAssertEqual(dissolved.lockBlur, 6, accuracy: 0.000001)
-
-        let glass = IOSNextMasterMotion.controlCenterUnlock(frame: 58)
-        XCTAssertEqual(glass.glassWidthFraction, 0.94, accuracy: 0.000001)
-        XCTAssertEqual(glass.glassHeight, 202, accuracy: 0.000001)
-
-        let modules = IOSNextMasterMotion.controlCenterUnlock(frame: 83)
-        XCTAssertEqual(modules.moduleReveal(index: 4), 1, accuracy: 0.000001)
-
-        let ready = IOSNextMasterMotion.controlCenterUnlock(frame: 108)
-        XCTAssertEqual(ready.readyOpacity, 1, accuracy: 0.000001)
-        XCTAssertEqual(ready.readyScale, 1, accuracy: 0.000001)
+        let handoff = IOSNextMasterMotion.controlCenterUnlock(frame: 10)
+        XCTAssertGreaterThan(handoff.flashOpacity, 0)
+        let settled = IOSNextMasterMotion.controlCenterUnlock(frame: 50)
+        XCTAssertEqual(settled.readyOpacity, 1, accuracy: 0.000001)
+        XCTAssertEqual(settled.readyScale, 1, accuracy: 0.000001)
+        XCTAssertEqual(settled.moduleReveal(index: 4), 1, accuracy: 0.000001)
+        XCTAssertEqual(IOSNextMasterMotion.controlCenterUnlock(frame: 108), IOSNextMasterMotion.controlCenterUnlock(frame: 999))
     }
 
 }
