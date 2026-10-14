@@ -312,7 +312,7 @@ final class AppModel {
 
     @discardableResult
     func setBrightness(_ value: Double, for light: HomeAssistantEntity) async -> DeviceCommandResult {
-        await performService(
+        return await performService(
             domain: "light",
             service: "turn_on",
             entity: light,
@@ -469,7 +469,7 @@ final class AppModel {
 
     @discardableResult
     func setVolume(_ value: Double, for player: HomeAssistantEntity) async -> DeviceCommandResult {
-        await performService(
+        return await performService(
             domain: "media_player",
             service: "volume_set",
             entity: player,
