@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: g99-iosnext-164-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   g99-a:
     runs-on: ubuntu-latest
@@ -32,7 +32,7 @@ jobs:
   g99-b:
     needs: g99-a
     runs-on: xcode-27
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare project and simulator
@@ -69,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
+          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -disable-concurrent-destination-testing -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
       - name: Evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -85,7 +85,7 @@ jobs:
       matrix:
         device: [iphone, ipad]
     runs-on: xcode-27
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare project and simulator
