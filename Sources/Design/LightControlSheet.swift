@@ -23,6 +23,30 @@ struct LightControlSheet: View {
     @State private var selectedColor = Color.white
     @State private var brightness = 1.0
     @State private var colorTemperature = 3000.0
+    @State private var brightnessSlider = SliderValueReconciler()
+    @State private var temperatureSlider = SliderValueReconciler()
+    @State private var brightnessSettlement: Task<Void, Never>?
+    @State private var temperatureSettlement: Task<Void, Never>?
+
+    private func settleBrightness(_ revision: Int) {
+        brightnessSettlement?.cancel()
+        brightnessSettlement = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            brightnessSlider.settle(revision: revision, range: 0...1)
+            brightness = brightnessSlider.value
+        }
+    }
+
+    private func settleTemperature(_ revision: Int, range: ClosedRange<Double>) {
+        temperatureSettlement?.cancel()
+        temperatureSettlement = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            temperatureSlider.settle(revision: revision, range: range)
+            colorTemperature = temperatureSlider.value
+        }
+    }
     @State private var favorites: [LightColorFavorite] = []
     @State private var selectedSegments: Set<Int> = []
     @State private var colorCommandQueue = LatestValueCommandQueue<QueuedLightColorCommand>()
@@ -79,7 +103,13 @@ struct LightControlSheet: View {
                 }
             }
             .onAppear { syncFromEntity() }
+            .onDisappear {
+                brightnessSettlement?.cancel()
+                temperatureSettlement?.cancel()
+            }
             .onChange(of: entity?.state) { _, _ in syncFromEntity() }
+            .onChange(of: entity?.brightnessFraction) { _, _ in syncFromEntity() }
+            .onChange(of: entity?.colorTemperatureKelvin) { _, _ in syncFromEntity() }
             .onChange(of: segmentBridge) { _, bridge in
                 if bridge == nil { selectedSegments.removeAll() }
             }
@@ -102,8 +132,19 @@ struct LightControlSheet: View {
                         LabeledContent("Helligkeit", value: "\(Int(brightness * 100)) %")
                         HStack(spacing: 10) {
                             Image(systemName: "sun.min.fill").foregroundStyle(.secondary)
-                            Slider(value: $brightness, in: 0...1) { editing in
-                                if !editing { Task { await applyBrightness(entity) } }
+                            Slider(value: Binding(
+                                get: { brightnessSlider.value },
+                                set: { brightnessSlider.updateDraft($0, range: 0...1); brightness = brightnessSlider.value }
+                            ), in: 0...1) { editing in
+                                if editing {
+                                    brightnessSettlement?.cancel()
+                                    brightnessSlider.beginEditing()
+                                } else {
+                                    let command = brightnessSlider.endEditing(range: 0...1)
+                                    brightness = command.value
+                                    Task { await applyBrightness(entity) }
+                                    settleBrightness(command.revision)
+                                }
                             }
                             .disabled(!entity.isAvailable)
                             Image(systemName: "sun.max.fill").foregroundStyle(entity.ios27LightTint)
@@ -245,9 +286,23 @@ struct LightControlSheet: View {
             IOS27SectionHeader(title: "Farbtemperatur", subtitle: "Warm bis kühl")
             VStack(alignment: .leading, spacing: 8) {
                 LabeledContent("Temperatur", value: "\(Int(colorTemperature)) K")
-                Slider(value: $colorTemperature, in: temperatureRange(for: entity), step: 50) { editing in
-                    if !editing, entity.isAvailable, selectedSegments.isEmpty {
-                        submitColor(.temperature(colorTemperature))
+                Slider(value: Binding(
+                    get: { temperatureSlider.value },
+                    set: {
+                        temperatureSlider.updateDraft($0, range: temperatureRange(for: entity))
+                        colorTemperature = temperatureSlider.value
+                    }
+                ), in: temperatureRange(for: entity), step: 50) { editing in
+                    if editing {
+                        temperatureSettlement?.cancel()
+                        temperatureSlider.beginEditing()
+                    } else {
+                        let command = temperatureSlider.endEditing(range: temperatureRange(for: entity))
+                        colorTemperature = command.value
+                        if entity.isAvailable, selectedSegments.isEmpty {
+                            submitColor(.temperature(command.value))
+                        }
+                        settleTemperature(command.revision, range: temperatureRange(for: entity))
                     }
                 }
                 .disabled(!entity.isAvailable || !selectedSegments.isEmpty)
@@ -364,8 +419,14 @@ struct LightControlSheet: View {
 
     private func syncFromEntity() {
         guard let entity else { return }
-        brightness = entity.brightnessFraction ?? brightness
-        colorTemperature = entity.colorTemperatureKelvin ?? colorTemperature
+        if let remoteBrightness = entity.brightnessFraction {
+            brightnessSlider.observe(remoteBrightness, range: 0...1)
+            brightness = brightnessSlider.value
+        }
+        if let remoteTemperature = entity.colorTemperatureKelvin {
+            temperatureSlider.observe(remoteTemperature, range: temperatureRange(for: entity), tolerance: 50)
+            colorTemperature = temperatureSlider.value
+        }
         favorites = LightColorFavoritesStore.favorites(for: entity.entityID)
         if let color = entity.lightColor {
             ignoredSynchronizedColor = color
