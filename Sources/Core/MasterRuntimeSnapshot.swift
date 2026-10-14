@@ -48,7 +48,12 @@ struct MasterRuntimeSnapshot: Equatable, Sendable {
         } else {
             diskPercent = nil
         }
-        activeOperations = max(0, legacySnapshot?.activeCount ?? status?.activeJobs?.count ?? 0)
+        // A seeded legacy snapshot may carry an aggregate count before any live activity events arrive.
+        // Once the live stream has a sequence, the reconciled activity map is authoritative.
+        let seededLegacyCount = liveState.lastSequence == nil && liveState.activities.isEmpty
+            ? liveState.snapshot?.activeCount
+            : nil
+        activeOperations = max(0, seededLegacyCount ?? legacySnapshot?.activeCount ?? status?.activeJobs?.count ?? 0)
         registeredRunners = max(0, status?.registeredRunners ?? 0)
         idleRunners = max(0, status?.idleRunners ?? 0)
         busyRunners = max(0, status?.busyRunners ?? 0)
