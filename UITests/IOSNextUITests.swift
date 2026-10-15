@@ -5,7 +5,7 @@ import UIKit
 
 final class IOSNextUITests: XCTestCase {
     private var app: XCUIApplication!
-    private let screens = ["home", "rooms", "chat", "media", "system", "light", "media-detail", "owner", "wireguard"]
+    private let screens = ["home", "rooms", "chat", "media", "system", "light", "media-detail", "owner"]
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -430,18 +430,25 @@ final class IOSNextUITests: XCTestCase {
         attachScreenshot("product-light-slider-interaction", app: application)
     }
 
-    func testOwnerAndWireGuardSafeEntryStates() {
+    func testOwnerSafeEntryState() {
         let ownerApplication = launch("owner")
         let unconfigured = ownerApplication.descendants(matching: .any)
             .matching(identifier: "control-center-unconfigured").firstMatch
         XCTAssertTrue(unconfigured.waitForExistence(timeout: 4), "Owner unconfigured state is missing")
         XCTAssertTrue(ownerApplication.buttons["control-center-setup-action"].waitForExistence(timeout: 3), "Owner setup action is missing")
         attachScreenshot("product-owner-entry", app: ownerApplication)
+    }
 
-        let wireGuardApplication = launch("wireguard")
-        XCTAssertTrue(wireGuardApplication.navigationBars["WireGuard"].waitForExistence(timeout: 3))
-        XCTAssertTrue(wireGuardApplication.staticTexts["iOS Next WireGuard"].waitForExistence(timeout: 3))
-        attachScreenshot("product-wireguard-entry", app: wireGuardApplication)
+    func testRemovedVPNFeatureIsAbsentFromSystem() {
+        let application = launch("system")
+        let removedEntry = application.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "WireGuard"))
+            .firstMatch
+        XCTAssertFalse(removedEntry.exists, "Removed WireGuard navigation is still visible")
+        let management = application.descendants(matching: .any)
+            .matching(identifier: "system-live-operations").firstMatch
+        XCTAssertTrue(management.waitForExistence(timeout: 4), "System management content missing")
+        attachScreenshot("product-system-no-wireguard", app: application)
     }
 
     func testLiveOperationsSafeEntryState() {
@@ -616,7 +623,7 @@ extension IOSNextUITests {
         case "NAV-001": spec = ("rooms", "Timo Zimmer", "Nur verifizierte Geräte")
         case "NAV-002": spec = ("rooms", "Alle Entitäten", "Name oder Entity-ID")
         case "NAV-003": spec = ("media", "Companion Testfilm", "10 Sekunden vor")
-        case "NAV-004": spec = ("system", "Fernzugriff · WireGuard", "iOS Next WireGuard")
+        case "NAV-004": spec = ("system", "Live Operations", "Live Operations nicht eingerichtet")
         case "NAV-005": spec = ("system", "Szenen", "Abend")
         case "NAV-006": spec = ("system", "Control Center", "Control Center nicht eingerichtet")
         case "NAV-007": spec = ("system", "Diagnose", "Tokens werden nie in der Diagnose angezeigt")
@@ -636,7 +643,7 @@ extension IOSNextUITests {
         switch scenario {
         case "A11Y-001": spec = ("dynamicTypeAccessibility=true", ["home", "chat", "system", "light"])
         case "A11Y-002": spec = ("reduceMotion=true", ["home", "chat", "media", "light"])
-        case "A11Y-003": spec = ("reduceTransparency=true", ["home", "system", "owner", "wireguard"])
+        case "A11Y-003": spec = ("reduceTransparency=true", ["home", "system", "owner", "chat"])
         case "A11Y-004": spec = ("increasedContrast=true", ["home", "rooms", "media", "system", "light"])
         default:
             XCTFail("PHASE2_CLASS=selector_contract unknown accessibility scenario: \(scenario)")
@@ -777,10 +784,6 @@ extension IOSNextUITests {
         case "OWNER-001":
             let application = phase2Product("owner")
             phase2AssertVisibleText("Control Center nicht eingerichtet", application: application)
-            phase2Screenshot("not-configured", application: application)
-        case "WG-001":
-            let application = phase2Product("wireguard")
-            phase2AssertVisibleText("iOS Next WireGuard", application: application)
             phase2Screenshot("not-configured", application: application)
         case "RUNNER-001": phase2RunRunnerSafeState()
         case "CHAT-INT-001": phase2RunChatInteraction()
