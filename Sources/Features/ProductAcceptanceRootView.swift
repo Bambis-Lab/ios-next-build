@@ -72,12 +72,16 @@ struct ProductAcceptanceRootView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("product-acceptance-\(screen.rawValue)")
         .accessibilityValue(accessibilityStateDescription)
-        .background {
+        .background(alignment: .topLeading) {
+            // The ready probe is a noninteractive diagnostic marker, not a
+            // full-screen accessibility surface over sliders, rows or tabs.
             VisualAcceptanceReadyProbe(
                 markerBaseName: "iosnext-product-screen-ready-\(screen.rawValue)-\(acceptanceAppearanceName)",
                 accessibilityIdentifier: "visual-ready-product-\(screen.rawValue)-\(acceptanceAppearanceName)",
                 payload: "screen=\(screen.rawValue);appearance=\(acceptanceAppearanceName)"
             )
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
         }
     }
 
