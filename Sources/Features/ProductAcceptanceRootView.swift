@@ -10,6 +10,8 @@ enum ProductAcceptanceScreen: String, CaseIterable {
     case light
     case mediaDetail = "media-detail"
     case owner
+    case runner
+    case projects
 
     var initialTab: AppTab? {
         switch self {
@@ -18,7 +20,7 @@ enum ProductAcceptanceScreen: String, CaseIterable {
         case .chat: .chat
         case .media: .media
         case .system: .system
-        case .light, .mediaDetail, .owner: nil
+        case .light, .mediaDetail, .owner, .runner, .projects: nil
         }
     }
 }
@@ -145,6 +147,18 @@ struct ProductAcceptanceRootView: View {
             }
         case .owner:
             AdminAreaView(appModel: appModel)
+        case .runner:
+#if DEBUG
+            NavigationStack { G99RunnerAcceptanceFixture() }
+#else
+            EmptyView()
+#endif
+        case .projects:
+#if DEBUG
+            NavigationStack { G99ProjectsAcceptanceFixture() }
+#else
+            EmptyView()
+#endif
         case .home, .rooms, .chat, .media, .system:
             EmptyView()
         }
@@ -158,3 +172,99 @@ struct ProductAcceptanceRootView: View {
         return screen
     }
 }
+
+
+#if DEBUG
+// Deterministic, local-only screenshot fixtures. No real Owner/Runner tokens,
+// no network requests and no modification to the live Factory.
+private struct G99RunnerAcceptanceFixture: View {
+    @State private var model: RunnerControlModel
+
+    init() {
+        let fixture = RunnerControlModel()
+        fixture.state = .ready(
+            RunnerStatus(
+                vmOnline: true, serviceActive: true,
+                registeredRunners: 4, idleRunners: 3, busyRunners: 1,
+                cpuPercent: 31, memoryPercent: 62, diskPercent: 44,
+                lastHealthCheck: Date(timeIntervalSince1970: 1_760_000_000),
+                uptimeSeconds: 324_000, maintenanceMode: false,
+                bridge: RunnerSubsystemStatus(
+                    id: "bridge", name: "Runner Bridge", active: true,
+                    version: "fixture", detail: "Lokale Testdaten", lastSeen: nil
+                ),
+                orchestrator: nil, commander: nil,
+                services: [
+                    RunnerServiceStatus(id: "queue", name: "Job Queue", active: true, detail: "Bereit"),
+                    RunnerServiceStatus(id: "worker", name: "Worker", active: true, detail: "Testmodus")
+                ],
+                backup: nil, recentAudit: nil, runnerInstances: nil,
+                activeJobs: [
+                    RunnerJobStatus(
+                        id: "g99-test-job", name: "iOS Next UI Acceptance",
+                        workflow: "G99", repository: "Bambis-Lab/ios-next-build",
+                        branch: "fix/iosnext-164-dashboard-sliders-fix01-05",
+                        runnerID: "runner-01", runnerName: "Xcode 27",
+                        state: "in_progress", startedAt: nil
+                    )
+                ]
+            )
+        )
+        _model = State(initialValue: fixture)
+    }
+
+    var body: some View {
+        RunnerDashboardView(model: model)
+            .accessibilityIdentifier("g99-fixture-runner")
+    }
+}
+
+private struct G99ProjectsAcceptanceFixture: View {
+    @State private var model: AdminControlModel
+
+    init() {
+        let fixture = AdminControlModel()
+        fixture.projectsV2 = [
+            AdminProjectStatusV2(
+                id: "ios-next", title: "iOS Next",
+                repository: "Bambis-Lab/ios-next", dispatchCount: 5,
+                activeJobs: 1, latestDispatchState: "in_progress",
+                ci: AdminCIStatusV2(
+                    status: "success", conclusion: "success",
+                    headSHA: "25b1176ecd930bff8db04f804d62acf550af83c7",
+                    workflow: "iPhone G99", updatedAt: Date(timeIntervalSince1970: 1_760_000_000),
+                    error: nil
+                )
+            ),
+            AdminProjectStatusV2(
+                id: "factory", title: "Master Control Factory",
+                repository: "Bambis-Lab/master-control-factory", dispatchCount: 8,
+                activeJobs: 0, latestDispatchState: "completed", ci: nil
+            ),
+            AdminProjectStatusV2(
+                id: "research", title: "CIR/KISA Forschung",
+                repository: "Bambis-Lab/Forschung", dispatchCount: 3,
+                activeJobs: 0, latestDispatchState: "failed",
+                ci: AdminCIStatusV2(
+                    status: "failure", conclusion: "failure",
+                    headSHA: "1234567890abcdef", workflow: "Research CI",
+                    updatedAt: Date(timeIntervalSince1970: 1_760_000_000), error: nil
+                )
+            )
+        ]
+        fixture.jobsV2 = [
+            AdminJobStatusV2(
+                id: "acceptance-1", ticketID: "G99-UI",
+                projectID: "ios-next", state: "in_progress",
+                approvedBy: "fixture", approvedAt: Date(timeIntervalSince1970: 1_760_000_000)
+            )
+        ]
+        _model = State(initialValue: fixture)
+    }
+
+    var body: some View {
+        OwnerProjectsView(model: model, capabilities: model.ownerCapabilityRegistry)
+            .accessibilityIdentifier("g99-fixture-projects")
+    }
+}
+#endif
