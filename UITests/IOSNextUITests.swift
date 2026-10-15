@@ -380,7 +380,7 @@ final class IOSNextUITests: XCTestCase {
     }
 
     func testDynamicTypeAccessibilityState() {
-        let application = launch("home")
+        let application = launch("home", extraArguments: ["--product-ui-test-dynamic-type"])
         XCTAssertTrue(accessibilityState(in: application).contains("dynamicTypeAccessibility=true"))
         attachScreenshot("product-accessibility-dynamic-type-xxxl", app: application)
     }
