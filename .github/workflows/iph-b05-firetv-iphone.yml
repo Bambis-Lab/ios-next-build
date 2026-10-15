@@ -1,0 +1,72 @@
+name: IPH B-05 Fire TV Capability Verification (iPhone Only)
+
+# Only the focused B-05 source/fixture tests are triggered on source changes.
+# G99 remains an explicit, separate manual workflow.
+on:
+  push:
+    branches:
+      - fix/iosnext-164-dashboard-sliders-fix01-05
+    paths:
+      - Sources/Core/PreviewData.swift
+      - Tests/IOSNextTests.swift
+      - .github/workflows/iph-b05-firetv-iphone.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iph-b05-iphone
+  cancel-in-progress: false
+
+jobs:
+  iphone-firetv-capability:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify source lock and iPhone-only toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          xcodebuild -version
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build/b05
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert a, "iPhone 18 Pro Max / iOS 27 required"; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$SIM_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$SIM_ID" -b
+          xcrun simctl ui "$SIM_ID" appearance light
+          printf 'branch=%s\nsha=%s\nsimulator=%s\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" "$SIM_ID" > build/b05/metadata.txt
+      - name: Run capability unit tests and Fire TV interaction
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/b05/DerivedData \
+            -resultBundlePath build/b05/B05.xcresult \
+            '-only-testing:IOSNextTests/IOSNextTests/testFireTVCompanionPreviewContract' \
+            '-only-testing:IOSNextTests/IOSNextTests/testFireTVCompanionTransportFailsClosedWithoutCapability' \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/b05/B05.log
+      - name: Preserve positive/negative capability evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IPH-B05-FireTV-iPhone-Evidence
+          path: |
+            build/b05/B05.log
+            build/b05/B05.xcresult
+            build/b05/metadata.txt
+          retention-days: 14
+          if-no-files-found: warn

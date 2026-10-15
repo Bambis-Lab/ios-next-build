@@ -56,6 +56,12 @@ extension AppModel {
             attributes["media_content_type"] = .string("video")
             attributes["volume_level"] = .number(0.52)
             attributes["skip_interval_seconds"] = .number(10)
+            // Deterministic product-acceptance fixture: expose the explicit
+            // capability required by Fire TV V2 playback controls.
+            // The production policy remains fail-closed for missing capabilities.
+            var capabilities = attributes["capabilities"]?.objectValue ?? [:]
+            capabilities["player_control"] = .bool(true)
+            attributes["capabilities"] = .object(capabilities)
             model.entities[index] = HomeAssistantEntity(entityID: original.entityID, state: "playing", attributes: attributes)
         }
         return model

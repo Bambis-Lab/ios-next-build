@@ -457,6 +457,41 @@ final class IOSNextTests: XCTestCase {
         XCTAssertEqual(entity.mediaContentType, "video")
         XCTAssertEqual(try XCTUnwrap(entity.volumeLevel), 0.52, accuracy: 0.001)
         XCTAssertEqual(entity.attributes["skip_interval_seconds"]?.numberValue, 10)
+        XCTAssertTrue(entity.supportsPause, "Preview player must advertise native pause support")
+        XCTAssertTrue(entity.companionSupportsPlayerControl, "Preview must expose explicit Fire TV player_control")
+        XCTAssertTrue(FireTVPresentationPolicy.shouldShowTransport(for: entity))
+    }
+
+    @MainActor
+    func testFireTVCompanionTransportFailsClosedWithoutCapability() throws {
+        let supported = try XCTUnwrap(
+            AppModel.preview.entities.first { $0.entityID == "media_player.fire_tv_companion" }
+        )
+        XCTAssertTrue(supported.supportsPause)
+        XCTAssertTrue(FireTVPresentationPolicy.shouldShowTransport(for: supported))
+
+        var attributes = supported.attributes
+        attributes.removeValue(forKey: "capabilities")
+        let capabilityMissing = HomeAssistantEntity(
+            entityID: supported.entityID, state: "playing", attributes: attributes
+        )
+        XCTAssertTrue(capabilityMissing.supportsPause, "Native media feature must remain available")
+        XCTAssertFalse(capabilityMissing.companionSupportsPlayerControl)
+        XCTAssertFalse(
+            FireTVPresentationPolicy.shouldShowTransport(for: capabilityMissing),
+            "Missing player_control must suppress transport despite native playback flags"
+        )
+
+        attributes["capabilities"] = .object(["player_control": .bool(false)])
+        let capabilityDenied = HomeAssistantEntity(
+            entityID: supported.entityID, state: "playing", attributes: attributes
+        )
+        XCTAssertFalse(FireTVPresentationPolicy.shouldShowTransport(for: capabilityDenied))
+
+        let switchedOff = HomeAssistantEntity(
+            entityID: supported.entityID, state: "off", attributes: supported.attributes
+        )
+        XCTAssertFalse(FireTVPresentationPolicy.shouldShowTransport(for: switchedOff))
     }
 
     private func fakeHABaseURL(_ mode: String) -> URL {
