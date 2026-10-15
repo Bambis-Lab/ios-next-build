@@ -10,7 +10,6 @@ enum ProductAcceptanceScreen: String, CaseIterable {
     case light
     case mediaDetail = "media-detail"
     case owner
-    case wireguard
 
     var initialTab: AppTab? {
         switch self {
@@ -19,7 +18,7 @@ enum ProductAcceptanceScreen: String, CaseIterable {
         case .chat: .chat
         case .media: .media
         case .system: .system
-        case .light, .mediaDetail, .owner, .wireguard: nil
+        case .light, .mediaDetail, .owner: nil
         }
     }
 }
@@ -142,10 +141,6 @@ struct ProductAcceptanceRootView: View {
             }
         case .owner:
             AdminAreaView(appModel: appModel)
-        case .wireguard:
-            NavigationStack {
-                WireGuardView()
-            }
         case .home, .rooms, .chat, .media, .system:
             EmptyView()
         }

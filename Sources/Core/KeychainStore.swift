@@ -64,12 +64,10 @@ enum KeychainStore {
 
 enum KeychainError: LocalizedError {
     case unexpectedStatus(OSStatus)
-    case configurationMissing
 
     var errorDescription: String? {
         switch self {
         case .unexpectedStatus: "Der sichere iOS-Schlüsselspeicher konnte nicht verwendet werden."
-        case .configurationMissing: "Die signierte WireGuard-Schlüsselbundgruppe ist noch nicht eingerichtet."
         }
     }
 }
