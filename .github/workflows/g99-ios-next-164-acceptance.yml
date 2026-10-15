@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/g99-ios-next-164-acceptance.yml'
   workflow_dispatch:
-# G99 verification: test-only timeout hardening and server trace on failure.
+# G99 verification: auth_stall server stays open 20s beyond client's 12s deadline.
 permissions:
   contents: read
 concurrency:
