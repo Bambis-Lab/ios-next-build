@@ -389,6 +389,73 @@ final class IOSNextTests: XCTestCase {
         }
     }
 
+    func testWireGuardConfigurationAcceptsStrictSubset() throws {
+        let key = Data(repeating: 7, count: 32).base64EncodedString()
+        let configuration = """
+        [Interface]
+        PrivateKey = \(key)
+        Address = 10.44.0.2/32, fd44::2/128
+        DNS = 10.44.0.1
+        MTU = 1280
+
+        [Peer]
+        PublicKey = \(key)
+        AllowedIPs = 10.0.0.0/8, fd44::/64
+        Endpoint = vpn.example.com:51820
+        PersistentKeepalive = 25
+        """
+        let parsed = try WireGuardConfigurationValidator.validate(configuration)
+        XCTAssertEqual(parsed.interface.addresses, ["10.44.0.2/32", "fd44::2/128"])
+        XCTAssertEqual(parsed.peers.first?.endpoint, "vpn.example.com:51820")
+    }
+
+    func testWireGuardConfigurationRejectsScripts() {
+        let key = Data(repeating: 8, count: 32).base64EncodedString()
+        let configuration = """
+        [Interface]
+        PrivateKey = \(key)
+        Address = 10.44.0.2/32
+        PostUp = curl https://attacker.invalid
+
+        [Peer]
+        PublicKey = \(key)
+        AllowedIPs = 10.0.0.0/8
+        Endpoint = vpn.example.com:51820
+        """
+        XCTAssertThrowsError(try WireGuardConfigurationValidator.validate(configuration))
+    }
+
+    func testWireGuardConfigurationRejectsInvalidAddressAndDuplicatePeer() {
+        let key = Data(repeating: 9, count: 32).base64EncodedString()
+        let invalidAddress = """
+        [Interface]
+        PrivateKey = \(key)
+        Address = 999.1.1.1/32
+
+        [Peer]
+        PublicKey = \(key)
+        AllowedIPs = 10.0.0.0/8
+        Endpoint = vpn.example.com:51820
+        """
+        XCTAssertThrowsError(try WireGuardConfigurationValidator.validate(invalidAddress))
+
+        let duplicatePeer = """
+        [Interface]
+        PrivateKey = \(key)
+        Address = 10.44.0.2/32
+
+        [Peer]
+        PublicKey = \(key)
+        AllowedIPs = 10.0.0.0/8
+        Endpoint = vpn-a.example.com:51820
+
+        [Peer]
+        PublicKey = \(key)
+        AllowedIPs = 192.168.0.0/16
+        Endpoint = vpn-b.example.com:51820
+        """
+        XCTAssertThrowsError(try WireGuardConfigurationValidator.validate(duplicatePeer))
+    }
     func testLiveHACardCatalogCoversEveryLiveDashboardType() {
         XCTAssertEqual(
             Set(LiveHACardType.allCases.map(\.rawValue)),
