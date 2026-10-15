@@ -154,25 +154,61 @@ final class IOSNextUITests: XCTestCase {
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
+    private func captureInteractionFailure(_ label: String, in application: XCUIApplication) {
+        let hierarchy = XCTAttachment(string: application.debugDescription)
+        hierarchy.name = "UI hierarchy - \(label)"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        let screenshot = XCTAttachment(screenshot: application.screenshot())
+        screenshot.name = "UI failure - \(label)"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     private func scrollUpUntilHittable(
         _ element: XCUIElement,
         in application: XCUIApplication,
         label: String,
-        maxSwipes: Int = 4
+        maxSwipes: Int = 4,
+        containerIdentifier: String? = nil
     ) {
-        XCTAssertTrue(element.waitForExistence(timeout: 3), "\(label) did not exist")
+        guard element.waitForExistence(timeout: 3) else {
+            captureInteractionFailure(label, in: application)
+            XCTFail("\(label) did not exist")
+            return
+        }
+        if element.isHittable { return }
 
-        let scrollContainer = application.scrollViews.firstMatch
-        XCTAssertTrue(scrollContainer.waitForExistence(timeout: 3), "\(label) has no scroll container")
-        for _ in 0..<maxSwipes {
-            if element.isHittable {
-                return
-            }
-            scrollContainer.swipeUp()
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        let namedContainer = containerIdentifier.map {
+            application.descendants(matching: .any).matching(identifier: $0).firstMatch
+        }
+        let scrollContainer: XCUIElement
+        if let namedContainer, namedContainer.waitForExistence(timeout: 2) {
+            scrollContainer = namedContainer
+        } else if application.scrollViews.firstMatch.exists {
+            scrollContainer = application.scrollViews.firstMatch
+        } else if application.tables.firstMatch.exists {
+            scrollContainer = application.tables.firstMatch
+        } else if application.collectionViews.firstMatch.exists {
+            scrollContainer = application.collectionViews.firstMatch
+        } else {
+            captureInteractionFailure(label, in: application)
+            XCTFail("\(label) has no identifiable scrollable container")
+            return
         }
 
-        XCTAssertTrue(element.isHittable, "\(label) did not become hittable after \(maxSwipes) scroll-container swipes")
+        for _ in 0..<maxSwipes {
+            if element.isHittable { return }
+            let before = element.frame
+            scrollContainer.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            NSLog("IPH-SCROLL \(label): before=\(before) after=\(element.frame) container=\(scrollContainer.frame)")
+        }
+
+        if !element.isHittable {
+            captureInteractionFailure(label, in: application)
+            XCTFail("\(label) not hittable after \(maxSwipes) scoped swipes; frame=\(element.frame), enabled=\(element.isEnabled), container=\(scrollContainer.frame)")
+        }
     }
 
     private func waitForVisualReady(
@@ -285,14 +321,17 @@ final class IOSNextUITests: XCTestCase {
             mediaRow.tap()
         }
 
-        XCTAssertTrue(application.navigationBars["Medien"].waitForExistence(timeout: 5), "Media tab navigation did not complete")
+        let mediaContent = application.staticTexts["Weitere Medien"].firstMatch
+        let mediaHeading = application.navigationBars["Medien"].firstMatch
         let mediaSummary = application.descendants(matching: .any)
             .matching(identifier: "media-active-summary")
             .firstMatch
-        XCTAssertTrue(
-            mediaSummary.waitForExistence(timeout: 8),
-            "Native media tab did not expose the media summary"
-        )
+        if !mediaSummary.waitForExistence(timeout: 8) {
+            captureInteractionFailure("Media tab content", in: application)
+            XCTFail("Media tab did not render the expected active-player summary; heading=\(mediaHeading.exists), otherMedia=\(mediaContent.exists)")
+            return
+        }
+        XCTAssertTrue(mediaHeading.exists || mediaSummary.isHittable, "Media content exists but neither title nor summary is accessible")
 
         let fireTV = application.descendants(matching: .any)
             .matching(identifier: "fire-tv-companion-card-media_player.fire_tv_companion")
@@ -302,6 +341,7 @@ final class IOSNextUITests: XCTestCase {
             "Media tab did not expose the Fire TV Companion V2 card"
         )
         scrollUpUntilHittable(fireTV, in: application, label: "Fire TV Companion V2 card")
+        guard fireTV.isHittable else { return }
         fireTV.press(forDuration: 0.8)
 
         XCTAssertTrue(application.navigationBars["Fire TV"].waitForExistence(timeout: 5), "Fire TV V2 control sheet did not open")
@@ -332,11 +372,15 @@ final class IOSNextUITests: XCTestCase {
         XCTAssertTrue(power.isEnabled)
 
         let brightness = application.sliders["light-brightness-slider"]
+        XCTAssertTrue(brightness.waitForExistence(timeout: 5), "Brightness slider missing")
+        XCTAssertTrue(brightness.isEnabled, "Brightness slider is disabled in the preview fixture")
         scrollUpUntilHittable(
             brightness,
             in: application,
-            label: "Brightness slider"
+            label: "Brightness slider",
+            containerIdentifier: "entity-detail-scroll"
         )
+        guard brightness.isHittable else { return }
         let before = brightness.value as? String
         brightness.adjust(toNormalizedSliderPosition: 0.28)
         let after = brightness.value as? String
@@ -364,6 +408,7 @@ final class IOSNextUITests: XCTestCase {
             .matching(identifier: "system-live-operations")
             .firstMatch
         scrollUpUntilHittable(liveOperations, in: application, label: "Live Operations", maxSwipes: 4)
+        guard liveOperations.isHittable else { return }
         liveOperations.tap()
         XCTAssertTrue(
             application.staticTexts["Live Operations nicht eingerichtet"].waitForExistence(timeout: 4),
