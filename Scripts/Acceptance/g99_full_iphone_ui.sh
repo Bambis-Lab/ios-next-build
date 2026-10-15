@@ -28,6 +28,47 @@ xcrun simctl launch --terminate-running-process "$SIM_ID" de.nicofroeba16.iosnex
 sleep 2
 xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
 
+# G99-FIX-01/02: isolate first-launch instability before the product UI matrix.
+# Only a diagnosed XCTest app-process launch failure may receive ONE retry.
+# Store both attempts, including any failure, for auditable evidence.
+STARTUP_DIR="build/g99/attachments/startup"
+mkdir -p "$STARTUP_DIR"
+run_startup_probe() {
+  local name="$1"
+  local status=0
+  set +e
+  xcodebuild test-without-building -collect-test-diagnostics never \
+    -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+    -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+    -resultBundlePath "$STARTUP_DIR/$name.xcresult" \
+    "-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders" \
+    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+    2>&1 | tee "$STARTUP_DIR/$name.log"
+  status=${PIPESTATUS[0]}
+  set -e
+  return "$status"
+}
+if run_startup_probe "first-launch"; then
+  echo "G99_STARTUP_PROBE=PASS retry=0" | tee "$STARTUP_DIR/summary.txt"
+else
+  if ! grep -Eq "does not have a process ID|Failed to launch|Failed to establish.*automation session|Failed to get.*process ID" "$STARTUP_DIR/first-launch.log"; then
+    echo "G99_STARTUP_PROBE=FAIL kind=non-launch no-retry" | tee "$STARTUP_DIR/summary.txt"
+    exit 65
+  fi
+  echo "G99_STARTUP_PROBE=INFRA_LAUNCH_RETRY_COUNT_1" | tee "$STARTUP_DIR/summary.txt"
+  xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+  xcrun simctl bootstatus "$SIM_ID" -b >> "$STARTUP_DIR/recovery.log" 2>&1
+  xcrun simctl launch --terminate-running-process "$SIM_ID" \
+    de.nicofroeba16.iosnext --product-ui-test-screen=home >> "$STARTUP_DIR/recovery.log" 2>&1
+  xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+  if run_startup_probe "retry-launch"; then
+    echo "G99_STARTUP_PROBE=RECOVERED_AFTER_ONE_RETRY" | tee -a "$STARTUP_DIR/summary.txt"
+  else
+    echo "G99_STARTUP_PROBE=FAIL retries_exhausted" | tee -a "$STARTUP_DIR/summary.txt"
+    exit 65
+  fi
+fi
+
 # Mandatory manifest contains nine product UI cases and two simulator-supported
 # accessibility cases. Light/Dark is asserted by the visual UI case.
 # The optional Settings-switch tests are deliberately outside the release gate.
