@@ -5,6 +5,7 @@ import UIKit
 
 final class IOSNextUITests: XCTestCase {
     private var app: XCUIApplication!
+    private var accessibilityRestore: (path: [String], toggle: String, enabled: Bool)?
     private let screens = ["home", "rooms", "chat", "media", "system", "light", "media-detail", "owner"]
 
     override func setUpWithError() throws {
@@ -13,6 +14,10 @@ final class IOSNextUITests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        if let original = accessibilityRestore {
+            _ = setAccessibilityPreference(path: original.path, toggle: original.toggle, enabled: original.enabled, recordRestore: false)
+            accessibilityRestore = nil
+        }
         app = nil
         XCUIDevice.shared.orientation = .portrait
     }
@@ -474,6 +479,82 @@ final class IOSNextUITests: XCTestCase {
         return root.value as? String ?? ""
     }
 
+    // Xcode 27 simctl does not expose Reduce Motion / Reduce Transparency.
+    // This driver taps actual controls in the installed iOS Settings application.
+    private func settingsValue(_ element: XCUIElement) -> Bool? {
+        guard element.exists else { return nil }
+        let raw = String(describing: element.value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if ["1", "on", "enabled", "true", "ein"].contains(raw) { return true }
+        if ["0", "off", "disabled", "false", "aus"].contains(raw) { return false }
+        return nil
+    }
+
+    private func settingsTap(_ title: String, in settings: XCUIApplication) -> Bool {
+        for attempt in 0..<5 {
+            let choices = [
+                settings.cells.containing(.staticText, identifier: title).firstMatch,
+                settings.buttons[title].firstMatch,
+                settings.staticTexts[title].firstMatch
+            ]
+            if let choice = choices.first(where: { $0.exists && $0.isHittable }) {
+                choice.tap()
+                return true
+            }
+            if attempt < 4 { settings.swipeUp() }
+        }
+        return false
+    }
+
+    @discardableResult
+    private func setAccessibilityPreference(
+        path: [String],
+        toggle: String,
+        enabled: Bool,
+        recordRestore: Bool = true
+    ) -> Bool {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        settings.launch()
+        for segment in path {
+            guard settingsTap(segment, in: settings) else {
+                let attachment = XCTAttachment(string: settings.debugDescription)
+                attachment.name = "Settings navigation missing - \(segment)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+                XCTFail("Cannot navigate real Settings > \(path.joined(separator: " > "))")
+                return false
+            }
+        }
+        let byName = settings.switches[toggle].firstMatch
+        let row = settings.cells.containing(.staticText, identifier: toggle).firstMatch
+        let control = byName.exists ? byName : row.switches.firstMatch
+        guard control.waitForExistence(timeout: 5), let original = settingsValue(control) else {
+            let attachment = XCTAttachment(string: settings.debugDescription)
+            attachment.name = "Settings switch missing - \(toggle)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("Real system switch \(toggle) missing or unparseable")
+            return false
+        }
+        if original != enabled {
+            if recordRestore {
+                accessibilityRestore = (path: path, toggle: toggle, enabled: original)
+            }
+            guard control.isHittable else {
+                XCTFail("System switch \(toggle) is not hittable")
+                return false
+            }
+            control.tap()
+        }
+        guard settingsValue(control) == enabled else {
+            XCTFail("System switch \(toggle) failed to reach the requested value")
+            return false
+        }
+        NSLog("G99 system Settings verified \(toggle)=\(enabled)")
+        settings.terminate()
+        return true
+    }
+
     func testAccessibilityCoreScreenRenders() {
         let application = launch("home")
         XCTAssertTrue(application.staticTexts["Häufig genutzt"].waitForExistence(timeout: 3))
@@ -481,27 +562,36 @@ final class IOSNextUITests: XCTestCase {
         attachScreenshot("product-accessibility-current-system-settings", app: application)
     }
 
+    // Genuine system settings only; no synthetic launch arguments.
     func testDynamicTypeAccessibilityState() {
-        let application = launch("home", extraArguments: ["--product-ui-test-dynamic-type"])
-        XCTAssertTrue(accessibilityState(in: application).contains("dynamicTypeAccessibility=true"))
+        let application = launch("home")
+        XCTAssertTrue(accessibilityState(in: application).contains("dynamicTypeAccessibility=true"),
+                      "Simulator content_size must be an accessibility category")
         attachScreenshot("product-accessibility-dynamic-type-xxxl", app: application)
     }
 
     func testReduceMotionAccessibilityState() {
-        let application = launch("home", extraArguments: ["--product-ui-test-reduce-motion"])
-        XCTAssertTrue(accessibilityState(in: application).contains("reduceMotion=true"))
+        guard setAccessibilityPreference(path: ["Accessibility", "Motion"],
+                                         toggle: "Reduce Motion", enabled: true) else { return }
+        let application = launch("home")
+        XCTAssertTrue(accessibilityState(in: application).contains("reduceMotion=true"),
+                      "System Reduce Motion not observed by SwiftUI")
         attachScreenshot("product-accessibility-reduce-motion", app: application)
     }
 
     func testReduceTransparencyAccessibilityState() {
-        let application = launch("home", extraArguments: ["--product-ui-test-reduce-transparency"])
-        XCTAssertTrue(accessibilityState(in: application).contains("reduceTransparency=true"))
+        guard setAccessibilityPreference(path: ["Accessibility", "Display & Text Size"],
+                                         toggle: "Reduce Transparency", enabled: true) else { return }
+        let application = launch("home")
+        XCTAssertTrue(accessibilityState(in: application).contains("reduceTransparency=true"),
+                      "System Reduce Transparency not observed by SwiftUI")
         attachScreenshot("product-accessibility-reduce-transparency", app: application)
     }
 
     func testIncreaseContrastAccessibilityState() {
-        let application = launch("home", extraArguments: ["--product-ui-test-increase-contrast"])
-        XCTAssertTrue(accessibilityState(in: application).contains("increasedContrast=true"))
+        let application = launch("home")
+        XCTAssertTrue(accessibilityState(in: application).contains("increasedContrast=true"),
+                      "Simulator increase_contrast must be enabled before launch")
         attachScreenshot("product-accessibility-increase-contrast", app: application)
     }
 
