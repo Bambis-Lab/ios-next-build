@@ -20,7 +20,7 @@ concurrency:
 jobs:
   iphone-targeted-ui:
     runs-on: xcode-27
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Prepare Xcode 27 iPhone-only project
@@ -43,6 +43,10 @@ jobs:
           mkdir -p build/iph-b
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert a, "iPhone 18 Pro Max iOS 27 required"; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          # Boot the selected iPhone *before* any XCUITest launch.
+          # The existing helper applies a 90-second watchdog to bootstatus.
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0"             2>&1 | tee build/iph-b/simulator-boot.log
+          xcrun simctl ui "$SIM_ID" appearance light
           {
             printf 'run_id=%s\nbranch=%s\nsha=%s\nsimulator=%s\n' "$GITHUB_RUN_ID" "$GITHUB_REF_NAME" "$GITHUB_SHA" "$SIM_ID"
             xcodebuild -version
@@ -51,6 +55,34 @@ jobs:
             xcrun simctl list devices available
           } > build/iph-b/environment.txt 2>&1
           xcrun simctl help ui > build/iph-b/simctl-ui-help.txt 2>&1 || true
+      - name: B-06 build for testing and controlled simulator prelaunch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "B06_BUILD_FOR_TESTING_BEGIN"
+          xcodebuild build-for-testing -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug \
+            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/iph-b/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/iph-b/BuildForTesting.log
+          APP_PATH="build/iph-b/DerivedData/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP_PATH"
+          XCTESTRUN_PATH="$(find build/iph-b/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -n "$XCTESTRUN_PATH"
+          echo "B06_BUILD_FOR_TESTING_PASS"
+          echo "B06_PREWARM_INSTALL_BEGIN"
+          xcrun simctl install "$SIM_ID" "$APP_PATH" 2>&1 | tee build/iph-b/prewarm-install.log
+          echo "B06_PREWARM_LAUNCH_BEGIN"
+          xcrun simctl launch --terminate-running-process "$SIM_ID" de.nicofroeba16.iosnext             --product-ui-test-screen=light 2>&1 | tee build/iph-b/prewarm-launch.log
+          # This process start is only a startup smoke check, not slider acceptance.
+          sleep 2
+          xcrun simctl io "$SIM_ID" screenshot build/iph-b/prewarm-screen.png             > build/iph-b/prewarm-screenshot.log 2>&1 || true
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext             > build/iph-b/prewarm-terminate.log 2>&1 || true
+          echo "B06_PREWARM_PROCESS_LAUNCHED" | tee -a build/iph-b/environment.txt
       - name: Run only three previously failing iPhone UI scenarios
         shell: bash
         run: |
@@ -58,11 +90,13 @@ jobs:
           test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           set +e
-          xcodebuild test -collect-test-diagnostics never \
-            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug \
-            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" \
+          XCTESTRUN_PATH="$(find build/iph-b/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -n "$XCTESTRUN_PATH"
+          printf 'test_execution=test-without-building\nxctestrun=%s\n' "$XCTESTRUN_PATH" >> build/iph-b/environment.txt
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             -parallel-testing-enabled NO -disable-concurrent-destination-testing \
-            -derivedDataPath build/iph-b/DerivedData \
             -resultBundlePath build/iph-b/Targeted.xcresult \
             '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' \
             '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' \
@@ -89,6 +123,13 @@ jobs:
           path: |
             build/iph-b/Targeted.log
             build/iph-b/Targeted.xcresult
+            build/iph-b/simulator-boot.log
+            build/iph-b/BuildForTesting.log
+            build/iph-b/prewarm-install.log
+            build/iph-b/prewarm-launch.log
+            build/iph-b/prewarm-screen.png
+            build/iph-b/prewarm-screenshot.log
+            build/iph-b/prewarm-terminate.log
             build/iph-b/environment.txt
             build/iph-b/simctl-ui-help.txt
             build/iph-b/screenshot-status.txt
