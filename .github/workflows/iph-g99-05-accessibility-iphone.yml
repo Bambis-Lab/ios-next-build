@@ -1,0 +1,101 @@
+name: IPH G99-05 Genuine Accessibility iPhone
+on:
+  push:
+    branches:
+      - fix/iosnext-164-dashboard-sliders-fix01-05
+    paths:
+      - 'UITests/IOSNextUITests.swift'
+      - '.github/workflows/iph-g99-05-accessibility-iphone.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iph-g99-05-iphone
+  cancel-in-progress: false
+jobs:
+  a11y:
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Boot fixed iPhone and prebuild XCTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build/g99-a11y
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert len(a)==1; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/g99-a11y/boot.log
+          xcrun simctl ui "$SIM_ID" appearance light
+          xcrun simctl help ui > build/g99-a11y/simctl-ui-help.txt
+          xcodebuild build-for-testing -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug \
+            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -derivedDataPath build/g99-a11y/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/g99-a11y/Build.log
+          APP="build/g99-a11y/DerivedData/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP"
+          xcrun simctl install "$SIM_ID" "$APP"
+          xcrun simctl launch --terminate-running-process "$SIM_ID" de.nicofroeba16.iosnext \
+            --product-ui-test-screen=home 2>&1 | tee build/g99-a11y/prewarm.log
+          sleep 2
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+      - name: Four genuine accessibility states
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          XCTESTRUN_PATH="$(find build/g99-a11y/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -n "$XCTESTRUN_PATH"
+          ORIGINAL_SIZE="$(xcrun simctl ui "$SIM_ID" content_size)"
+          ORIGINAL_CONTRAST="$(xcrun simctl ui "$SIM_ID" increase_contrast)"
+          test "$ORIGINAL_SIZE" != unknown
+          test "$ORIGINAL_SIZE" != unsupported
+          test "$ORIGINAL_CONTRAST" = enabled -o "$ORIGINAL_CONTRAST" = disabled
+          restore() {
+            xcrun simctl ui "$SIM_ID" content_size "$ORIGINAL_SIZE" || true
+            xcrun simctl ui "$SIM_ID" increase_contrast "$ORIGINAL_CONTRAST" || true
+          }
+          trap restore EXIT
+          printf 'branch=%s\nsha=%s\nsim=%s\nsize_before=%s\ncontrast_before=%s\n' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$SIM_ID" "$ORIGINAL_SIZE" "$ORIGINAL_CONTRAST" > build/g99-a11y/metadata.txt
+          run_one() {
+            local label="$1" selector="$2"
+            echo "G99_05_BEGIN $label"
+            xcodebuild test-without-building -collect-test-diagnostics never \
+              -xctestrun "$XCTESTRUN_PATH" \
+              -destination "platform=iOS Simulator,id=$SIM_ID" \
+              -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+              -resultBundlePath "build/g99-a11y/$label.xcresult" \
+              "-only-testing:IOSNextUITests/IOSNextUITests/$selector" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              2>&1 | tee "build/g99-a11y/$label.log"
+            echo "G99_05_PASS $label"
+          }
+          xcrun simctl ui "$SIM_ID" content_size accessibility-extra-extra-extra-large
+          test "$(xcrun simctl ui "$SIM_ID" content_size)" = accessibility-extra-extra-extra-large
+          run_one dynamic-type testDynamicTypeAccessibilityState
+          xcrun simctl ui "$SIM_ID" content_size "$ORIGINAL_SIZE"
+          xcrun simctl ui "$SIM_ID" increase_contrast enabled
+          test "$(xcrun simctl ui "$SIM_ID" increase_contrast)" = enabled
+          run_one increase-contrast testIncreaseContrastAccessibilityState
+          xcrun simctl ui "$SIM_ID" increase_contrast "$ORIGINAL_CONTRAST"
+          run_one reduce-motion testReduceMotionAccessibilityState
+          run_one reduce-transparency testReduceTransparencyAccessibilityState
+          echo "G99_05_REAL_ACCESSIBILITY=PASS count=4"
+      - name: Preserve diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: G99-05-iPhone-Genuine-A11Y
+          path: build/g99-a11y/
+          retention-days: 14
+          if-no-files-found: warn

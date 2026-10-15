@@ -515,6 +515,13 @@ final class IOSNextUITests: XCTestCase {
     ) -> Bool {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
         settings.launch()
+        // Settings can restore the previously visited detail screen.
+        for _ in 0..<5 {
+            if settings.navigationBars["Settings"].exists { break }
+            let back = settings.navigationBars.buttons.firstMatch
+            guard back.exists && back.isHittable else { break }
+            back.tap()
+        }
         for segment in path {
             guard settingsTap(segment, in: settings) else {
                 let attachment = XCTAttachment(string: settings.debugDescription)
