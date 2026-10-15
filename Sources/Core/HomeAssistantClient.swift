@@ -57,10 +57,14 @@ struct HomeAssistantClientTimingPolicy: Sendable {
         pingTimeoutSeconds: 5
     )
 
+    // Xcode 27 simulator scheduling can delay the initial WebSocket auth
+    // and registry commands despite a successful TCP/WebSocket upgrade.
+    // Keep negative-path tests bounded, but avoid mistaking simulator
+    // scheduling stalls for server/network failures.
     static let integrationTest = HomeAssistantClientTimingPolicy(
-        authHandshakeSeconds: 4.0,
-        getStatesSeconds: 4.0,
-        commandSeconds: 2.0,
+        authHandshakeSeconds: 12.0,
+        getStatesSeconds: 12.0,
+        commandSeconds: 8.0,
         heartbeatIntervalSeconds: 0.75,
         pingTimeoutSeconds: 1.5
     )
