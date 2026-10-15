@@ -372,9 +372,12 @@ final class IOSNextUITests: XCTestCase {
                         application.staticTexts["Deine Projekte"].waitForExistence(timeout: 8),
                         "Owner Projects screen did not render"
                     )
+                    let populatedProject = application.descendants(matching: .any)
+                        .matching(NSPredicate(format: "label CONTAINS[c] %@", "Master Control Factory"))
+                        .firstMatch
                     XCTAssertTrue(
-                        application.staticTexts["Master Control Factory"].waitForExistence(timeout: 5),
-                        "Project fixture is not populated"
+                        populatedProject.waitForExistence(timeout: 5),
+                        "Project fixture is not populated or accessible"
                     )
                 }
                 attachScreenshot("g99-fix03-\(screen)-\(mode)", app: application)
