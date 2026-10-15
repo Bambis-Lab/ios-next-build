@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: iosnext-slider-164-${{ github.ref }}
+  group: g99-iosnext-164-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   g99-a:

@@ -5,6 +5,16 @@ on:
     branches:
       - feature/iosnext-164-slider-p0-build27
       - fix/iosnext-164-dashboard-sliders-fix01-05
+    paths:
+      - 'Sources/Core/SliderValueReconciler.swift'
+      - 'Tests/SliderValueReconcilerTests.swift'
+      - 'Tests/SliderValueReconcilerFixTests.swift'
+      - 'Sources/Design/MediaControlSheet.swift'
+      - 'Sources/Design/LightControlSheet.swift'
+      - 'Sources/Features/RoomsView.swift'
+      - 'Sources/Design/IOS27DashboardCards.swift'
+      - '.github/workflows/slider-164-xcode27.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read

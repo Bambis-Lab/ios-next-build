@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: iosnext-slider-164-${{ github.ref }}
+  group: iph-g99-05-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   a11y:
