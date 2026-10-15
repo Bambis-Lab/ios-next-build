@@ -6,7 +6,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: g99-iosnext-164-${{ github.ref }}
+  group: iosnext-slider-164-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   g99-a:
@@ -58,7 +58,7 @@ jobs:
           test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           printf 'sha=%s\nbranch=%s\nsimulator=%s\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" "$SIM_ID" > build/g99/unit-environment.txt
-          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" >> build/g99/unit-environment.txt 2>&1
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" >> build/g99/unit-environment.txt 2>&1
       - name: Compile and full unit tests
         shell: bash
         run: |

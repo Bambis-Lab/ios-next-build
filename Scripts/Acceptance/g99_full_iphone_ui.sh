@@ -10,7 +10,7 @@ bash Scripts/prepare_free_sideload_project.sh
 mkdir -p build/g99/attachments
 SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert len(a)==1, "exact iPhone 18 Pro Max / iOS 27 required"; print(a[0])')"
 export SIM_ID
-python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/g99/boot.log
+IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/g99/boot.log
 xcrun simctl ui "$SIM_ID" appearance light
 printf 'sha=%s\nbranch=%s\nsim=%s\nruntime=iOS27\norientation=portrait\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" "$SIM_ID" > build/g99/environment.txt
 

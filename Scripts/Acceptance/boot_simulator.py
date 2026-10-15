@@ -93,7 +93,12 @@ def main():
         if not states or states[0] != "Booted":
             raise exc
 
-    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=90)
+    # iOS 27 migration may exceed 90s on cold self-hosted runners.
+    # Explicit opt-in per acceptance job; the default stays 90s elsewhere.
+    bootstatus_timeout = int(os.environ.get("IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS", "90"))
+    if not 30 <= bootstatus_timeout <= 240:
+        raise RuntimeError("Invalid IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS (30..240)")
+    run_bounded(["xcrun", "simctl", "bootstatus", udid, "-b"], timeout=bootstatus_timeout)
     print(f"SIMULATOR_READY udid={udid} elapsed={time.monotonic()-started:.1f}s", flush=True)
     return 0
 

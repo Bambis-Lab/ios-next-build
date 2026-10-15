@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: iph-g99-05-iphone
+  group: iosnext-slider-164-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   a11y:
@@ -31,7 +31,7 @@ jobs:
           mkdir -p build/g99-a11y
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert len(a)==1; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/g99-a11y/boot.log
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/g99-a11y/boot.log
           xcrun simctl ui "$SIM_ID" appearance light
           xcrun simctl help ui > build/g99-a11y/simctl-ui-help.txt
           xcodebuild build-for-testing -collect-test-diagnostics never \
