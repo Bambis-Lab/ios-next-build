@@ -28,7 +28,7 @@ xcrun simctl launch --terminate-running-process "$SIM_ID" de.nicofroeba16.iosnex
 sleep 2
 xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
 
-# G99-FIX-01/02: isolate first-launch instability before the product UI matrix.
+# G99-FIX-01/02: isolate first-launch instability (paired with FIX-03 fixtures) before the product UI matrix.
 # Only a diagnosed XCTest app-process launch failure may receive ONE retry.
 # Store both attempts, including any failure, for auditable evidence.
 STARTUP_DIR="build/g99/attachments/startup"
