@@ -88,7 +88,7 @@ struct MediaView: View {
         .background(IOS27HomeBackground())
         .navigationTitle("Medien")
         .navigationBarTitleDisplayMode(.large)
-        .task { rebuildPresentation() }
+        .onAppear { rebuildPresentation() }
         .onChange(of: appModel.searchRevision) { _, _ in rebuildPresentation() }
     }
 

@@ -72,6 +72,8 @@ struct IOS27FireTVCompanionCardV2: View {
         .ios27ContentSurface(radius: 28, elevated: true)
         .contentShape(Rectangle())
         .ios27HoldAction { showControls = true }
+        .accessibilityIdentifier("fire-tv-companion-card-\(player.entityID)")
+        .accessibilityHint("Lange drücken, um die Fire-TV-Steuerung zu öffnen")
         .sheet(isPresented: $showControls) {
             FireTVCompanionControlSheetV2(entityID: player.entityID, appModel: appModel)
         }

@@ -68,6 +68,12 @@ struct SystemView: View {
                     Label("Berechtigungen", systemImage: "checkmark.shield.fill")
                 }
                 NavigationLink {
+                    LiveOperationsView()
+                } label: {
+                    Label("Live Operations", systemImage: "waveform.path.ecg")
+                }
+                .accessibilityIdentifier("system-live-operations")
+                NavigationLink {
                     DiagnosticsView(appModel: appModel)
                 } label: {
                     Label("Diagnose", systemImage: "stethoscope")

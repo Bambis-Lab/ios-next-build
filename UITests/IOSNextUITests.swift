@@ -162,15 +162,17 @@ final class IOSNextUITests: XCTestCase {
     ) {
         XCTAssertTrue(element.waitForExistence(timeout: 3), "\(label) did not exist")
 
+        let scrollContainer = application.scrollViews.firstMatch
+        XCTAssertTrue(scrollContainer.waitForExistence(timeout: 3), "\(label) has no scroll container")
         for _ in 0..<maxSwipes {
             if element.isHittable {
                 return
             }
-            application.swipeUp()
+            scrollContainer.swipeUp()
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
 
-        XCTAssertTrue(element.isHittable, "\(label) did not become hittable after \(maxSwipes) swipes")
+        XCTAssertTrue(element.isHittable, "\(label) did not become hittable after \(maxSwipes) scroll-container swipes")
     }
 
     private func waitForVisualReady(
@@ -283,28 +285,31 @@ final class IOSNextUITests: XCTestCase {
             mediaRow.tap()
         }
 
+        XCTAssertTrue(application.navigationBars["Medien"].waitForExistence(timeout: 5), "Media tab navigation did not complete")
         let mediaSummary = application.descendants(matching: .any)
             .matching(identifier: "media-active-summary")
             .firstMatch
         XCTAssertTrue(
-            mediaSummary.waitForExistence(timeout: 5),
+            mediaSummary.waitForExistence(timeout: 8),
             "Native media tab did not expose the media summary"
         )
 
         let fireTV = application.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Companion Testfilm"))
+            .matching(identifier: "fire-tv-companion-card-media_player.fire_tv_companion")
             .firstMatch
         XCTAssertTrue(
-            fireTV.waitForExistence(timeout: 5),
-            "Media tab did not expose the expected Fire TV content"
+            fireTV.waitForExistence(timeout: 8),
+            "Media tab did not expose the Fire TV Companion V2 card"
         )
-        tapWhenVisible(fireTV, in: application, label: "Fire TV Companion card")
+        scrollUpUntilHittable(fireTV, in: application, label: "Fire TV Companion V2 card")
+        fireTV.press(forDuration: 0.8)
 
-        XCTAssertTrue(application.navigationBars["Fire TV Companion"].waitForExistence(timeout: 3))
-        XCTAssertTrue(application.buttons["Pause"].waitForExistence(timeout: 3))
-        XCTAssertTrue(application.buttons["10 Sekunden zurück"].waitForExistence(timeout: 3))
-        XCTAssertTrue(application.buttons["10 Sekunden vor"].waitForExistence(timeout: 3))
+        XCTAssertTrue(application.navigationBars["Fire TV"].waitForExistence(timeout: 5), "Fire TV V2 control sheet did not open")
+        XCTAssertTrue(application.buttons["Fertig"].waitForExistence(timeout: 3), "Fire TV V2 control sheet cannot be dismissed")
+        XCTAssertTrue(application.buttons["Pause"].waitForExistence(timeout: 3), "Fire TV playback controls are missing")
         attachScreenshot("product-fire-tv-companion-detail", app: application)
+        application.buttons["Fertig"].tap()
+        XCTAssertTrue(application.navigationBars["Medien"].waitForExistence(timeout: 3), "Media screen did not return after closing Fire TV")
     }
 
     func testChatComposerInteraction() {
@@ -341,7 +346,10 @@ final class IOSNextUITests: XCTestCase {
 
     func testOwnerAndWireGuardSafeEntryStates() {
         let ownerApplication = launch("owner")
-        XCTAssertTrue(ownerApplication.staticTexts["Control Center nicht eingerichtet"].waitForExistence(timeout: 3))
+        let unconfigured = ownerApplication.descendants(matching: .any)
+            .matching(identifier: "control-center-unconfigured").firstMatch
+        XCTAssertTrue(unconfigured.waitForExistence(timeout: 4), "Owner unconfigured state is missing")
+        XCTAssertTrue(ownerApplication.buttons["control-center-setup-action"].waitForExistence(timeout: 3), "Owner setup action is missing")
         attachScreenshot("product-owner-entry", app: ownerApplication)
 
         let wireGuardApplication = launch("wireguard")

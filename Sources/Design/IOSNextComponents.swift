@@ -66,6 +66,7 @@ struct IOSNextPage<Content: View>: View {
                     .padding(.bottom, 32)
             }
             .scrollIndicators(.hidden)
+            .accessibilityIdentifier("entity-detail-scroll")
         }
     }
 }
