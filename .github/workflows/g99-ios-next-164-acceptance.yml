@@ -49,12 +49,15 @@ jobs:
           mkdir -p build/g99
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-      - name: Start isolated Fake HA integration server
+      - name: Compile and full unit tests
         shell: bash
         run: |
           set -euo pipefail
+          # Keep the fake server in the same Actions step as xcodebuild:
+          # runner cleanup may terminate background processes between steps.
           python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/g99/fake-ha.log 2>&1 &
-          echo $! > build/g99/fake-ha.pid
+          FAKE_HA_PID=$!
+          trap 'kill "$FAKE_HA_PID" 2>/dev/null || true' EXIT
           python3 - <<'PY'
           import socket,time
           for i in range(60):
@@ -66,10 +69,7 @@ jobs:
           else:
               raise SystemExit('G99_FAKE_HA_READY=FAIL')
           PY
-      - name: Compile and full unit tests
-        shell: bash
-        run: |
-          set -euo pipefail
+          kill -0 "$FAKE_HA_PID"
           xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -disable-concurrent-destination-testing -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
       - name: Evidence
         if: always()
