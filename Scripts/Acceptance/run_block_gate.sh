@@ -121,7 +121,6 @@ if [ "$RUN_MOTION" = "1" ]; then
   runtime_end "motion"
 else
   runtime_start "prepare"
-  bash Scripts/prepare_wireguard_dependency.sh
   xcodegen generate
   runtime_end "prepare"
 

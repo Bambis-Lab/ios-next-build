@@ -21,7 +21,6 @@ command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen is required" >&2; exit 2
 
 # Prepare the same app-only free-sideload target used by the published 1.1.0 build.
 # Intentionally no motion capture or motion acceptance command is invoked here.
-bash Scripts/prepare_wireguard_dependency.sh
 bash Scripts/prepare_free_sideload_project.sh
 
 test -f .free-sideload-ready

@@ -38,7 +38,6 @@ command -v xcrun >/dev/null 2>&1 || { echo 'xcrun required' >&2; exit 1; }
 rm -rf "$OUT_DIR" "$DERIVED_DATA_PATH"
 mkdir -p "$FRAMES" "$LOGS" "$DERIVED_DATA_PATH"
 
-bash Scripts/prepare_wireguard_dependency.sh
 xcodegen generate
 
 cleanup() {
