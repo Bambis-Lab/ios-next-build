@@ -29,6 +29,12 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          # Structural regression guard: retired VPN code and tunnel extension must not reappear.
+          test ! -d WireGuard
+          test ! -e Sources/Features/WireGuardView.swift
+          test ! -e Sources/Core/WireGuardTunnelController.swift
+          ! grep -q 'IOSNextPacketTunnel' project.yml
+          ! grep -q 'WireGuardKit' project.yml
           xcodebuild -version
           test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
           if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
