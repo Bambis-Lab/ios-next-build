@@ -252,8 +252,9 @@ final class RunnerControlModel {
     private let liveTokenAccount = "runnerLiveToken"
     private var configuration: RunnerControlConfiguration?
 
-    init() {
-        restoreConfiguration()
+    init(skipStoredConfiguration: Bool = false) {
+        // Acceptance fixtures must never restore credentials from Keychain.
+        if !skipStoredConfiguration { restoreConfiguration() }
     }
 
     func configure(endpoint: String, token: String, liveToken: String = "") throws {
