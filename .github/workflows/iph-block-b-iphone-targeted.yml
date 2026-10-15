@@ -1,0 +1,64 @@
+name: IPH Block B iPhone targeted UI verification
+
+# Targeted verification is triggered only when this workflow file changes.
+# G99 remains manual-only and is not invoked here.
+on:
+  push:
+    branches:
+      - fix/iosnext-164-dashboard-sliders-fix01-05
+    paths:
+      - '.github/workflows/iph-block-b-iphone-targeted.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iph-block-b-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  iphone-targeted-ui:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27 iPhone-only project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          bash Scripts/prepare_wireguard_dependency.sh
+          export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
+          bash Scripts/prepare_free_sideload_project.sh
+          mkdir -p build/iph-b
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert a, "iPhone 18 Pro Max iOS 27 required"; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+      - name: Run only four repaired iPhone UI scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug \
+            -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/iph-b/DerivedData \
+            -resultBundlePath build/iph-b/Targeted.xcresult \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/iph-b/Targeted.log
+      - name: Preserve targeted iPhone failure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IPH-Block-B-iPhone-Targeted-Evidence
+          path: |
+            build/iph-b/Targeted.log
+            build/iph-b/Targeted.xcresult
+          retention-days: 14
+          if-no-files-found: warn
