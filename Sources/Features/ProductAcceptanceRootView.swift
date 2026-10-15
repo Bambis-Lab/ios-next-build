@@ -181,7 +181,7 @@ private struct G99RunnerAcceptanceFixture: View {
     @State private var model: RunnerControlModel
 
     init() {
-        let fixture = RunnerControlModel()
+        let fixture = RunnerControlModel(skipStoredConfiguration: true)
         fixture.state = .ready(
             RunnerStatus(
                 vmOnline: true, serviceActive: true,
