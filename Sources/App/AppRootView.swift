@@ -15,16 +15,6 @@ struct AppRootView: View {
                 MotionAcceptanceView()
             } else if isProductAcceptanceMode {
                 ProductAcceptanceRootView()
-                    // Explicit acceptance-only environment; the CI simulator's
-                    // accessibility settings are not guaranteed to be enabled.
-                    .environment(\.accessibilityReduceMotion,
-                        ProcessInfo.processInfo.arguments.contains("--product-ui-test-reduce-motion"))
-                    .environment(\.accessibilityReduceTransparency,
-                        ProcessInfo.processInfo.arguments.contains("--product-ui-test-reduce-transparency"))
-                    .environment(\.colorSchemeContrast,
-                        ProcessInfo.processInfo.arguments.contains("--product-ui-test-increase-contrast") ? .increased : .standard)
-                    .environment(\.dynamicTypeSize,
-                        ProcessInfo.processInfo.arguments.contains("--product-ui-test-dynamic-type") ? .accessibility3 : .large)
             } else if isAnimationAcceptanceMode {
                 AnimationAcceptanceView()
             } else if isLiveCardTestMode {
