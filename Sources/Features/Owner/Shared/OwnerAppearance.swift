@@ -23,7 +23,7 @@ struct OwnerPage<Content: View>: View {
                 .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
-        .safeAreaPadding(.bottom, 28)
+        .safeAreaPadding(.bottom, 96)
         .background(Color.clear)
     }
 }

@@ -13,6 +13,9 @@ on:
       - 'Scripts/Acceptance/g99_full_iphone_ui.sh'
       - 'project.yml'
       - 'Info.plist'
+      - 'Sources/Features/RunnerDashboardView.swift'
+      - 'Sources/Features/Owner/Projects/OwnerProjectsView.swift'
+      - 'Sources/Features/Owner/Shared/OwnerAppearance.swift'
 # Fake-HA auth_stall remains open beyond the client's integration-test deadline.
 permissions:
   contents: read

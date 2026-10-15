@@ -8,54 +8,65 @@ struct OwnerProjectsView: View {
         model.projectsV2.presentationSnapshots(jobs: model.jobsV2)
     }
 
+    private var missingCISnapshots: Int {
+        snapshots.filter { !$0.hasCISnapshot }.count
+    }
+
     var body: some View {
         OwnerPage {
-            VStack(alignment: .leading, spacing: IOSNextLayout.pageSpacing) {
-                HStack(spacing: 12) {
-                    OwnerMetricView(title: "Projekte", value: "\(projectCount)", symbol: "folder.fill")
-                    OwnerMetricView(title: "Offene Tickets", value: "\(model.ownerOpenTicketCount)", symbol: "ticket.fill", tint: model.ownerOpenTicketCount > 0 ? .orange : .green)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 16) {
+                    Label("\(projectCount) Projekte", systemImage: "folder.fill")
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                    Label("\(model.ownerOpenTicketCount) Tickets offen", systemImage: "ticket.fill")
+                        .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
                 }
+                .font(.subheadline.weight(.semibold))
+                .padding(16)
+                .iosNextSurface()
 
+                if let error = model.ownerV2Error {
+                    OwnerAlertBanner(title: "Projektdaten nicht aktuell", message: error, symbol: "wifi.exclamationmark")
+                }
+                if !snapshots.isEmpty && missingCISnapshots > 0 {
+                    OwnerAlertBanner(
+                        title: "GitHub-CI nicht vollständig verbunden",
+                        message: "Für \(missingCISnapshots) von \(snapshots.count) Projekten liefert das Owner Backend keinen CI-Snapshot. Repository- und Jobdaten sind davon unabhängig.",
+                        symbol: "info.circle", tint: .blue
+                    )
+                }
                 if !model.jobsV2.isEmpty {
                     HStack(spacing: 12) {
-                        OwnerMetricView(title: "Jobs", value: "\(model.jobsV2.count)", symbol: "gearshape.2.fill")
-                        OwnerMetricView(title: "Aktiv", value: "\(activeJobCount)", symbol: "play.circle.fill", tint: activeJobCount > 0 ? .blue : .green)
+                        Label("\(model.jobsV2.count) Jobs", systemImage: "gearshape.2.fill")
+                        Spacer(minLength: 0)
+                        Label("\(activeJobCount) aktiv", systemImage: "play.circle.fill")
                     }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
                 }
-
-                if capabilities.supports(.tickets) {
+                if capabilities.supports(.tickets) && model.ownerOpenTicketCount > 0 {
                     NavigationLink {
                         OwnerTicketInboxView(model: model)
                     } label: {
                         OwnerStatusRow(
-                            title: "Tickets",
-                            detail: "Anfragen lesen, beantworten und gezielt dispatchen",
-                            symbol: "ticket.fill",
-                            value: "\(model.ownerOpenTicketCount) offen",
-                            tint: .indigo
+                            title: "Offene Tickets", detail: "Anfragen prüfen und bearbeiten",
+                            symbol: "ticket.fill", value: "\(model.ownerOpenTicketCount)", tint: .orange
                         )
                     }
                     .buttonStyle(.plain)
                 }
-
                 IOSNextSectionHeader(
-                    title: "Projekte",
-                    subtitle: "Ein Snapshot pro Projekt · Repository, Dispatch, Jobs und CI",
+                    title: "Deine Projekte",
+                    subtitle: "Repository, Jobs und CI aus dem Owner Backend",
                     symbol: "folder.fill"
                 )
-
                 if !snapshots.isEmpty {
                     ForEach(snapshots) { snapshot in
                         NavigationLink {
                             OwnerProjectDetailView(snapshot: snapshot)
                         } label: {
-                            OwnerStatusRow(
-                                title: snapshot.title,
-                                detail: snapshot.repository ?? "Kein Repository gemeldet",
-                                symbol: "folder.fill",
-                                value: projectValue(snapshot),
-                                tint: projectTint(snapshot)
-                            )
+                            projectRow(snapshot)
                         }
                         .buttonStyle(.plain)
                     }
@@ -74,8 +85,7 @@ struct OwnerProjectsView: View {
                             OwnerStatusRow(
                                 title: route.title,
                                 detail: ProjectRegistry.canonicalRepository(for: route) ?? "Kein Repository gemeldet",
-                                symbol: "folder.fill",
-                                value: "Legacy"
+                                symbol: "folder.fill", value: "Legacy"
                             )
                         }
                         .buttonStyle(.plain)
@@ -85,6 +95,43 @@ struct OwnerProjectsView: View {
         }
         .navigationTitle("Projekte")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await model.refreshStatusV2() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .accessibilityLabel("Projekte aktualisieren")
+            }
+        }
+        .refreshable { await model.refreshStatusV2() }
+    }
+
+    private func projectRow(_ snapshot: ProjectPresentationSnapshot) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.indigo)
+                .frame(width: 36, height: 36)
+                .background(Color.indigo.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(snapshot.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                Text(snapshot.repository ?? "Repository nicht angegeben")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Label(projectValue(snapshot), systemImage: snapshot.hasCISnapshot ? "checkmark.circle" : "info.circle")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(projectTint(snapshot))
+            }
+            Spacer(minLength: 2)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary).accessibilityHidden(true)
+        }
+        .padding(14)
+        .iosNextSurface()
+        .accessibilityElement(children: .combine)
     }
 
     private var projectCount: Int {
@@ -97,7 +144,7 @@ struct OwnerProjectsView: View {
 
     private func projectValue(_ snapshot: ProjectPresentationSnapshot) -> String {
         if snapshot.activeJobs > 0 { return "\(snapshot.activeJobs) aktiv" }
-        guard snapshot.hasCISnapshot else { return "CI nicht geliefert" }
+        guard snapshot.hasCISnapshot else { return "CI-Daten fehlen" }
         switch snapshot.ciStatus {
         case "repository_missing": return "Kein Repository"
         case "adapter_not_configured": return "CI nicht eingerichtet"

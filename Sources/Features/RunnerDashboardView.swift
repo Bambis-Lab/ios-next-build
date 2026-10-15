@@ -4,6 +4,7 @@ struct RunnerDashboardView: View {
     @State private var model: RunnerControlModel
     @State private var runtime = IOSNextRuntime.shared
     @State private var pendingAction: RunnerAction?
+    @State private var showsTechnicalDetails = false
 
     init() {
         _model = State(initialValue: IOSNextRuntime.shared.runnerModel)
@@ -142,34 +143,49 @@ struct RunnerDashboardView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 runnerHero(status)
-
-                IOS27SectionHeader(title: "Systemstatus", subtitle: "Live vom begrenzten Runner-Control-Dienst")
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 12)], spacing: 12) {
-                    metricLink(.registered, title: "Registriert", value: "\(status.registeredRunners)", symbol: "server.rack", tint: .blue, status: status)
-                    metricLink(.idle, title: "Frei", value: "\(status.idleRunners)", symbol: "checkmark.circle.fill", tint: .green, status: status)
-                    metricLink(.busy, title: "Beschäftigt", value: "\(status.busyRunners)", symbol: "hammer.fill", tint: .orange, status: status)
-                    if let cpu = status.cpuPercent {
-                        metricLink(.cpu, title: "CPU", value: percent(cpu), symbol: "cpu.fill", tint: cpu >= 85 ? .red : .blue, status: status)
+                IOS27SectionHeader(title: "Kapazität", subtitle: "Aktuelle Ausführungsplätze")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+                    compactMetric(.registered, title: "Gesamt", value: status.registeredRunners, tint: .blue, status: status)
+                    compactMetric(.idle, title: "Frei", value: status.idleRunners, tint: .green, status: status)
+                    compactMetric(.busy, title: "Belegt", value: status.busyRunners, tint: .orange, status: status)
+                }
+                if let jobs = status.activeJobs, !jobs.isEmpty {
+                    IOS27SectionHeader(title: "Laufende Jobs", subtitle: "\(jobs.count) vom Backend gemeldet")
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(jobs.prefix(3)) { job in
+                            HStack(spacing: 12) {
+                                Image(systemName: "gearshape.2.fill").foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(job.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                    Text(job.state.replacingOccurrences(of: "_", with: " ").localizedCapitalized)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        if jobs.count > 3 {
+                            Text("Weitere \(jobs.count - 3) Jobs im Runner-System")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                    if let memory = status.memoryPercent {
-                        metricLink(.memory, title: "RAM", value: percent(memory), symbol: "memorychip.fill", tint: memory >= 85 ? .red : .purple, status: status)
-                    }
-                    if let disk = status.diskPercent {
-                        metricLink(.disk, title: "Speicher", value: percent(disk), symbol: "internaldrive.fill", tint: disk >= 85 ? .red : .cyan, status: status)
+                    .padding(16).ios27ContentSurface(radius: 22)
+                }
+                if status.cpuPercent != nil || status.memoryPercent != nil || status.diskPercent != nil {
+                    IOS27SectionHeader(title: "Ressourcen", subtitle: "Live vom Runner-Control-Dienst")
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 10)], spacing: 10) {
+                        if let cpu = status.cpuPercent {
+                            metricLink(.cpu, title: "CPU", value: percent(cpu), symbol: "cpu.fill", tint: cpu >= 85 ? .red : .blue, status: status)
+                        }
+                        if let ram = status.memoryPercent {
+                            metricLink(.memory, title: "RAM", value: percent(ram), symbol: "memorychip.fill", tint: ram >= 85 ? .red : .purple, status: status)
+                        }
+                        if let disk = status.diskPercent {
+                            metricLink(.disk, title: "Speicher", value: percent(disk), symbol: "internaldrive.fill", tint: disk >= 85 ? .red : .cyan, status: status)
+                        }
                     }
                 }
-
-                if status.bridge != nil || status.orchestrator != nil {
-                    IOS27SectionHeader(title: "Infrastruktur", subtitle: "Relay · Orchestrierung")
-                    if let bridge = status.bridge { subsystemCard(bridge, symbol: "point.3.connected.trianglepath.dotted") }
-                    if let orchestrator = status.orchestrator { subsystemCard(orchestrator, symbol: "flowchart.fill") }
-                }
-
                 if status.commander != nil || model.commanderLiveState.effectiveSnapshot != nil {
-                    IOS27SectionHeader(
-                        title: "Master Runtime",
-                        subtitle: "Sanitisierte Echtzeit-Telemetrie des eigenen Systems"
-                    )
+                    IOS27SectionHeader(title: "Master Runtime", subtitle: "Echter Live-Status")
                     NavigationLink {
                         CommanderLiveDetailView(model: model)
                     } label: {
@@ -177,52 +193,85 @@ struct RunnerDashboardView: View {
                     }
                     .buttonStyle(.plain)
                 }
-
-                if let services = status.services, !services.isEmpty {
-                    IOS27SectionHeader(title: "Services", subtitle: "Nur vom Backend freigegebene Dienste")
-                    servicesCard(services)
+                DisclosureGroup(isExpanded: $showsTechnicalDetails) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if status.bridge != nil || status.orchestrator != nil {
+                            IOS27SectionHeader(title: "Infrastruktur", subtitle: "Relay und Orchestrierung")
+                            if let bridge = status.bridge {
+                                subsystemCard(bridge, symbol: "point.3.connected.trianglepath.dotted")
+                            }
+                            if let orchestrator = status.orchestrator {
+                                subsystemCard(orchestrator, symbol: "flowchart.fill")
+                            }
+                        }
+                        if let services = status.services, !services.isEmpty {
+                            IOS27SectionHeader(title: "Services")
+                            servicesCard(services)
+                        }
+                        if let backup = status.backup {
+                            IOS27SectionHeader(title: "Backup")
+                            IOS27StatusCard(
+                                title: "Letztes Backup", value: backup.state,
+                                symbol: "externaldrive.badge.checkmark",
+                                tint: backup.state.localizedCaseInsensitiveContains("ok") ? .green : .blue,
+                                detail: backup.lastSuccessful.map(formattedDate) ?? backup.detail
+                            )
+                        }
+                        if let audit = status.recentAudit, !audit.isEmpty {
+                            IOS27SectionHeader(title: "Letzte Aktionen")
+                            auditCard(audit)
+                        }
+                        IOS27SectionHeader(title: "Steuerung", subtitle: "Nur freigegebene Aktionen")
+                        VStack(spacing: 10) {
+                            actionButton(.healthCheck, symbol: "stethoscope", status: status)
+                            actionButton(.pause, symbol: "pause.circle.fill", status: status)
+                            actionButton(.resume, symbol: "play.circle.fill", status: status)
+                            actionButton(.gracefulRestart, symbol: "arrow.triangle.2.circlepath", status: status)
+                            actionButton(.shutdown, symbol: "power", status: status, destructive: true)
+                        }
+                        if let receipt = model.lastReceipt {
+                            IOS27StatusCard(
+                                title: "Letzte Runner-Aktion", value: receipt.state,
+                                symbol: "checkmark.seal.fill", tint: .green,
+                                detail: "Request \(receipt.requestID)"
+                            )
+                        }
+                    }
+                    .padding(.top, 14)
+                } label: {
+                    Label("Diagnose & Steuerung", systemImage: "slider.horizontal.3").font(.headline)
                 }
-
-                if let backup = status.backup {
-                    IOS27SectionHeader(title: "Backup")
-                    IOS27StatusCard(
-                        title: "Letztes Backup",
-                        value: backup.state,
-                        symbol: "externaldrive.badge.checkmark",
-                        tint: backup.state.localizedCaseInsensitiveContains("ok") ? .green : .blue,
-                        detail: backup.lastSuccessful.map(formattedDate) ?? backup.detail
-                    )
-                }
-
-                if let audit = status.recentAudit, !audit.isEmpty {
-                    IOS27SectionHeader(title: "Letzte Aktionen", subtitle: "Audit-Ansicht")
-                    auditCard(audit)
-                }
-
-                IOS27SectionHeader(title: "Steuerung", subtitle: "Nur fest freigegebene Aktionen")
-                VStack(spacing: 10) {
-                    actionButton(.healthCheck, symbol: "stethoscope", status: status)
-                    actionButton(.pause, symbol: "pause.circle.fill", status: status)
-                    actionButton(.resume, symbol: "play.circle.fill", status: status)
-                    actionButton(.gracefulRestart, symbol: "arrow.triangle.2.circlepath", status: status)
-                    actionButton(.shutdown, symbol: "power", status: status, destructive: true)
-                }
-
-                if let receipt = model.lastReceipt {
-                    IOS27StatusCard(
-                        title: "Letzte Runner-Aktion",
-                        value: receipt.state,
-                        symbol: "checkmark.seal.fill",
-                        tint: .green,
-                        detail: "Request \(receipt.requestID)"
-                    )
-                }
+                .padding(16)
+                .ios27ContentSurface(radius: 22)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
         }
-        .ios27ScrollBottomClearance()
+        .safeAreaPadding(.bottom, 96)
         .background(FactoryAmbientBackground(kind: .runner))
+    }
+
+    private func compactMetric(
+        _ metric: RunnerMetricDestination,
+        title: String,
+        value: Int,
+        tint: Color,
+        status: RunnerStatus
+    ) -> some View {
+        NavigationLink {
+            RunnerMetricDetailView(metric: metric, status: status)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(value)").font(.title2.bold()).monospacedDigit().foregroundStyle(tint)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .padding(14)
+            .ios27ContentSurface(radius: 18)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title): \(value)")
+        .accessibilityHint("Öffnet Runner-Details")
     }
 
     private func runnerHero(_ status: RunnerStatus) -> some View {
@@ -230,7 +279,7 @@ struct RunnerDashboardView: View {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(status.serviceActive ? "Runner bereit" : "Runner gestoppt")
-                        .font(.largeTitle.bold())
+                        .font(.title2.bold())
                     Text(status.vmOnline ? "Ubuntu-VM erreichbar" : "Ubuntu-VM offline")
                         .foregroundStyle(.secondary)
                 }
