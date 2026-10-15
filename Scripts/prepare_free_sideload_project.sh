@@ -14,6 +14,10 @@ old_ent = '        CODE_SIGN_ENTITLEMENTS: Sources/Resources/IOSNext.entitlement
 if old_ent not in s:
     raise SystemExit('Expected main-app CODE_SIGN_ENTITLEMENTS not found')
 s = s.replace(old_ent, '        CODE_SIGN_ENTITLEMENTS: ""\n        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) IOSNEXT_FREE_SIDELOAD"\n', 1)
+old_dep = """    dependencies:\n      - target: IOSNextPacketTunnel\n        embed: true\n        link: false\n"""
+if old_dep not in s:
+    raise SystemExit('Expected IOSNextPacketTunnel embed dependency not found')
+s = s.replace(old_dep, '', 1)
 p.write_text(s)
 PY
 python3 - <<'PY'
