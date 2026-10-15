@@ -532,10 +532,21 @@ final class IOSNextUITests: XCTestCase {
                 return false
             }
         }
-        let byName = settings.switches[toggle].firstMatch
-        let row = settings.cells.containing(.staticText, identifier: toggle).firstMatch
-        let control = byName.exists ? byName : row.switches.firstMatch
-        guard control.waitForExistence(timeout: 5), let original = settingsValue(control) else {
+        // Settings can expose the same switch by its visible label or by an
+        // internal accessibility identifier (e.g. REDUCE_MOTION). Re-resolve
+        // the control after interaction instead of reading a stale snapshot.
+        func currentSwitch() -> XCUIElement {
+            let row = settings.cells.containing(.staticText, identifier: toggle).firstMatch
+            let named = settings.switches[toggle].firstMatch
+            if named.exists { return named }
+            if row.exists, row.switches.firstMatch.exists { return row.switches.firstMatch }
+            return settings.switches.firstMatch
+        }
+        func observedValue() -> Bool? {
+            settingsValue(currentSwitch())
+        }
+        let control = currentSwitch()
+        guard control.waitForExistence(timeout: 5), let original = observedValue() else {
             let attachment = XCTAttachment(string: settings.debugDescription)
             attachment.name = "Settings switch missing - \(toggle)"
             attachment.lifetime = .keepAlways
@@ -553,8 +564,21 @@ final class IOSNextUITests: XCTestCase {
             }
             control.tap()
         }
-        guard settingsValue(control) == enabled else {
-            XCTFail("System switch \(toggle) failed to reach the requested value")
+        // UIKit/Settings accessibility values may lag the tap and can be
+        // refreshed asynchronously. Poll the actual Settings switch state,
+        // never infer success from tap() returning.
+        let deadline = Date().addingTimeInterval(8)
+        var actual = observedValue()
+        while actual != enabled && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            actual = observedValue()
+        }
+        guard actual == enabled else {
+            let attachment = XCTAttachment(string: settings.debugDescription)
+            attachment.name = "Settings switch did not change - \(toggle)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("System switch \(toggle) failed to reach requested value; observed=\(String(describing: actual))")
             return false
         }
         NSLog("G99 system Settings verified \(toggle)=\(enabled)")
