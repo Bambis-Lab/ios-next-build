@@ -21,9 +21,20 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           src=Path('UITests/IOSNextUITests.swift').read_text()
-          required=['testOwnerSafeEntryState','testRemovedVPNFeatureIsAbsentFromSystem','testLiveOperationsSafeEntryState','testPrimaryProductScreensRenderLightAndDark','testNativeTabNavigationAndMediaDetail','testChatComposerInteraction','testLightSliderInteraction','testAccessibilityCoreScreenRenders','testDynamicTypeAccessibilityState','testReduceMotionAccessibilityState','testReduceTransparencyAccessibilityState','testIncreaseContrastAccessibilityState']
-          assert all(x in src for x in required)
+          selectors=Path('Scripts/Acceptance/g99_iphone_manifest.txt').read_text().splitlines()
+          assert len(selectors)==13, f'expected 13 iPhone G99 scenarios, got {len(selectors)}'
+          assert len(set(selectors))==13, 'duplicate G99 selector'
+          assert all(x.startswith('IOSNextUITests/IOSNextUITests/test') for x in selectors)
+          assert not any('IPad' in x or 'ipad' in x.lower() for x in selectors), 'iPad execution prohibited'
+          assert all(('func '+x.rsplit('/',1)[-1]+'(') in src for x in selectors), 'missing XCTest source'
+          assert selectors[9:] == [
+              'IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState',
+              'IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState',
+              'IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState',
+              'IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState'
+          ]
           assert Path('Tests/SliderValueReconcilerFixTests.swift').exists()
+          assert Path('Scripts/Acceptance/g99_full_iphone_ui.sh').exists()
           print('G99_SOURCE_LOCK=PASS')
           PY
   g99-b:
@@ -44,6 +55,10 @@ jobs:
           mkdir -p build/g99
           SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          test "$GITHUB_REF_NAME" = "fix/iosnext-164-dashboard-sliders-fix01-05"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf 'sha=%s\nbranch=%s\nsimulator=%s\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" "$SIM_ID" > build/g99/unit-environment.txt
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" >> build/g99/unit-environment.txt 2>&1
       - name: Compile and full unit tests
         shell: bash
         run: |
@@ -73,48 +88,44 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: G99-164-Unit
-          path: build/g99/
+          path: |
+            build/g99/Unit.log
+            build/g99/Unit.xcresult
+            build/g99/fake-ha.log
+            build/g99/unit-environment.txt
           retention-days: 14
   g99-ui:
     needs: [g99-a, g99-b]
     if: needs.g99-a.result == 'success' && needs.g99-b.result == 'success'
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Prepare project and simulator
+      - name: Execute full iPhone-only G99 UI including real accessibility
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild -version
-          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
-          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
-          export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
-          bash Scripts/prepare_free_sideload_project.sh
-          mkdir -p build/g99
-          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x.get("isAvailable",True) and x["name"]=="iPhone 18 Pro Max"]; assert a, "iPhone 18 Pro Max iOS 27 simulator required"; print(a[0])')"
-          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
-          export SIM_ID
-          STATE="$(xcrun simctl list devices -j | python3 -c 'import json,sys,os; d=json.load(sys.stdin)["devices"]; uid=os.environ["SIM_ID"]; print(next((x.get("state","") for v in d.values() for x in v if x["udid"]==uid),""))' )"
-          if [ "$STATE" != "Booted" ]; then xcrun simctl boot "$SIM_ID"; fi
-          xcrun simctl bootstatus "$SIM_ID" -b
-          xcrun simctl ui "$SIM_ID" appearance
-      - name: UI interaction, light and dark, accessibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          for MODE in light dark; do
-            xcrun simctl ui "$SIM_ID" appearance "$MODE"
-            xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testRemovedVPNFeatureIsAbsentFromSystem' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
-            mkdir -p "build/g99/screenshots/$MODE"
-            xcrun xcresulttool export attachments --path "build/g99/UI-$MODE.xcresult" --output-path "build/g99/screenshots/$MODE"
-          done
-          echo "G99_UI_ACCEPTANCE=PASS device=iphone"
-      - name: Preserve evidence
+          bash Scripts/Acceptance/g99_full_iphone_ui.sh
+      - name: Preserve full iPhone G99 evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: G99-164-iPhone-UI-Evidence
-          path: build/g99/
+          path: |
+            build/g99/UI-base.log
+            build/g99/UI-base.xcresult
+            build/g99/a11y-dynamic-type.log
+            build/g99/a11y-dynamic-type.xcresult
+            build/g99/a11y-increase-contrast.log
+            build/g99/a11y-increase-contrast.xcresult
+            build/g99/a11y-reduce-motion.log
+            build/g99/a11y-reduce-motion.xcresult
+            build/g99/a11y-reduce-transparency.log
+            build/g99/a11y-reduce-transparency.xcresult
+            build/g99/BuildForTesting.log
+            build/g99/boot.log
+            build/g99/prewarm.log
+            build/g99/environment.txt
+            build/g99/attachments/
           retention-days: 14
           if-no-files-found: warn
