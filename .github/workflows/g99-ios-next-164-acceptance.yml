@@ -35,6 +35,10 @@ jobs:
           ]
           assert Path('Tests/SliderValueReconcilerFixTests.swift').exists()
           assert Path('Scripts/Acceptance/g99_full_iphone_ui.sh').exists()
+          spec=Path('project.yml').read_text()
+          assert 'MARKETING_VERSION: 1.6.4' in spec
+          assert 'CURRENT_PROJECT_VERSION: 27' in spec
+          assert 'IOSNextWireGuardKeychainAccessGroup' not in Path('Info.plist').read_text()
           print('G99_SOURCE_LOCK=PASS')
           PY
   g99-b:
