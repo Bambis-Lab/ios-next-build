@@ -6,6 +6,14 @@ struct RunnerDashboardView: View {
     @State private var pendingAction: RunnerAction?
     @State private var showsTechnicalDetails = false
 
+    private var isLocalG99Fixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--product-ui-test-screen=runner")
+#else
+        false
+#endif
+    }
+
     init() {
         _model = State(initialValue: IOSNextRuntime.shared.runnerModel)
     }
@@ -39,9 +47,11 @@ struct RunnerDashboardView: View {
         .navigationTitle("Runner")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            guard !isLocalG99Fixture else { return }
             runtime.setRunnerPollingActive("runner-dashboard", active: true)
         }
         .onDisappear {
+            guard !isLocalG99Fixture else { return }
             runtime.setRunnerPollingActive("runner-dashboard", active: false)
         }
         .alert("Runner-Aktion fehlgeschlagen", isPresented: Binding(
@@ -60,7 +70,10 @@ struct RunnerDashboardView: View {
                 .labelStyle(.iconOnly)
             }
         }
-        .refreshable { await model.refresh() }
+        .refreshable {
+            guard !isLocalG99Fixture else { return }
+            await model.refresh()
+        }
         .sheet(isPresented: $model.isPresentingConfiguration) {
             RunnerConfigurationView(model: model)
         }
