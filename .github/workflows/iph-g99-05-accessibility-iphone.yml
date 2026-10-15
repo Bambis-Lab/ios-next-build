@@ -96,6 +96,19 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: G99-05-iPhone-Genuine-A11Y
-          path: build/g99-a11y/
+          path: |
+            build/g99-a11y/boot.log
+            build/g99-a11y/Build.log
+            build/g99-a11y/prewarm.log
+            build/g99-a11y/simctl-ui-help.txt
+            build/g99-a11y/metadata.txt
+            build/g99-a11y/dynamic-type.log
+            build/g99-a11y/dynamic-type.xcresult
+            build/g99-a11y/increase-contrast.log
+            build/g99-a11y/increase-contrast.xcresult
+            build/g99-a11y/reduce-motion.log
+            build/g99-a11y/reduce-motion.xcresult
+            build/g99-a11y/reduce-transparency.log
+            build/g99-a11y/reduce-transparency.xcresult
           retention-days: 14
           if-no-files-found: warn
