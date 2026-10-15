@@ -9,6 +9,7 @@ final class IOSNextUITests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
     }
 
     override func tearDownWithError() throws {
@@ -20,7 +21,9 @@ final class IOSNextUITests: XCTestCase {
     private func launch(_ screen: String, extraArguments: [String] = []) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = ["--product-ui-test-screen=\(screen)"] + extraArguments
+        NSLog("G99-01 launch begin screen=\(screen) arguments=\(application.launchArguments) orientation=\(XCUIDevice.shared.orientation.rawValue)")
         application.launch()
+        NSLog("G99-01 launch end screen=\(screen) appState=\(application.state.rawValue)")
         let root = application.descendants(matching: .any)
             .matching(identifier: "product-acceptance-\(screen)")
             .firstMatch
@@ -154,7 +157,46 @@ final class IOSNextUITests: XCTestCase {
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
-    private func captureInteractionFailure(_ label: String, in application: XCUIApplication) {
+    private func captureInteractionFailure(
+        _ label: String,
+        in application: XCUIApplication,
+        element: XCUIElement? = nil,
+        scrollContainer: XCUIElement? = nil
+    ) {
+        let window = application.windows.firstMatch
+        var details = [
+            "test=\(name)",
+            "label=\(label)",
+            "application_state=\(application.state.rawValue)",
+            "launch_arguments=\(application.launchArguments.joined(separator: " "))",
+            "orientation=\(XCUIDevice.shared.orientation.rawValue)",
+            "window_exists=\(window.exists)",
+            "window_frame=\(window.exists ? String(describing: window.frame) : "absent")",
+            "fixture_fallback_visible=\(application.staticTexts["Live-HA-Fixture nicht geladen"].exists)"
+        ]
+        if let element {
+            details += [
+                "element_identifier=\(element.identifier)",
+                "element_type=\(element.elementType.rawValue)",
+                "element_exists=\(element.exists)",
+                "element_enabled=\(element.exists && element.isEnabled)",
+                "element_hittable=\(element.exists && element.isHittable)",
+                "element_frame=\(element.exists ? String(describing: element.frame) : "absent")"
+            ]
+        }
+        if let scrollContainer {
+            details += [
+                "scroll_type=\(scrollContainer.elementType.rawValue)",
+                "scroll_identifier=\(scrollContainer.identifier)",
+                "scroll_frame=\(scrollContainer.frame)"
+            ]
+        }
+        let metadata = XCTAttachment(string: details.joined(separator: "\n"))
+        metadata.name = "G99-01 metadata - \(label)"
+        metadata.lifetime = .keepAlways
+        add(metadata)
+        NSLog("G99-01 failure \(details.joined(separator: " | "))")
+
         let hierarchy = XCTAttachment(string: application.debugDescription)
         hierarchy.name = "UI hierarchy - \(label)"
         hierarchy.lifetime = .keepAlways
@@ -173,7 +215,7 @@ final class IOSNextUITests: XCTestCase {
         containerIdentifier: String? = nil
     ) {
         guard element.waitForExistence(timeout: 3) else {
-            captureInteractionFailure(label, in: application)
+            captureInteractionFailure(label, in: application, element: element)
             XCTFail("\(label) did not exist")
             return
         }
@@ -192,7 +234,7 @@ final class IOSNextUITests: XCTestCase {
         } else if application.collectionViews.firstMatch.exists {
             scrollContainer = application.collectionViews.firstMatch
         } else {
-            captureInteractionFailure(label, in: application)
+            captureInteractionFailure(label, in: application, element: element)
             XCTFail("\(label) has no identifiable scrollable container")
             return
         }
@@ -206,7 +248,7 @@ final class IOSNextUITests: XCTestCase {
         }
 
         if !element.isHittable {
-            captureInteractionFailure(label, in: application)
+            captureInteractionFailure(label, in: application, element: element, scrollContainer: scrollContainer)
             XCTFail("\(label) not hittable after \(maxSwipes) scoped swipes; frame=\(element.frame), enabled=\(element.isEnabled), container=\(scrollContainer.frame)")
         }
     }
@@ -327,7 +369,7 @@ final class IOSNextUITests: XCTestCase {
             .matching(identifier: "media-active-summary")
             .firstMatch
         if !mediaSummary.waitForExistence(timeout: 8) {
-            captureInteractionFailure("Media tab content", in: application)
+            captureInteractionFailure("Media tab content", in: application, element: mediaSummary)
             XCTFail("Media tab did not render the expected active-player summary; heading=\(mediaHeading.exists), otherMedia=\(mediaContent.exists)")
             return
         }
