@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/g99-ios-next-164-acceptance.yml'
   workflow_dispatch:
-# G99 acceptance retry: preserve workflow behavior; trigger branch-scoped acceptance.
+# G99 verification: test-only timeout hardening and server trace on failure.
 permissions:
   contents: read
 concurrency:
@@ -70,6 +70,8 @@ jobs:
               raise SystemExit('G99_FAKE_HA_READY=FAIL')
           PY
           kill -0 "$FAKE_HA_PID"
+          # Print server-side handshake and message trace even when xcodebuild fails.
+          trap 'status=$?; echo "=== Fake HA server trace ==="; cat build/g99/fake-ha.log || true; kill "$FAKE_HA_PID" 2>/dev/null || true; exit "$status"' EXIT
           xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -disable-concurrent-destination-testing -derivedDataPath build/g99/DerivedData -resultBundlePath build/g99/Unit.xcresult '-only-testing:IOSNextTests' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/g99/Unit.log
       - name: Evidence
         if: always()
