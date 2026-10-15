@@ -27,6 +27,13 @@ struct SystemView: View {
             }
 
             Section("Verwaltung") {
+#if !IOSNEXT_FREE_SIDELOAD
+                NavigationLink {
+                    WireGuardView()
+                } label: {
+                    Label("Fernzugriff · WireGuard", systemImage: "network.badge.shield.half.filled")
+                }
+#endif
                 NavigationLink {
                     ScenesView(appModel: appModel)
                 } label: {
