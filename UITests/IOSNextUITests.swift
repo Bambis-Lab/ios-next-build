@@ -386,19 +386,19 @@ final class IOSNextUITests: XCTestCase {
     }
 
     func testReduceMotionAccessibilityState() {
-        let application = launch("home")
+        let application = launch("home", extraArguments: ["--product-ui-test-reduce-motion"])
         XCTAssertTrue(accessibilityState(in: application).contains("reduceMotion=true"))
         attachScreenshot("product-accessibility-reduce-motion", app: application)
     }
 
     func testReduceTransparencyAccessibilityState() {
-        let application = launch("home")
+        let application = launch("home", extraArguments: ["--product-ui-test-reduce-transparency"])
         XCTAssertTrue(accessibilityState(in: application).contains("reduceTransparency=true"))
         attachScreenshot("product-accessibility-reduce-transparency", app: application)
     }
 
     func testIncreaseContrastAccessibilityState() {
-        let application = launch("home")
+        let application = launch("home", extraArguments: ["--product-ui-test-increase-contrast"])
         XCTAssertTrue(accessibilityState(in: application).contains("increasedContrast=true"))
         attachScreenshot("product-accessibility-increase-contrast", app: application)
     }
