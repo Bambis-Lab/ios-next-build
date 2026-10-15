@@ -16,10 +16,10 @@ struct OwnerProjectsView: View {
         OwnerPage {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 16) {
-                    Label("\(projectCount) Projekte", systemImage: "folder.fill")
+                    Label("\(projectCount) \(projectCount == 1 ? "Projekt" : "Projekte")", systemImage: "folder.fill")
                         .foregroundStyle(.primary)
                     Spacer(minLength: 0)
-                    Label("\(model.ownerOpenTicketCount) Tickets offen", systemImage: "ticket.fill")
+                    Label("\(model.ownerOpenTicketCount) \(model.ownerOpenTicketCount == 1 ? "Ticket" : "Tickets") offen", systemImage: "ticket.fill")
                         .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
                 }
                 .font(.subheadline.weight(.semibold))
@@ -30,15 +30,28 @@ struct OwnerProjectsView: View {
                     OwnerAlertBanner(title: "Projektdaten nicht aktuell", message: error, symbol: "wifi.exclamationmark")
                 }
                 if !snapshots.isEmpty && missingCISnapshots > 0 {
-                    OwnerAlertBanner(
-                        title: "GitHub-CI nicht vollständig verbunden",
-                        message: "Für \(missingCISnapshots) von \(snapshots.count) Projekten liefert das Owner Backend keinen CI-Snapshot. Repository- und Jobdaten sind davon unabhängig.",
-                        symbol: "info.circle", tint: .blue
-                    )
+                    HStack(alignment: .center, spacing: 10) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.blue)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("CI-Daten unvollständig")
+                                .font(.caption.weight(.semibold))
+                            Text("Bei \(missingCISnapshots) von \(snapshots.count) \(snapshots.count == 1 ? "Projekt" : "Projekten") fehlen CI-Snapshots.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("owner-projects-ci-warning")
                 }
                 if !model.jobsV2.isEmpty {
                     HStack(spacing: 12) {
-                        Label("\(model.jobsV2.count) Jobs", systemImage: "gearshape.2.fill")
+                        Label("\(model.jobsV2.count) \(model.jobsV2.count == 1 ? "Job" : "Jobs")", systemImage: "gearshape.2.fill")
                         Spacer(minLength: 0)
                         Label("\(activeJobCount) aktiv", systemImage: "play.circle.fill")
                     }
@@ -139,7 +152,10 @@ struct OwnerProjectsView: View {
     }
 
     private var activeJobCount: Int {
-        model.jobsV2.filter { !["completed", "resolved", "failed"].contains($0.state) }.count
+        model.jobsV2.filter {
+            !["completed", "resolved", "failed", "failure", "success", "succeeded", "cancelled", "canceled", "skipped"]
+                .contains($0.state.lowercased())
+        }.count
     }
 
     private func projectValue(_ snapshot: ProjectPresentationSnapshot) -> String {
