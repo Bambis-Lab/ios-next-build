@@ -21,7 +21,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           src=Path('UITests/IOSNextUITests.swift').read_text()
-          required=['testPrimaryProductScreensRenderLightAndDark','testNativeTabNavigationAndMediaDetail','testChatComposerInteraction','testLightSliderInteraction','testAccessibilityCoreScreenRenders','testDynamicTypeAccessibilityState','testReduceMotionAccessibilityState','testReduceTransparencyAccessibilityState','testIncreaseContrastAccessibilityState']
+          required=['testOwnerSafeEntryState','testRemovedVPNFeatureIsAbsentFromSystem','testLiveOperationsSafeEntryState','testPrimaryProductScreensRenderLightAndDark','testNativeTabNavigationAndMediaDetail','testChatComposerInteraction','testLightSliderInteraction','testAccessibilityCoreScreenRenders','testDynamicTypeAccessibilityState','testReduceMotionAccessibilityState','testReduceTransparencyAccessibilityState','testIncreaseContrastAccessibilityState']
           assert all(x in src for x in required)
           assert Path('Tests/SliderValueReconcilerFixTests.swift').exists()
           print('G99_SOURCE_LOCK=PASS')
@@ -39,7 +39,6 @@ jobs:
           xcodebuild -version
           test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
           if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
-          bash Scripts/prepare_wireguard_dependency.sh
           export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build/g99
@@ -90,7 +89,6 @@ jobs:
           xcodebuild -version
           test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = "27.0"
           if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
-          bash Scripts/prepare_wireguard_dependency.sh
           export CM_COMMIT="$(git rev-parse HEAD)" EXPECTED_VERSION=1.6.4 EXPECTED_BUILD=27
           bash Scripts/prepare_free_sideload_project.sh
           mkdir -p build/g99
@@ -107,7 +105,7 @@ jobs:
           set -euo pipefail
           for MODE in light dark; do
             xcrun simctl ui "$SIM_ID" appearance "$MODE"
-            xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerAndWireGuardSafeEntryStates' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
+            xcodebuild test -collect-test-diagnostics never -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO -derivedDataPath build/g99/DerivedData -resultBundlePath "build/g99/UI-$MODE.xcresult" '-only-testing:IOSNextUITests/IOSNextUITests/testPrimaryProductScreensRenderLightAndDark' '-only-testing:IOSNextUITests/IOSNextUITests/testNativeTabNavigationAndMediaDetail' '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testLightSliderInteraction' '-only-testing:IOSNextUITests/IOSNextUITests/testOwnerSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testRemovedVPNFeatureIsAbsentFromSystem' '-only-testing:IOSNextUITests/IOSNextUITests/testLiveOperationsSafeEntryState' '-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders' '-only-testing:IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState' '-only-testing:IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee "build/g99/UI-$MODE.log"
             mkdir -p "build/g99/screenshots/$MODE"
             xcrun xcresulttool export attachments --path "build/g99/UI-$MODE.xcresult" --output-path "build/g99/screenshots/$MODE"
           done

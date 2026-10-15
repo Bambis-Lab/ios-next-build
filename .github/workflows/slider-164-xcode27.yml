@@ -60,7 +60,6 @@ jobs:
           if ! command -v xcodegen >/dev/null 2>&1; then
             HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
           fi
-          bash Scripts/prepare_wireguard_dependency.sh
           export CM_COMMIT="$(git rev-parse HEAD)"
           export EXPECTED_VERSION="1.6.4"
           export EXPECTED_BUILD="27"
