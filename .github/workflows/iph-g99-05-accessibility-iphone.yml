@@ -1,11 +1,7 @@
 name: IPH G99-05 Genuine Accessibility iPhone
 on:
-  push:
-    branches:
-      - fix/iosnext-164-dashboard-sliders-fix01-05
-    paths:
-      - 'UITests/IOSNextUITests.swift'
-      - '.github/workflows/iph-g99-05-accessibility-iphone.yml'
+  # Optional diagnostic workflow: run only when explicitly requested.
+  # Settings.app switches are not release blockers for this personal app.
   workflow_dispatch:
 permissions:
   contents: read

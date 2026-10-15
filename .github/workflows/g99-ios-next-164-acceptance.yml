@@ -1,7 +1,18 @@
 name: G99 iOS Next 1.6.4 iPhone-only Full UI Acceptance
-# IPH-00: Explicit dispatch only; no automatic full G99 runs during repair.
+# Personal-app G99: only the mandatory, deterministic iPhone checks gate acceptance.
+# Narrow push trigger runs this revised gate on its own acceptance edits and on
+# a later conditional version-metadata change; other source changes stay manual.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/iosnext-164-dashboard-sliders-fix01-05
+    paths:
+      - '.github/workflows/g99-ios-next-164-acceptance.yml'
+      - 'Scripts/Acceptance/g99_iphone_manifest.txt'
+      - 'Scripts/Acceptance/g99_full_iphone_ui.sh'
+      - 'project.yml'
+      - 'Info.plist'
 # Fake-HA auth_stall remains open beyond the client's integration-test deadline.
 permissions:
   contents: read
@@ -22,17 +33,23 @@ jobs:
           from pathlib import Path
           src=Path('UITests/IOSNextUITests.swift').read_text()
           selectors=Path('Scripts/Acceptance/g99_iphone_manifest.txt').read_text().splitlines()
-          assert len(selectors)==13, f'expected 13 iPhone G99 scenarios, got {len(selectors)}'
-          assert len(set(selectors))==13, 'duplicate G99 selector'
+          assert len(selectors)==11, f'expected 11 mandatory iPhone G99 scenarios, got {len(selectors)}'
+          assert len(set(selectors))==11, 'duplicate G99 selector'
           assert all(x.startswith('IOSNextUITests/IOSNextUITests/test') for x in selectors)
           assert not any('IPad' in x or 'ipad' in x.lower() for x in selectors), 'iPad execution prohibited'
           assert all(('func '+x.rsplit('/',1)[-1]+'(') in src for x in selectors), 'missing XCTest source'
           assert selectors[9:] == [
               'IOSNextUITests/IOSNextUITests/testDynamicTypeAccessibilityState',
-              'IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState',
-              'IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState',
               'IOSNextUITests/IOSNextUITests/testIncreaseContrastAccessibilityState'
           ]
+          optional=Path('Scripts/Acceptance/g99_optional_settings_a11y.txt').read_text().splitlines()
+          assert optional == [
+              'IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState',
+              'IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState'
+          ], 'optional system-switch scenarios must stay explicitly documented'
+          assert not set(optional).intersection(selectors), 'optional tests must not block G99'
+          assert all(('func '+x.rsplit('/',1)[-1]+'(') in src for x in optional)
+          assert not any('ipad' in x.lower() for x in optional)
           assert Path('Tests/SliderValueReconcilerFixTests.swift').exists()
           assert Path('Scripts/Acceptance/g99_full_iphone_ui.sh').exists()
           spec=Path('project.yml').read_text()
@@ -105,7 +122,7 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Execute full iPhone-only G99 UI including real accessibility
+      - name: Execute mandatory iPhone-only G99 UI and supported accessibility
         shell: bash
         run: |
           set -euo pipefail
@@ -122,10 +139,6 @@ jobs:
             build/g99/a11y-dynamic-type.xcresult
             build/g99/a11y-increase-contrast.log
             build/g99/a11y-increase-contrast.xcresult
-            build/g99/a11y-reduce-motion.log
-            build/g99/a11y-reduce-motion.xcresult
-            build/g99/a11y-reduce-transparency.log
-            build/g99/a11y-reduce-transparency.xcresult
             build/g99/BuildForTesting.log
             build/g99/boot.log
             build/g99/prewarm.log

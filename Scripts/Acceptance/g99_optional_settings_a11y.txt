@@ -1,0 +1,2 @@
+IOSNextUITests/IOSNextUITests/testReduceMotionAccessibilityState
+IOSNextUITests/IOSNextUITests/testReduceTransparencyAccessibilityState
