@@ -3,9 +3,9 @@ set -euo pipefail
 
 APP_ID="de.nicofroeba16.iosnext"
 MATRIX="UITests/VisualAcceptanceMatrix.json"
-MATRIX_HEAD="dafb1ae63da7bccad28d6cc40aa95a06ec342426"
-MATRIX_JSON_SHA256="0fad724ea19da47266a46405db951cfa7a715f0c237fb0cf50852e98665a097c"
-MATRIX_DOC_SHA256="acad10e9c85fb9eb65fc7c5fbf9681f65daf6dd84aa6db598c7af17d1eccb17e"
+MATRIX_HEAD="c8ed1b73b147180137d9df9a92023c4d928ec586"
+MATRIX_JSON_SHA256="3e8130d47063a3f94206f4c7e6bfc6e9c722d71cf744dad60637eb5051f561b0"
+MATRIX_DOC_SHA256="dd883a9d2dadb61f846effa6ddf67026d1b66795febbc02f585d2d0a0d54b7df"
 MANIFEST="CIEvidence/phase2-visual-acceptance-manifest.json"
 TEST_METHOD="IOSNextUITests/IOSNextUITests/testPhase2Scenario"
 
@@ -31,12 +31,10 @@ python3 Scripts/phase2_results.py --manifest "$MANIFEST" init --matrix-head "$MA
 
 devices_json="$(xcrun simctl list devices available -j)"
 iphone_id="$(printf '%s' "$devices_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for r,ds in d["devices"].items() if r.endswith("iOS-27-0") for x in ds if x.get("isAvailable", True) and x["name"]=="iPhone 18 Pro Max"))')"
-ipad_id="$(printf '%s' "$devices_json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(x["udid"] for r,ds in d["devices"].items() if r.endswith("iOS-27-0") for x in ds if x.get("isAvailable", True) and x["name"].startswith("iPad")))')"
 test -n "$iphone_id"
-test -n "$ipad_id"
-printf 'iphone=%s\nipad=%s\n' "$iphone_id" "$ipad_id" | tee CIEvidence/phase2-devices.txt
+printf 'iphone=%s\n' "$iphone_id" | tee CIEvidence/phase2-devices.txt
 
-for device_id in "$iphone_id" "$ipad_id"; do
+for device_id in "$iphone_id"; do
   xcrun simctl boot "$device_id" 2>/dev/null || true
   xcrun simctl bootstatus "$device_id" -b
   xcrun simctl terminate "$device_id" "$APP_ID" 2>/dev/null || true
@@ -170,8 +168,7 @@ evidence_root() {
 device_tuple() {
   case "$1" in
     iphone-18-pro-max) printf '%s\t%s\n' "$iphone_id" portrait ;;
-    ipad-portrait) printf '%s\t%s\n' "$ipad_id" portrait ;;
-    ipad-landscape) printf '%s\t%s\n' "$ipad_id" landscape ;;
+    ipad-portrait|ipad-landscape) echo "iPad execution prohibited" >&2; return 2 ;;
     *) return 1 ;;
   esac
 }
@@ -272,7 +269,7 @@ run_variant() {
 # shellcheck disable=SC2329,SC2317
 cleanup() {
   set +e
-  for device_id in "$iphone_id" "$ipad_id"; do
+  for device_id in "$iphone_id"; do
     xcrun simctl terminate "$device_id" "$APP_ID" 2>/dev/null || true
     reset_accessibility "$device_id" >/dev/null 2>&1 || true
     xcrun simctl ui "$device_id" appearance light >/dev/null 2>&1 || true
@@ -287,6 +284,8 @@ for scenario in m["scenarios"]:
     appearances=scenario.get("variants",{}).get("appearance",["light"])
     devices=scenario.get("variants",{}).get("devices",["iphone-18-pro-max"])
     for device in devices:
+        if device != "iphone-18-pro-max":
+            continue  # Explicit iPad execution suspension
         for appearance in appearances:
             print(scenario["id"], device, appearance, sep="\t")
 PY

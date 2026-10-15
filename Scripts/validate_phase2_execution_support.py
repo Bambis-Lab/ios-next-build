@@ -8,19 +8,20 @@ UITESTS = (ROOT / "UITests/IOSNextUITests.swift").read_text()
 RUNNER = (ROOT / "Scripts/run_phase2_visual_acceptance.sh").read_text()
 
 scenarios = MATRIX["scenarios"]
-assert len(scenarios) == 38
+assert len(scenarios) == 37
 variant_count = sum(
     len(item.get("variants", {}).get("appearance", ["light"]))
     * len(item.get("variants", {}).get("devices", ["iphone-18-pro-max"]))
     for item in scenarios
 )
-assert variant_count == 176, variant_count
+assert variant_count == 170, variant_count
+assert "WG-001" not in {item["id"] for item in scenarios}
 assert "func testPhase2Scenario()" in UITESTS
 
 literal_ids = {
     "CLD-001", "SETUP-001", "SHELL-001", "SHELL-002", "SHELL-003",
     "SHELL-004", "SHELL-005", "DETAIL-001", "DETAIL-002", "OWNER-001",
-    "WG-001", "RUNNER-001", "CHAT-INT-001", "LIGHT-INT-001", "ORIENT-001",
+    "RUNNER-001", "CHAT-INT-001", "LIGHT-INT-001", "ORIENT-001",
 }
 for scenario_id in literal_ids:
     assert scenario_id in UITESTS, f"missing dispatcher mapping: {scenario_id}"
@@ -40,8 +41,8 @@ for item in scenarios:
         continue
     assert any(sid.startswith(prefix) for prefix in range_markers), sid
 
-assert 'MATRIX_JSON_SHA256="0fad724ea19da47266a46405db951cfa7a715f0c237fb0cf50852e98665a097c"' in RUNNER
-assert 'MATRIX_DOC_SHA256="acad10e9c85fb9eb65fc7c5fbf9681f65daf6dd84aa6db598c7af17d1eccb17e"' in RUNNER
+assert 'MATRIX_JSON_SHA256="3e8130d47063a3f94206f4c7e6bfc6e9c722d71cf744dad60637eb5051f561b0"' in RUNNER
+assert 'MATRIX_DOC_SHA256="dd883a9d2dadb61f846effa6ddf67026d1b66795febbc02f585d2d0a0d54b7df"' in RUNNER
 assert 'Phase-1 matrix JSON hash drift' in RUNNER
 assert 'Phase-1 matrix documentation hash drift' in RUNNER
 assert 'phase2-plan.tsv' in RUNNER

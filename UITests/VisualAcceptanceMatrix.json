@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "goal_version": "native-ios-visual-matrix-rebuild-phase1-v1",
-  "inventory_source_head": "9bafb7bb818109cdcade6e40f7d6ce2dda38c678",
-  "branch": "auto/ios-ui-acceptance-sim-green-v1",
+  "goal_version": "native-ios-visual-matrix-iphone-164-without-wireguard",
+  "inventory_source_head": "c8ed1b73b147180137d9df9a92023c4d928ec586",
+  "branch": "fix/iosnext-164-dashboard-sliders-fix01-05",
   "phase": "phase1-definition-only",
   "source_of_truth": "current product code at inventory_source_head; legacy matrix/run are reference only",
   "failure_classes": [
@@ -521,16 +521,16 @@
     {
       "id": "NAV-004",
       "category": "navigation",
-      "surface": "system-to-wireguard",
+      "surface": "system-to-live-operations",
       "entry": "SHELL-005",
       "preconditions": [
         "entry surface stable"
       ],
       "action": [
-        "tap Fernzugriff · WireGuard"
+        "tap Live Operations"
       ],
       "expected_stable_state": [
-        "WireGuard safe status/setup surface"
+        "Live Operations safe unconfigured state"
       ],
       "evidence_type": [
         "before/after screenshots",
@@ -562,7 +562,7 @@
         "blank_or_flat_capture"
       ],
       "dependencies": [],
-      "notes": ""
+      "notes": "System navigation must expose an actionable Live Operations entry"
     },
     {
       "id": "NAV-005",
@@ -856,55 +856,6 @@
       "notes": "clean simulator required; Owner state can persist"
     },
     {
-      "id": "WG-001",
-      "category": "safe-state",
-      "surface": "wireguard-not-configured",
-      "entry": "--product-ui-test-screen=wireguard",
-      "preconditions": [
-        "clean simulator VPN preferences/keychain state",
-        "no imported .conf"
-      ],
-      "action": [
-        "launch WireGuard acceptance screen only"
-      ],
-      "expected_stable_state": [
-        "WireGuard title and Nicht eingerichtet state visible",
-        "no VPN connect/import/remove action invoked"
-      ],
-      "evidence_type": [
-        "screenshot",
-        "accessibility tree"
-      ],
-      "variants": {
-        "appearance": [
-          "light",
-          "dark"
-        ],
-        "devices": [
-          "iphone-18-pro-max",
-          "ipad-portrait",
-          "ipad-landscape"
-        ]
-      },
-      "retry_policy": {
-        "max_attempts": 3,
-        "retryable": [
-          "ready_timeout",
-          "blank_or_flat_capture",
-          "orientation_mismatch"
-        ],
-        "recovery": "relaunch exact scenario with fresh ready nonce; reboot simulator before final attempt"
-      },
-      "failure_classification": [
-        "external_state_leak",
-        "wrong_surface",
-        "blank_or_flat_capture",
-        "ready_timeout"
-      ],
-      "dependencies": [],
-      "notes": "clean simulator system VPN state required"
-    },
-    {
       "id": "RUNNER-001",
       "category": "safe-state",
       "surface": "control-center-not-configured",
@@ -1196,7 +1147,7 @@
           "home",
           "system",
           "owner",
-          "wireguard"
+          "chat"
         ]
       },
       "retry_policy": {
@@ -1965,8 +1916,7 @@
       "replacement": [
         "SHELL-001..005",
         "DETAIL-001..002",
-        "OWNER-001",
-        "WG-001"
+        "OWNER-001"
       ],
       "reason": "monolithic capture hid per-surface failure ownership"
     },
@@ -1996,13 +1946,12 @@
       "reason": "bounded visibility policy replaces fixed hittability timing"
     },
     {
-      "legacy": "testOwnerAndWireGuardSafeEntryStates",
-      "classification": "split",
+      "legacy": "testOwnerSafeEntryState",
+      "classification": "retained-concept",
       "replacement": [
-        "OWNER-001",
-        "WG-001"
+        "OWNER-001"
       ],
-      "reason": "different persistent-state risks need separate ownership"
+      "reason": "owner safe entry retained after VPN feature removal"
     },
     {
       "legacy": "testAccessibilityCoreScreenRenders",
@@ -2084,10 +2033,6 @@
     {
       "scope": "Owner Face ID unlock/admin actions/token configuration",
       "reason": "auth/secret/admin mutation gate; safe not-configured state only"
-    },
-    {
-      "scope": "WireGuard import/connect/on-demand/remove",
-      "reason": "device/network/keychain/system VPN mutation gate; safe not-configured state only"
     },
     {
       "scope": "Runner health/pause/resume/restart/shutdown actions",

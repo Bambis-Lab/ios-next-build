@@ -17,6 +17,7 @@ assert manifest["source_of_truth"].startswith("current product code")
 assert len(scenarios) >= 30
 ids = [item["id"] for item in scenarios]
 assert len(ids) == len(set(ids)), "scenario IDs must be unique"
+assert "WG-001" not in ids, "retired VPN scenario may not run"
 assert all(REQUIRED <= set(item) for item in scenarios)
 assert all(item["preconditions"] and item["action"] for item in scenarios)
 assert all(item["expected_stable_state"] and item["evidence_type"] for item in scenarios)
@@ -27,7 +28,7 @@ for tab in ("home", "rooms", "chat", "media", "system"):
     assert f"case {tab}" in app_shell, f"missing current app tab {tab}"
 
 product_root = (ROOT / "Sources/Features/ProductAcceptanceRootView.swift").read_text()
-for screen in ("home", "rooms", "chat", "media", "system", "light", "mediaDetail", "owner", "wireguard"):
+for screen in ("home", "rooms", "chat", "media", "system", "light", "mediaDetail", "owner"):
     assert f"case {screen}" in product_root, f"missing acceptance surface {screen}"
 
 card_source = (ROOT / "Sources/Features/LiveHACardTestModeView.swift").read_text()
@@ -63,7 +64,7 @@ assert any(
 exclusion_text = " ".join(
     item["scope"] + " " + item["reason"] for item in manifest["explicit_exclusions"]
 ).lower()
-for word in ("authentication", "network", "owner", "wireguard", "runner", "final simulator", "library"):
+for word in ("authentication", "network", "owner", "runner", "final simulator", "library"):
     assert word in exclusion_text, f"missing safety exclusion: {word}"
 
 print(f"Visual acceptance matrix valid: {len(scenarios)} scenarios, {len(manifest_cards)} card types")
