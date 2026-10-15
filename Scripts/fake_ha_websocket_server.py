@@ -164,7 +164,9 @@ class Handler(socketserver.BaseRequestHandler):
             )
 
             if mode == "auth_stall":
-                time.sleep(5)
+                # Keep the socket open beyond the client's 12s test deadline.
+                # A 5s close produced POSIX 57 instead of a genuine timeout.
+                time.sleep(20)
                 return
 
             send_json(sock, {"type": "auth_required", "ha_version": "2026.9.0"})
