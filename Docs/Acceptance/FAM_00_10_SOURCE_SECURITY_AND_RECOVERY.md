@@ -2,10 +2,11 @@
 
 ## Source lock
 - Repository: Bambis-Lab/ios-next-build
-- Base SHA: 25b1176ecd930bff8db04f804d62acf550af83c7
-- Earlier G99 passing source: 76562a32ee3a0073b9eb448c2ac489107f71836a
-- Source base metadata: MARKETING_VERSION=1.6.4, CURRENT_PROJECT_VERSION=27
-- The actual signed SideStore 1.7.0 IPA cannot be byte-matched from these sources. Do NOT claim 1.7.1 release readiness before reconciling the shipped IPA and this branch.
+- Shipped 1.7.0 SOURCE SHA: 9adf58c205400147f95c89e44cc71564e0c30d2d, per official Bambis-Lab/ios-next-releases/release-manifests/1.7.0.json; IPA SHA-256: 9b8a11ccd652c3a2bb6fcbc32a313a77af7eae509580cf6ac5e4eec8f8def858 (Build 28).
+- Earlier G99 change SHA: 25b1176ecd930bff8db04f804d62acf550af83c7. Release 1.7.0 source was 10 commits ahead and changed RunnerControlClient, RunnerDashboardView, OwnerProjectsView, ProductAcceptanceRootView and G99 tests.
+- Merge SHA 4daebf4a97a94a49d06b6dbc51824f6f1cff54c1 preserved the published release source as a parent and applied isolated family feature files without reverting the Runner/Project fixes.
+- Published 1.7.0 release CI patched original project.yml 1.6.4/27 into 1.7.0/28 during packaging; the source metadata correctly remains 1.6.4/27 until separate release approval.
+- The release source comparison is definitive but a new 1.7.1 IPA remains unbuilt and unreleased.
 - Branch: feature/iosnext-171-family-bootstrap. Nothing merged, no live changes.
 
 ## Architecture, fail-closed
@@ -41,3 +42,14 @@ Backend mirror: python3 Scripts/sync_owner_addon.py --check
 iOS unit on Xcode 27: xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -destination 'platform=iOS Simulator,name=iPhone 18 Pro Max' -only-testing:IOSNextTests/FamilyIdentityTests CODE_SIGNING_ALLOWED=NO
 
 Never print raw HA token, signing key, chat token, Owner token, or authentication headers.
+
+## FAM-11 integration outcomes and remaining release gates
+- Family mode is opt-in, disabled unless explicit backend configuration enables it.
+- Old /v2/auth/bootstrap denies access when family enrollment is enabled; static legacy chat tokens are denied too. Plan the cross-client migration before enabling.
+- Family chat grants now use the verified Broker HTTPS origin and integrate with /v1/chat/session, contacts, identities, messages, and tickets. No guessed relay address or token redirects.
+- Chat role for a family session is the verified member-only claim, not Owner display name. HA login alone never issues Factory/Runner admin tokens.
+- The independent existing Owner token + P-256 device approval stays mandatory even for the Nico profile; a separate backend Owner authorization design and real-device approval remain required.
+- Keys for newly registered family chat are separated by stable HA user ID in Keychain, with old chat keys left in the legacy namespace. No claim that old E2EE messages survive deletion.
+- Device IDs rotate when the signing private key is missing; revoked or different-key devices cannot reuse an old registration.
+- Real stable HA user IDs, the broker URL, and any deployment credentials are never in Git. Live user matching, staged Factory Owner sessions, and real E2E remain open.
+- CI synthetic family UI screenshots are not proof of real Home Assistant login. SideStore signing and eventual release require separate explicit Go.
