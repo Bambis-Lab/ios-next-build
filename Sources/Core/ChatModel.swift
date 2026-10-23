@@ -235,6 +235,12 @@ final class ChatModel {
     }
 
     func start() async {
+        // Pre-HA standalone chat cannot reuse a stale legacy credential when
+        // authenticated family enrollment is mandatory.
+        guard FamilyBootstrapClient.configuredURL() == nil || isFamilyCredentialActive else {
+            state = .offline("Zuerst mit deinem Home-Assistant-Familienkonto anmelden.")
+            return
+        }
         if let existingStartupTask = startupTask {
             await existingStartupTask.value
             return
