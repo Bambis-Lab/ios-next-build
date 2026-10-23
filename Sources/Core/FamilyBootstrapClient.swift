@@ -15,9 +15,12 @@ enum FamilyDeviceBinding {
     static func identity() throws -> FamilyRegisteredIdentity {
         let defaults = UserDefaults.standard
         let deviceID: String
-        if let previous = defaults.string(forKey: idKey), previous.hasPrefix("ios-") {
+        if let previous = defaults.string(forKey: idKey), previous.hasPrefix("ios-"),
+           (try KeychainStore.data(account: keyAccount)) != nil {
             deviceID = previous
         } else {
+            // Fresh install with orphaned UserDefaults must never inherit an
+            // old device ID whose signing key can no longer prove ownership.
             deviceID = "ios-" + UUID().uuidString.lowercased()
             defaults.set(deviceID, forKey: idKey)
         }
@@ -48,12 +51,28 @@ enum FamilyDeviceBinding {
     }
 }
 
+struct FamilyChatGrant: Decodable, Equatable, Sendable {
+    let accessToken: String
+    let expiresAt: Int
+    let scopes: [String]
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case expiresAt = "expires_at"
+        case scopes
+    }
+    var isValid: Bool {
+        accessToken.count >= 32 && expiresAt > Int(Date().timeIntervalSince1970) + 15
+            && Set(scopes) == Set(["chat", "tickets"])
+    }
+}
+
 struct FamilyRegistration: Decodable, Equatable, Sendable {
     let haUserID: String
     let profile: HomeProfile
     let role: String
     let deviceID: String
     let ownerAuthorization: String
+    let chat: FamilyChatGrant?
 
     enum CodingKeys: String, CodingKey {
         case haUserID = "ha_user_id"
@@ -61,6 +80,7 @@ struct FamilyRegistration: Decodable, Equatable, Sendable {
         case role
         case deviceID = "device_id"
         case ownerAuthorization = "owner_authorization"
+        case chat
     }
 
     /// Never treat HA admin status or a display-name match as Owner entitlement.
@@ -125,6 +145,9 @@ struct FamilyBootstrapClient: Sendable {
         )
         let result = try JSONDecoder().decode(FamilyRegistration.self, from: registrationData)
         guard result.isValid(for: verifiedHAUserID, expectedDeviceID: device.deviceID) else {
+            throw FamilyBootstrapError.invalidResponse
+        }
+        guard let grant = result.chat, grant.isValid else {
             throw FamilyBootstrapError.invalidResponse
         }
         return result
