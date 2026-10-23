@@ -71,4 +71,36 @@ final class FamilyIdentityTests: XCTestCase {
         XCTAssertTrue(decoded.isValid(for: "ha-mika", expectedDeviceID: "ios-device"))
     }
 
+    func testOwnerSessionCannotBeReusedByAnotherAccountOrDevice() {
+        let expiry = Int(Date().timeIntervalSince1970) + 900
+        let session = FamilyOwnerSession(
+            accessToken: String(repeating: "o", count: 64),
+            deviceSession: String(repeating: "s", count: 64),
+            expiresAt: expiry, deviceID: "ios-nico", haUserID: "ha-nico", role: "owner"
+        )
+        XCTAssertTrue(session.isValid(haUserID: "ha-nico", deviceID: "ios-nico"))
+        XCTAssertFalse(session.isValid(haUserID: "ha-mika", deviceID: "ios-nico"))
+        XCTAssertFalse(session.isValid(haUserID: "ha-nico", deviceID: "ios-mika"))
+        let expired = FamilyOwnerSession(
+            accessToken: session.accessToken, deviceSession: session.deviceSession,
+            expiresAt: 1, deviceID: "ios-nico", haUserID: "ha-nico", role: "owner"
+        )
+        XCTAssertFalse(expired.isValid(haUserID: "ha-nico", deviceID: "ios-nico"))
+    }
+
+    func testFamilyChatKeyNamespaceIsDistinctForMikaAndJuli() throws {
+        let mika = try ChatDeviceKeys.loadOrCreate(forUserID: "ha-mika")
+        let juli = try ChatDeviceKeys.loadOrCreate(forUserID: "ha-juli")
+        XCTAssertNotEqual(mika.safetyNumber, juli.safetyNumber)
+        XCTAssertEqual(try ChatDeviceKeys.loadOrCreate(forUserID: "ha-mika").safetyNumber,
+                       mika.safetyNumber)
+    }
+
+    func testFamilyDeviceProofPersistsForSameAppInstallation() throws {
+        let first = try FamilyDeviceBinding.identity()
+        let again = try FamilyDeviceBinding.identity()
+        XCTAssertEqual(first.deviceID, again.deviceID)
+        XCTAssertEqual(first.publicKey, again.publicKey)
+    }
+
 }
