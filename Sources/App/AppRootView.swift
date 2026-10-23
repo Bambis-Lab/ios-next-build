@@ -51,6 +51,12 @@ struct AppRootView: View {
                 appModel.isConnected, appModel: appModel
             )
         }
+        .task(id: appModel.registeredFamilyProfile) {
+            guard !isTestHarnessMode, appModel.registeredFamilyProfile != nil else { return }
+            await runtime.lifecycleCoordinator.homeAssistantConnectionChanged(
+                appModel.isConnected, appModel: appModel
+            )
+        }
         .sheet(isPresented: Bindable(appModel).isPresentingConnection) {
             ConnectionSetupView(appModel: appModel)
                 .presentationDetents([.medium, .large])
