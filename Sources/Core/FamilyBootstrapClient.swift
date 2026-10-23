@@ -51,6 +51,53 @@ enum FamilyDeviceBinding {
     }
 }
 
+struct FamilyOwnerSession: Decodable, Sendable {
+    let accessToken: String
+    let deviceSession: String
+    let expiresAt: Int
+    let deviceID: String
+    let haUserID: String
+    let role: String
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case deviceSession = "device_session"
+        case expiresAt = "expires_at"
+        case deviceID = "device_id"
+        case haUserID = "ha_user_id"
+        case role
+    }
+
+    func isValid(haUserID: String, deviceID: String) -> Bool {
+        role == "owner" && self.haUserID == haUserID && self.deviceID == deviceID &&
+            accessToken.count >= 32 && deviceSession.count >= 32 &&
+            expiresAt > Int(Date().timeIntervalSince1970) + 30
+    }
+}
+
+private struct FamilyOwnerChallenge: Decodable {
+    let challengeID: String
+    let challenge: String
+    enum CodingKeys: String, CodingKey {
+        case challengeID = "challenge_id"
+        case challenge
+    }
+}
+private struct FamilyOwnerChallengeRequest: Encodable {
+    let deviceID: String
+    enum CodingKeys: String, CodingKey { case deviceID = "device_id" }
+}
+private struct FamilyOwnerSessionRequest: Encodable {
+    let deviceID: String
+    let challengeID: String
+    let signature: String
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case challengeID = "challenge_id"
+        case signature
+    }
+}
+
 struct FamilyChatContext: Sendable {
     let endpoint: URL
     let haUserID: String
@@ -170,6 +217,28 @@ struct FamilyBootstrapClient: Sendable {
             throw FamilyBootstrapError.invalidResponse
         }
         return result
+    }
+
+    func ownerSession(haToken: String, verifiedHAUserID: String) async throws -> FamilyOwnerSession {
+        guard baseURL.scheme == "https" else { throw FamilyBootstrapError.brokerNotConfigured }
+        let device = try FamilyDeviceBinding.identity()
+        let challengeData = try await request(
+            path: "v2/family/owner/challenge", haToken: haToken,
+            payload: FamilyOwnerChallengeRequest(deviceID: device.deviceID)
+        )
+        let challenge = try JSONDecoder().decode(FamilyOwnerChallenge.self, from: challengeData)
+        let signature = try FamilyDeviceBinding.sign(challenge: challenge.challenge)
+        let data = try await request(
+            path: "v2/family/owner/session", haToken: haToken,
+            payload: FamilyOwnerSessionRequest(
+                deviceID: device.deviceID, challengeID: challenge.challengeID, signature: signature
+            )
+        )
+        let session = try JSONDecoder().decode(FamilyOwnerSession.self, from: data)
+        guard session.isValid(haUserID: verifiedHAUserID, deviceID: device.deviceID) else {
+            throw FamilyBootstrapError.invalidResponse
+        }
+        return session
     }
 
     private func request<Request: Encodable>(
