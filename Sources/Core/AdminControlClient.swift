@@ -879,15 +879,31 @@ final class AdminControlModel {
             try await authenticateOwner(reason: "Break-Glass für 5 Minuten öffnen")
             try await ensureDeviceSession()
             guard let deviceSessionToken else { throw AdminControlError.deviceBindingFailed }
-            let identity = try OwnerDeviceBindingStore.identity()
+            // Family Owner approval trusts the same registered P-256 key.
+            // The legacy Owner key belongs only to legacy non-family sessions.
+            let deviceID: String
+            if familyApprovedOwnerUserID != nil {
+                let familyIdentity = try FamilyDeviceBinding.identity()
+                guard familyIdentity.deviceID == familyApprovedDeviceID else {
+                    throw AdminControlError.deviceBindingFailed
+                }
+                deviceID = familyIdentity.deviceID
+            } else {
+                deviceID = try OwnerDeviceBindingStore.identity().deviceID
+            }
             let challenge = try await client.deviceChallengeV2(
-                deviceID: identity.deviceID,
+                deviceID: deviceID,
                 purpose: "break_glass",
                 configuration: configuration
             )
-            let signature = try OwnerDeviceBindingStore.sign(challengeBase64: challenge.challenge)
+            let signature: String
+            if familyApprovedOwnerUserID != nil {
+                signature = try FamilyDeviceBinding.sign(challenge: challenge.challenge)
+            } else {
+                signature = try OwnerDeviceBindingStore.sign(challengeBase64: challenge.challenge)
+            }
             let session = try await client.breakGlassV2(
-                deviceID: identity.deviceID,
+                deviceID: deviceID,
                 challengeID: challenge.challengeID,
                 signature: signature,
                 reason: normalized,
