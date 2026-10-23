@@ -343,6 +343,12 @@ final class ChatModel {
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
         isFamilyCredentialActive = false
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
+        keys = nil
+        ownSafetyNumber = ""
+        recipientSafetyNumbers = []
+        lastError = nil
         contacts = []
         recipientUserID = ""
         accessRole = nil
@@ -681,6 +687,9 @@ final class ChatModel {
     }
 
     private func restoreConfiguration() {
+        // Family deployments must never restore a stale legacy chat bearer
+        // before a verified HA user and registered device are established.
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard let endpoint = UserDefaults.standard.string(forKey: endpointKey),
               let url = URL(string: endpoint), isAllowedEndpoint(url),
               let userID = UserDefaults.standard.string(forKey: userKey),
