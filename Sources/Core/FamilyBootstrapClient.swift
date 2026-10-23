@@ -81,6 +81,18 @@ struct FamilyRegistration: Decodable, Equatable, Sendable {
     let ownerAuthorization: String
     let chat: FamilyChatGrant?
 
+    init(
+        haUserID: String, profile: HomeProfile, role: String, deviceID: String,
+        ownerAuthorization: String, chat: FamilyChatGrant? = nil
+    ) {
+        self.haUserID = haUserID
+        self.profile = profile
+        self.role = role
+        self.deviceID = deviceID
+        self.ownerAuthorization = ownerAuthorization
+        self.chat = chat
+    }
+
     enum CodingKeys: String, CodingKey {
         case haUserID = "ha_user_id"
         case profile
