@@ -117,7 +117,7 @@ struct AppShellView: View {
     private func content(for tab: AppTab) -> some View {
         switch tab {
         case .home:
-            if appModel.registeredFamilyProfile != nil {
+            if !appModel.familyBrokerConfigured || appModel.registeredFamilyProfile != nil {
                 HomeView(appModel: appModel)
             } else {
                 VStack(spacing: 8) {
