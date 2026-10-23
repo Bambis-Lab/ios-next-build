@@ -50,18 +50,39 @@ struct AdminAreaView: View {
         .sheet(isPresented: $isPresentingFactoryPreview) {
             NavigationStack { FactoryPreviewView() }
         }
-        .task(id: appModel?.registeredFamilyProfile) {
+        .task(id: "\(appModel?.homeAssistantCurrentUser?.id ?? "")|\(appModel?.registeredFamilyProfile?.rawValue ?? "")") {
             guard FamilyBootstrapClient.configuredURL() != nil else { return }
             model.clearFamilyOwnerSession()
             guard let appModel, appModel.registeredFamilyProfile == .nico,
+                  let approvedUserID = appModel.homeAssistantCurrentUser?.id,
                   let endpoint = FamilyBootstrapClient.configuredURL() else { return }
-            do {
-                let session = try await appModel.requestApprovedFamilyOwnerSession()
-                guard !Task.isCancelled, appModel.registeredFamilyProfile == .nico else { return }
-                try model.configureApprovedFamilyOwner(session, endpoint: endpoint)
-            } catch {
-                guard !Task.isCancelled else { return }
-                model.lastError = "Owner-Gerät benötigt separate Freigabe: " + error.localizedDescription
+            // Credentials are short-lived and never stored persistently.
+            // Renewal is scoped to this visible Owner view and current HA user.
+            while !Task.isCancelled {
+                guard appModel.registeredFamilyProfile == .nico,
+                      appModel.homeAssistantCurrentUser?.id == approvedUserID else {
+                    model.clearFamilyOwnerSession()
+                    return
+                }
+                do {
+                    let session = try await appModel.requestApprovedFamilyOwnerSession()
+                    guard !Task.isCancelled,
+                          appModel.homeAssistantCurrentUser?.id == approvedUserID else {
+                        model.clearFamilyOwnerSession()
+                        return
+                    }
+                    try model.configureApprovedFamilyOwner(session, endpoint: endpoint)
+                    let secondsUntilRenewal = session.expiresAt - Int(Date().timeIntervalSince1970) - 120
+                    try await Task.sleep(for: .seconds(max(20, secondsUntilRenewal)))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    model.clearFamilyOwnerSession()
+                    guard !Task.isCancelled else { return }
+                    model.lastError = "Owner-Gerät benötigt separate Freigabe oder eine neue Sitzung: " + error.localizedDescription
+                    // No legacy token fallback or automatic device approval.
+                    return
+                }
             }
         }
         .onChange(of: appModel?.homeAssistantCurrentUser?.id) { _, _ in
@@ -82,8 +103,14 @@ struct AdminAreaView: View {
             let active = phase == .active
             model.setPollingActive(active)
             runtime.setRunnerPollingActive("control-center", active: active)
-            if active, case .unlocked = model.state {
-                Task { await model.refreshStatusV2() }
+            if active {
+                if let expiry = model.deviceSessionExpiresAt,
+                   expiry.timeIntervalSinceNow <= 30,
+                   FamilyBootstrapClient.configuredURL() != nil {
+                    model.clearFamilyOwnerSession()
+                } else if case .unlocked = model.state {
+                    Task { await model.refreshStatusV2() }
+                }
             }
         }
     }
