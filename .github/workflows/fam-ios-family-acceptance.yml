@@ -82,6 +82,8 @@ jobs:
             '-only-testing:IOSNextTests/FamilyIdentityTests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/fam/FAM-Unit.log
+          grep -q "Test Suite 'FamilyIdentityTests' passed" build/fam/FAM-Unit.log
+          grep -Fq '** TEST SUCCEEDED **' build/fam/FAM-Unit.log
       - name: Execute Mika and Juli UI XCTest independently with bounded infra recovery
         shell: bash
         run: |
@@ -102,8 +104,15 @@ jobs:
               CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
               2>&1 | tee "build/fam/FAM-$name-$attempt.log"
           }
+          assert_case_executed() {
+            local name="$1" attempt="$2"
+            # xcodebuild may report success without actually matching an XCTest
+            # selector. Require the named case to have executed and passed.
+            grep -Fq "Test Case '-[IOSNextUITests.FamilyOnboardingUITests $name]' passed" \
+              "build/fam/FAM-$name-$attempt.log"
+          }
           for name in testMikaFamilyPreview testJuliFamilyPreview; do
-            if run_case "$name" first; then
+            if run_case "$name" first && assert_case_executed "$name" first; then
               echo "FAM_UI_CASE=PASS name=$name retry=0" | tee -a build/fam/FAM-UI-summary.log
             else
               log="build/fam/FAM-$name-first.log"
@@ -115,7 +124,7 @@ jobs:
               echo "FAM_UI_CASE=INFRA_RETRY name=$name count=1" | tee -a build/fam/FAM-UI-summary.log
               xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
               xcrun simctl bootstatus "$SIM_ID" -b >> build/fam/FAM-UI-recovery.log 2>&1
-              if run_case "$name" retry1; then
+              if run_case "$name" retry1 && assert_case_executed "$name" retry1; then
                 echo "FAM_UI_CASE=PASS name=$name retry=1" | tee -a build/fam/FAM-UI-summary.log
               else
                 echo "FAM_UI_CASE=FAIL name=$name retries_exhausted" | tee -a build/fam/FAM-UI-summary.log
