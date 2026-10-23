@@ -36,8 +36,11 @@ jobs:
           assert Path("UITests/FamilyOnboardingUITests.swift").exists()
           print("FAM_IOS_SOURCE=PASS")
           PY
+          python3 Scripts/Acceptance/validate_fam_g99_manifest.py
   iphone-simulator:
-    needs: source
+    # The self-hosted Xcode runner may reuse the same iOS simulator between
+    # jobs. Serialize all three macOS test jobs to prevent CoreSimulator races.
+    needs: [source, full-unit-regression]
     runs-on: xcode-27
     timeout-minutes: 55
     steps:
@@ -55,28 +58,81 @@ jobs:
           echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
           printf 'sha=%s\nsimulator=%s\nbuild=%s\n' "$GITHUB_SHA" "$SIM_ID" "$(xcodebuild -version | head -1)" > build/fam/environment.txt
           IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" >> build/fam/environment.txt 2>&1
-      - name: Swift family unit plus deterministic family UI screenshots
+      - name: Build signed family XCTest bundle once
         shell: bash
         run: |
           set -euo pipefail
-          xcodebuild test -collect-test-diagnostics never \
+          xcodebuild build-for-testing -collect-test-diagnostics never \
             -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
-            -destination "platform=iOS Simulator,id=$SIM_ID" \
-            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO \
             -derivedDataPath build/fam/DerivedData \
-            -resultBundlePath build/fam/FAM.xcresult \
-            '-only-testing:IOSNextTests/FamilyIdentityTests' \
-            '-only-testing:IOSNextUITests/FamilyOnboardingUITests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
-            2>&1 | tee build/fam/FAM.log
+            2>&1 | tee build/fam/FAM-BuildForTesting.log
+          XCTESTRUN_PATH="$(find build/fam/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+      - name: Verify all family Swift / Keychain identity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/fam/FAM-Unit.xcresult \
+            '-only-testing:IOSNextTests/FamilyIdentityTests' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam/FAM-Unit.log
+      - name: Execute Mika and Juli UI XCTest independently with bounded infra recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/fam/DerivedData/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP"
+          xcrun simctl install "$SIM_ID" "$APP"
+          xcrun simctl launch --terminate-running-process "$SIM_ID" \
+            de.nicofroeba16.iosnext --fam-acceptance-mika 2>&1 | tee build/fam/FAM-Prewarm.log
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+          run_case() {
+            local name="$1" attempt="$2"
+            xcodebuild test-without-building -collect-test-diagnostics never \
+              -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+              -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+              -resultBundlePath "build/fam/FAM-$name-$attempt.xcresult" \
+              "-only-testing:IOSNextUITests/FamilyOnboardingUITests/$name" \
+              CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+              2>&1 | tee "build/fam/FAM-$name-$attempt.log"
+          }
+          for name in testMikaFamilyPreview testJuliFamilyPreview; do
+            if run_case "$name" first; then
+              echo "FAM_UI_CASE=PASS name=$name retry=0" | tee -a build/fam/FAM-UI-summary.log
+            else
+              log="build/fam/FAM-$name-first.log"
+              if ! grep -Eq 'Early unexpected exit|test runner crashed while preparing|Failed to establish.*automation session|Failed to launch|does not have a process ID' "$log" ||
+                 grep -Eq 'Test Case .*failed|Assertion Failure|XCTAssert.*failed' "$log"; then
+                echo "FAM_UI_CASE=FAIL name=$name cause=test_or_unclassified no_retry" | tee -a build/fam/FAM-UI-summary.log
+                exit 65
+              fi
+              echo "FAM_UI_CASE=INFRA_RETRY name=$name count=1" | tee -a build/fam/FAM-UI-summary.log
+              xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+              xcrun simctl bootstatus "$SIM_ID" -b >> build/fam/FAM-UI-recovery.log 2>&1
+              if run_case "$name" retry1; then
+                echo "FAM_UI_CASE=PASS name=$name retry=1" | tee -a build/fam/FAM-UI-summary.log
+              else
+                echo "FAM_UI_CASE=FAIL name=$name retries_exhausted" | tee -a build/fam/FAM-UI-summary.log
+                exit 65
+              fi
+            fi
+          done
+          echo "FAM_UI_ACCEPTANCE=PASS mandatory=2"
+
       - name: Capture evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: FAM10-iPhone18ProMax-synthetic-identity-tests
+          name: FAM11-isolated-iPhone18ProMax-family-UI
           path: |
-            build/fam/FAM.log
-            build/fam/FAM.xcresult
+            build/fam/FAM-*.log
+            build/fam/FAM-*.xcresult
             build/fam/environment.txt
           retention-days: 14
 
@@ -137,7 +193,7 @@ jobs:
             build/fam-full-unit/fake-ha.log
           retention-days: 14
   full-g99-iphone:
-    needs: [source, full-unit-regression]
+    needs: [source, full-unit-regression, iphone-simulator]
     runs-on: xcode-27
     timeout-minutes: 110
     steps:
