@@ -93,7 +93,7 @@ final class AppModel {
     }
 
     var profileFavorites: [HomeAssistantEntity] {
-        guard registeredFamilyProfile != nil else { return [] }
+        guard !familyBrokerConfigured || registeredFamilyProfile != nil else { return [] }
         let explicit = profileDefinition.favoriteEntityIDs.compactMap { requestedID in
             if let index = entityIndexByID[requestedID], entities.indices.contains(index) {
                 return entities[index]
