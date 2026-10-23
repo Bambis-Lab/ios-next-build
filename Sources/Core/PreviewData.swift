@@ -24,6 +24,9 @@ private struct LiveHAFixture: Decodable {
 extension AppModel {
     static var preview: AppModel {
         let model = AppModel()
+        #if DEBUG
+        model.seedVerifiedFamilyPreview()
+        #endif
         model.connectionState = .connected
         guard let url = Bundle.main.url(forResource: "live_ha_fixture", withExtension: "json"),
               let data = try? Data(contentsOf: url),
