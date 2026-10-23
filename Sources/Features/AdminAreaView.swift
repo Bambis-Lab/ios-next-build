@@ -20,7 +20,14 @@ struct AdminAreaView: View {
     var body: some View {
         ZStack {
             OwnerBackground()
-            if factoryEmbedded {
+            if FamilyBootstrapClient.configuredURL() != nil &&
+               appModel?.registeredFamilyProfile != .nico {
+                ContentUnavailableView(
+                    "Owner-Zugriff nicht verfügbar",
+                    systemImage: "lock.shield",
+                    description: Text("Für diesen HA-Benutzer ist kein Owner-Zugang freigegeben.")
+                )
+            } else if factoryEmbedded {
                 ownerContent
             } else {
                 NavigationStack {
