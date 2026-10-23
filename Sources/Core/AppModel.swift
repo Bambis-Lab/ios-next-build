@@ -234,7 +234,11 @@ final class AppModel {
         generation: UInt64
     ) async {
         guard let endpoint = FamilyBootstrapClient.configuredURL() else {
-            familyRegistrationNotice = "Familien-Backend noch nicht konfiguriert. Home Assistant bleibt nutzbar."
+            // Explicit legacy compatibility: the shipped personal 1.7.0 app
+            // starts on Nico's dashboard when family enrollment is disabled.
+            // This does NOT issue any Owner credentials or bypass HA ACLs.
+            selectedProfile = .nico
+            familyRegistrationNotice = nil
             return
         }
         do {
