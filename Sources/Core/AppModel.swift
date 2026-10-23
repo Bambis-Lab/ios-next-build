@@ -141,6 +141,10 @@ final class AppModel {
     }
 
     func connectOAuth(using configuration: HomeAssistantOAuthConfiguration) async {
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
+        registeredFamilyProfile = nil
+        familyChatGrant = nil
+        homeAssistantCurrentUser = nil
         connectionState = .connecting
         do {
             let tokens = try await oauthService.authorize(using: configuration)
@@ -170,6 +174,11 @@ final class AppModel {
         persist: Bool = true,
         failurePrefix: String? = nil
     ) async {
+        // Must execute before the first asynchronous HA login/reconnect call.
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
+        registeredFamilyProfile = nil
+        familyChatGrant = nil
+        homeAssistantCurrentUser = nil
         let trace = IOSNextPerformance.begin("HA.Connect")
         defer { IOSNextPerformance.end("HA.Connect", trace) }
         connectionGeneration &+= 1
@@ -300,6 +309,7 @@ final class AppModel {
     }
 
     func disconnect() {
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
         connectionGeneration &+= 1
         deviceCommands.invalidatePending()
         entityStateRevisions.removeAll()
