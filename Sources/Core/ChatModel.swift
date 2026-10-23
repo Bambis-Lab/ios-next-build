@@ -224,11 +224,13 @@ final class ChatModel {
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
             ChatMediaThumbnailCache.shared.clear()
         }
+        // Persist the credential first. A failed Keychain write must not leave
+        // new account metadata paired with an unrelated previous account token.
+        try KeychainStore.save(token, account: tokenAccount)
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
         UserDefaults.standard.set(userID, forKey: userKey)
         UserDefaults.standard.set(recipientUserID, forKey: recipientKey)
-        try KeychainStore.save(token, account: tokenAccount)
         self.recipientUserID = recipientUserID
         configuration = ChatConfiguration(baseURL: url, token: token, userID: userID, deviceID: deviceID)
         state = .connecting
