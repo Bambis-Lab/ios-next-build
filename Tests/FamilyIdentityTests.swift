@@ -49,4 +49,26 @@ final class FamilyIdentityTests: XCTestCase {
         XCTAssertEqual(decoded.profile, .juli)
         XCTAssertTrue(decoded.isValid(for: "ha-juli", expectedDeviceID: "ios-device"))
     }
+    func testFamilyGrantDeniesOwnerScopeAndExpiredToken() {
+        let future = Int(Date().timeIntervalSince1970) + 900
+        let valid = FamilyChatGrant(accessToken: String(repeating: "a", count: 64), expiresAt: future, scopes: ["chat", "tickets"])
+        XCTAssertTrue(valid.isValid)
+        XCTAssertFalse(FamilyChatGrant(accessToken: valid.accessToken, expiresAt: future, scopes: ["chat", "owner"]).isValid)
+        XCTAssertFalse(FamilyChatGrant(accessToken: valid.accessToken, expiresAt: 1, scopes: ["chat", "tickets"]).isValid)
+    }
+
+    func testFamilyRegistrationDecodesChatCredentialWithoutAcceptingAnOwnerPermission() throws {
+        let timestamp = Int(Date().timeIntervalSince1970) + 900
+        let data = Data("""
+        {"ha_user_id":"ha-mika","profile":"mika","role":"member",
+         "device_id":"ios-device","owner_authorization":"not_available",
+         "chat":{"access_token":"\\(String(repeating: "a", count: 64))",
+         "expires_at":\\(timestamp),"scopes":["chat","tickets"]}}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(FamilyRegistration.self, from: data)
+        XCTAssertEqual(decoded.profile, .mika)
+        XCTAssertTrue(decoded.chat?.isValid == true)
+        XCTAssertTrue(decoded.isValid(for: "ha-mika", expectedDeviceID: "ios-device"))
+    }
+
 }
