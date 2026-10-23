@@ -262,8 +262,10 @@ final class AppModel {
         )
     }
 
-    func refreshFamilyChatGrantIfNeeded() async {
-        guard familyBrokerConfigured, familyChatContext() == nil,
+    func refreshFamilyChatGrantIfNeeded(minimumValidity: Int = 30) async {
+        guard familyBrokerConfigured,
+              familyChatGrant == nil ||
+                  (familyChatGrant?.expiresAt ?? 0) <= Int(Date().timeIntervalSince1970) + minimumValidity,
               let configuration = currentConfiguration,
               let user = homeAssistantCurrentUser else { return }
         await enrollFamilyAfterLogin(
