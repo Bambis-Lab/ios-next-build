@@ -9,7 +9,18 @@ struct ChatDeviceKeys: Sendable {
     let agreement: Curve25519.KeyAgreement.PrivateKey
     let signing: Curve25519.Signing.PrivateKey
 
-    static func loadOrCreate() throws -> ChatDeviceKeys {
+    /// A verified HA family account must never inherit another user's E2EE keys.
+    /// Nil preserves the legacy key namespace without silently changing old chats.
+    static func loadOrCreate(forUserID userID: String? = nil) throws -> ChatDeviceKeys {
+        let suffix: String
+        if let userID {
+            let digest = SHA256.hash(data: Data(userID.utf8))
+            suffix = ".family." + digest.map { String(format: "%02x", $0) }.joined()
+        } else {
+            suffix = ""
+        }
+        let agreementAccount = Self.agreementAccount + suffix
+        let signingAccount = Self.signingAccount + suffix
         let agreement: Curve25519.KeyAgreement.PrivateKey
         if let raw = try KeychainStore.data(account: agreementAccount) {
             agreement = try .init(rawRepresentation: raw)
