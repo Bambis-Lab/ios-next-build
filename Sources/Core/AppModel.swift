@@ -26,6 +26,7 @@ final class AppModel {
     var selectedProfile: HomeProfile = .gabi
     private(set) var registeredFamilyProfile: HomeProfile?
     private(set) var familyRegistrationNotice: String?
+    @ObservationIgnored private var familyChatGrant: FamilyChatGrant?
     var connectionState: ConnectionState = .notConfigured
     var entities: [HomeAssistantEntity] = []
     private(set) var searchRevision: UInt64 = 0
@@ -194,6 +195,7 @@ final class AppModel {
             apply(snapshot)
             homeAssistantCurrentUser = snapshot.currentUser
             registeredFamilyProfile = nil
+            familyChatGrant = nil
             selectedProfile = .gabi
             familyRegistrationNotice = "Familienprofil wird überprüft."
             connectionState = .connected
@@ -235,14 +237,40 @@ final class AppModel {
                 return
             }
             registeredFamilyProfile = identity.profile
+            familyChatGrant = identity.chat
             selectedProfile = identity.profile
             familyRegistrationNotice = nil
         } catch {
             guard generation == connectionGeneration else { return }
             registeredFamilyProfile = nil
+            familyChatGrant = nil
             selectedProfile = .gabi
             familyRegistrationNotice = "Familienregistrierung nicht verfügbar: " + error.localizedDescription
         }
+    }
+
+    var familyBrokerConfigured: Bool { FamilyBootstrapClient.configuredURL() != nil }
+
+    func familyChatContext() -> FamilyChatContext? {
+        guard let endpoint = FamilyBootstrapClient.configuredURL(),
+              let grant = familyChatGrant, grant.isValid,
+              registeredFamilyProfile != nil,
+              let userID = homeAssistantCurrentUser?.id,
+              let device = try? FamilyDeviceBinding.identity() else { return nil }
+        return FamilyChatContext(
+            endpoint: endpoint, haUserID: userID, deviceID: device.deviceID, grant: grant
+        )
+    }
+
+    func refreshFamilyChatGrantIfNeeded() async {
+        guard familyBrokerConfigured, familyChatContext() == nil,
+              let configuration = currentConfiguration,
+              let user = homeAssistantCurrentUser else { return }
+        await enrollFamilyAfterLogin(
+            homeAssistantUserID: user.id,
+            accessToken: configuration.accessToken,
+            generation: connectionGeneration
+        )
     }
 
     func chatBootstrapIdentityContext() async throws -> (baseURL: URL, accessToken: String, userID: String) {
@@ -274,6 +302,7 @@ final class AppModel {
         entityIDsByDomain.removeAll()
         homeAssistantCurrentUser = nil
         registeredFamilyProfile = nil
+        familyChatGrant = nil
         selectedProfile = .gabi
         familyRegistrationNotice = nil
         connectionState = .notConfigured
