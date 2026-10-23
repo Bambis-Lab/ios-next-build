@@ -9,6 +9,17 @@ struct ChatDeviceKeys: Sendable {
     let agreement: Curve25519.KeyAgreement.PrivateKey
     let signing: Curve25519.Signing.PrivateKey
 
+    static func mayMigrateLegacyKeys(
+        previouslyBoundHAUserID: String?,
+        verifiedHAUserID: String,
+        hasOldChatConfiguration: Bool,
+        alreadyUsingFamilyCredential: Bool
+    ) -> Bool {
+        !verifiedHAUserID.isEmpty &&
+            previouslyBoundHAUserID == verifiedHAUserID &&
+            hasOldChatConfiguration && !alreadyUsingFamilyCredential
+    }
+
     /// Only called after the old chat configuration is positively bound to the
     /// same *verified* HA account. Copy, never delete, the original identity.
     /// A partial or already-created family keypair must never be overwritten.
