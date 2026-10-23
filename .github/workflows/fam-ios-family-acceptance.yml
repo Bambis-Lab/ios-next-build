@@ -79,3 +79,89 @@ jobs:
             build/fam/FAM.xcresult
             build/fam/environment.txt
           retention-days: 14
+
+  full-unit-regression:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Boot isolated simulator and generate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/fam-full-unit
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" > build/fam-full-unit/boot.log 2>&1
+      - name: Run complete iOS unit test target with local fake HA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/fam-full-unit/fake-ha.log 2>&1 &
+          FAKE_HA_PID=$!
+          trap 'kill "$FAKE_HA_PID" 2>/dev/null || true' EXIT
+          python3 - <<'PY'
+          import socket,time
+          for _ in range(60):
+              try:
+                  with socket.create_connection(("127.0.0.1",18765),timeout=1):
+                      print("FAM_FAKE_HA_READY=PASS")
+                      break
+              except OSError:
+                  time.sleep(0.5)
+          else:
+              raise SystemExit("FAM_FAKE_HA_READY=FAIL")
+          PY
+          xcodebuild test -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/fam-full-unit/DerivedData \
+            -resultBundlePath build/fam-full-unit/FullUnit.xcresult \
+            '-only-testing:IOSNextTests' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/fam-full-unit/FullUnit.log
+      - name: Preserve full unit gate artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: FAM11-FINAL-full-iOS-unit
+          path: |
+            build/fam-full-unit/FullUnit.xcresult
+            build/fam-full-unit/FullUnit.log
+            build/fam-full-unit/boot.log
+            build/fam-full-unit/fake-ha.log
+          retention-days: 14
+  full-g99-iphone:
+    needs: [source, full-unit-regression]
+    runs-on: xcode-27
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Execute mandatory G99 iPhone UI and accessibility tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Scripts/Acceptance/fam_full_iphone_ui.sh
+      - name: Preserve full UI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: FAM11-FINAL-G99-iPhone18ProMax
+          path: |
+            build/g99/UI-base.log
+            build/g99/UI-base.xcresult
+            build/g99/a11y-dynamic-type.log
+            build/g99/a11y-dynamic-type.xcresult
+            build/g99/a11y-increase-contrast.log
+            build/g99/a11y-increase-contrast.xcresult
+            build/g99/BuildForTesting.log
+            build/g99/boot.log
+            build/g99/environment.txt
+            build/g99/attachments/
+          retention-days: 14
+          if-no-files-found: warn
