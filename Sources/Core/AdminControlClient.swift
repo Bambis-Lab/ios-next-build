@@ -507,6 +507,8 @@ final class AdminControlModel {
     private let tokenAccount = "ownerAdminToken"
     private let enrollmentSecretAccount = "ownerDeviceEnrollmentSecret"
     private var configuration: AdminControlConfiguration?
+    private var familyApprovedOwnerUserID: String?
+    private var familyApprovedDeviceID: String?
     private var deviceSessionToken: String?
     private var breakGlassSessionToken: String?
     private var lastEventSequence = 0
@@ -527,7 +529,11 @@ final class AdminControlModel {
               owner.isValid(haUserID: owner.haUserID, deviceID: owner.deviceID) else {
             throw AdminControlError.forbidden
         }
-        invalidateOwnerReadTasks()
+        let sameIdentity = familyApprovedOwnerUserID == owner.haUserID &&
+            familyApprovedDeviceID == owner.deviceID && configuration?.baseURL == endpoint
+        if !sameIdentity { invalidateOwnerReadTasks() }
+        familyApprovedOwnerUserID = owner.haUserID
+        familyApprovedDeviceID = owner.deviceID
         // No Master token, enrollment secret or short-lived Owner grant is
         // persisted in Keychain or UserDefaults by the family path.
         configuration = AdminControlConfiguration(
@@ -538,11 +544,14 @@ final class AdminControlModel {
         deviceSessionToken = owner.deviceSession
         deviceSessionExpiresAt = Date(timeIntervalSince1970: TimeInterval(owner.expiresAt))
         deviceBindingPhase = .trusted(Date(timeIntervalSince1970: TimeInterval(owner.expiresAt)))
-        state = .locked
+        // Renewal must not unexpectedly lock an already authenticated Owner.
+        if !sameIdentity { state = .locked }
     }
 
     func clearFamilyOwnerSession() {
         invalidateOwnerReadTasks()
+        familyApprovedOwnerUserID = nil
+        familyApprovedDeviceID = nil
         configuration = nil
         resetV2State()
         state = .notConfigured
@@ -892,6 +901,15 @@ final class AdminControlModel {
         if let deviceSessionExpiresAt, deviceSessionToken != nil, deviceSessionExpiresAt.timeIntervalSinceNow > 30 {
             deviceBindingPhase = .trusted(deviceSessionExpiresAt)
             return
+        }
+        // The family credential already represents an independently
+        // approved, bound device. Never re-enroll a second legacy key using
+        // an absent Owner enrollment secret.
+        if familyApprovedOwnerUserID != nil {
+            deviceSessionToken = nil
+            deviceSessionExpiresAt = nil
+            deviceBindingPhase = .failed("Owner-Gerätesitzung abgelaufen; erneute HA-Freigabe erforderlich.")
+            throw AdminControlError.deviceBindingFailed
         }
         guard v2Capabilities?.capabilities.contains("device_binding") == true else {
             deviceBindingPhase = .unavailable
