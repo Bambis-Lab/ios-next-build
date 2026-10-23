@@ -62,8 +62,8 @@ final class FamilyIdentityTests: XCTestCase {
         let data = Data("""
         {"ha_user_id":"ha-mika","profile":"mika","role":"member",
          "device_id":"ios-device","owner_authorization":"not_available",
-         "chat":{"access_token":"\\(String(repeating: "a", count: 64))",
-         "expires_at":\\(timestamp),"scopes":["chat","tickets"]}}
+         "chat":{"access_token":"\(String(repeating: "a", count: 64))",
+         "expires_at":\(timestamp),"scopes":["chat","tickets"]}}
         """.utf8)
         let decoded = try JSONDecoder().decode(FamilyRegistration.self, from: data)
         XCTAssertEqual(decoded.profile, .mika)
