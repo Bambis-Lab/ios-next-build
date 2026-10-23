@@ -96,6 +96,25 @@ final class FamilyIdentityTests: XCTestCase {
                        mika.safetyNumber)
     }
 
+    func testE2EEMigrationNeverCrossesHAAccountsOrOverwritesFamilyIdentity() {
+        XCTAssertTrue(ChatDeviceKeys.mayMigrateLegacyKeys(
+            previouslyBoundHAUserID: "ha-mika", verifiedHAUserID: "ha-mika",
+            hasOldChatConfiguration: true, alreadyUsingFamilyCredential: false
+        ))
+        XCTAssertFalse(ChatDeviceKeys.mayMigrateLegacyKeys(
+            previouslyBoundHAUserID: "ha-mika", verifiedHAUserID: "ha-juli",
+            hasOldChatConfiguration: true, alreadyUsingFamilyCredential: false
+        ))
+        XCTAssertFalse(ChatDeviceKeys.mayMigrateLegacyKeys(
+            previouslyBoundHAUserID: nil, verifiedHAUserID: "ha-mika",
+            hasOldChatConfiguration: true, alreadyUsingFamilyCredential: false
+        ))
+        XCTAssertFalse(ChatDeviceKeys.mayMigrateLegacyKeys(
+            previouslyBoundHAUserID: "ha-mika", verifiedHAUserID: "ha-mika",
+            hasOldChatConfiguration: true, alreadyUsingFamilyCredential: true
+        ))
+    }
+
     func testFamilyDeviceProofPersistsForSameAppInstallation() throws {
         let first = try FamilyDeviceBinding.identity()
         let again = try FamilyDeviceBinding.identity()
