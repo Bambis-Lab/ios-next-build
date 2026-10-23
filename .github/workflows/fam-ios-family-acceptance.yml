@@ -165,3 +165,63 @@ jobs:
             build/g99/attachments/
           retention-days: 14
           if-no-files-found: warn
+
+  unsigned-rc-171:
+    needs: [source, iphone-simulator, full-unit-regression, full-g99-iphone]
+    if: ${{ vars.FAM11_STAGING_E2E_PASS == 'true' && vars.IOSNEXT_FAMILY_BROKER_URL != '' }}
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Make isolated Release Candidate build, without publishing
+        shell: bash
+        env:
+          FAMILY_BROKER_URL: ${{ vars.IOSNEXT_FAMILY_BROKER_URL }}
+        run: |
+          set -euo pipefail
+          case "$FAMILY_BROKER_URL" in
+            https://*) ;;
+            *) echo 'Family broker must use vetted HTTPS endpoint' >&2; exit 1 ;;
+          esac
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          mkdir -p build
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("project.yml")
+          source=p.read_text()
+          assert source.count("MARKETING_VERSION: 1.6.4") == 1
+          assert source.count("CURRENT_PROJECT_VERSION: 27") == 1
+          p.write_text(source.replace("MARKETING_VERSION: 1.6.4", "MARKETING_VERSION: 1.7.1")
+                      .replace("CURRENT_PROJECT_VERSION: 27", "CURRENT_PROJECT_VERSION: 29"))
+          PY
+          export CM_COMMIT="$GITHUB_SHA" EXPECTED_VERSION=1.7.1 EXPECTED_BUILD=29
+          bash Scripts/prepare_free_sideload_project.sh
+          xcodebuild build -project IOSNext.xcodeproj -scheme IOSNext -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/rc171/DerivedData \
+            MARKETING_VERSION=1.7.1 CURRENT_PROJECT_VERSION=29 \
+            IOSNEXT_FAMILY_BROKER_URL="$FAMILY_BROKER_URL" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/rc171-build.log
+          APP="build/rc171/DerivedData/Build/Products/Release-iphoneos/IOSNext.app"
+          test -d "$APP" && file "$APP/IOSNext" | grep -q arm64
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -qx 'de.nicofroeba16.iosnext'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist" | grep -qx '1.7.1'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist" | grep -qx '29'
+          /usr/libexec/PlistBuddy -c 'Print :IOSNextFamilyBrokerURL' "$APP/Info.plist" | grep -qxF "$FAMILY_BROKER_URL"
+          mkdir -p build/rc171-out/Payload
+          cp -R "$APP" build/rc171-out/Payload/IOSNext.app
+          (cd build/rc171-out && /usr/bin/zip -qry IOSNext-1.7.1-build29-UNSIGNED-RC.ipa Payload)
+          unzip -t build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa >/dev/null
+          shasum -a 256 build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa > build/rc171-out/SHA256SUMS.txt
+          printf 'source_sha=%s\nstatus=UNSIGNED_RC_NOT_PUBLISHED\n' "$GITHUB_SHA" > build/rc171-out/provenance.txt
+      - name: Upload unsigned RC to CI artifact storage only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-1.7.1-build29-UNSIGNED-RC-NOT-PUBLISHED
+          path: |
+            build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa
+            build/rc171-out/SHA256SUMS.txt
+            build/rc171-out/provenance.txt
+            build/rc171-build.log
+          retention-days: 14
+          if-no-files-found: error
