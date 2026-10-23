@@ -236,7 +236,7 @@ jobs:
 
   unsigned-rc-171:
     needs: [source, iphone-simulator, full-unit-regression, full-g99-iphone]
-    if: ${{ vars.FAM11_STAGING_E2E_PASS == 'true' && vars.IOSNEXT_FAMILY_BROKER_URL != '' }}
+    if: ${{ vars.FAM11_STAGING_E2E_PASS == 'true' && vars.IOSNEXT_FAMILY_BROKER_URL != '' && vars.FAM11_STAGING_IOS_SHA == github.sha && vars.FAM11_STAGING_BACKEND_SHA != '' && vars.FAM11_STAGING_EVIDENCE_SHA256 != '' }}
     runs-on: xcode-27
     timeout-minutes: 60
     steps:
@@ -245,12 +245,19 @@ jobs:
         shell: bash
         env:
           FAMILY_BROKER_URL: ${{ vars.IOSNEXT_FAMILY_BROKER_URL }}
+          STAGED_IOS_SHA: ${{ vars.FAM11_STAGING_IOS_SHA }}
+          STAGED_BACKEND_SHA: ${{ vars.FAM11_STAGING_BACKEND_SHA }}
+          STAGING_EVIDENCE_SHA256: ${{ vars.FAM11_STAGING_EVIDENCE_SHA256 }}
         run: |
           set -euo pipefail
           case "$FAMILY_BROKER_URL" in
             https://*) ;;
             *) echo 'Family broker must use vetted HTTPS endpoint' >&2; exit 1 ;;
           esac
+          # A manually set boolean alone is not a staging E2E attestation.
+          test "$STAGED_IOS_SHA" = "$GITHUB_SHA"
+          [[ "$STAGED_BACKEND_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$STAGING_EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
           if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
           mkdir -p build
           python3 - <<'PY'
@@ -281,7 +288,7 @@ jobs:
           (cd build/rc171-out && /usr/bin/zip -qry IOSNext-1.7.1-build29-UNSIGNED-RC.ipa Payload)
           unzip -t build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa >/dev/null
           shasum -a 256 build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa > build/rc171-out/SHA256SUMS.txt
-          printf 'source_sha=%s\nstatus=UNSIGNED_RC_NOT_PUBLISHED\n' "$GITHUB_SHA" > build/rc171-out/provenance.txt
+          printf 'source_sha=%s\\nbackend_sha=%s\\nstaging_evidence_sha256=%s\\nstatus=UNSIGNED_RC_NOT_PUBLISHED\\n' "$GITHUB_SHA" "$STAGED_BACKEND_SHA" "$STAGING_EVIDENCE_SHA256" > build/rc171-out/provenance.txt
       - name: Upload unsigned RC to CI artifact storage only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
