@@ -22,7 +22,10 @@ final class AppModel {
         }
     }
 
-    var selectedProfile: HomeProfile = .nico
+    // Safe generic presentation until the server verifies a family identity.
+    var selectedProfile: HomeProfile = .gabi
+    private(set) var registeredFamilyProfile: HomeProfile?
+    private(set) var familyRegistrationNotice: String?
     var connectionState: ConnectionState = .notConfigured
     var entities: [HomeAssistantEntity] = []
     private(set) var searchRevision: UInt64 = 0
@@ -89,6 +92,7 @@ final class AppModel {
     }
 
     var profileFavorites: [HomeAssistantEntity] {
+        guard registeredFamilyProfile != nil else { return [] }
         let explicit = profileDefinition.favoriteEntityIDs.compactMap { requestedID in
             if let index = entityIndexByID[requestedID], entities.indices.contains(index) {
                 return entities[index]
@@ -189,6 +193,9 @@ final class AppModel {
             reconnectAttempt = 0
             apply(snapshot)
             homeAssistantCurrentUser = snapshot.currentUser
+            registeredFamilyProfile = nil
+            selectedProfile = .gabi
+            familyRegistrationNotice = "Familienprofil wird überprüft."
             connectionState = .connected
             isPresentingConnection = false
             observeStateChanges()
@@ -196,12 +203,45 @@ final class AppModel {
                 UserDefaults.standard.set(serverURL.absoluteString, forKey: serverURLKey)
                 try KeychainStore.save(accessToken, account: tokenAccount)
             }
+            await enrollFamilyAfterLogin(
+                homeAssistantUserID: snapshot.currentUser.id,
+                accessToken: accessToken,
+                generation: connectGeneration
+            )
         } catch {
             guard connectGeneration == connectionGeneration, !Task.isCancelled else { return }
             let message = error.localizedDescription
             connectionState = .failed(
                 failurePrefix.map { "\($0): \(message)" } ?? message
             )
+        }
+    }
+
+    private func enrollFamilyAfterLogin(
+        homeAssistantUserID: String,
+        accessToken: String,
+        generation: UInt64
+    ) async {
+        guard let endpoint = FamilyBootstrapClient.configuredURL() else {
+            familyRegistrationNotice = "Familien-Backend noch nicht konfiguriert. Home Assistant bleibt nutzbar."
+            return
+        }
+        do {
+            let identity = try await FamilyBootstrapClient(baseURL: endpoint).enroll(
+                haToken: accessToken,
+                verifiedHAUserID: homeAssistantUserID
+            )
+            guard generation == connectionGeneration, homeAssistantCurrentUser?.id == homeAssistantUserID else {
+                return
+            }
+            registeredFamilyProfile = identity.profile
+            selectedProfile = identity.profile
+            familyRegistrationNotice = nil
+        } catch {
+            guard generation == connectionGeneration else { return }
+            registeredFamilyProfile = nil
+            selectedProfile = .gabi
+            familyRegistrationNotice = "Familienregistrierung nicht verfügbar: " + error.localizedDescription
         }
     }
 
@@ -233,6 +273,9 @@ final class AppModel {
         entityIndexByID.removeAll()
         entityIDsByDomain.removeAll()
         homeAssistantCurrentUser = nil
+        registeredFamilyProfile = nil
+        selectedProfile = .gabi
+        familyRegistrationNotice = nil
         connectionState = .notConfigured
     }
 
