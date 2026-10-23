@@ -553,6 +553,17 @@ final class AdminControlModel {
         familyApprovedOwnerUserID = nil
         familyApprovedDeviceID = nil
         configuration = nil
+        deviceSessionToken = nil
+        deviceSessionExpiresAt = nil
+        breakGlassSessionToken = nil
+        breakGlassExpiresAt = nil
+        backendStatus = nil
+        auditEvents = []
+        supportTickets = []
+        ticketDetails = [:]
+        projectRoutes = []
+        lastDispatch = nil
+        lastError = nil
         resetV2State()
         state = .notConfigured
     }
