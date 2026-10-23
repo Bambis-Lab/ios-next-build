@@ -106,6 +106,7 @@ struct AdminControlConfiguration: Equatable, Sendable {
 
     let baseURL: URL
     let ownerToken: String
+    var ownerDeviceSession: String? = nil
 }
 
 enum AdminControlError: LocalizedError {
@@ -414,6 +415,9 @@ actor AdminControlClient {
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(configuration.ownerToken)", forHTTPHeaderField: "Authorization")
+        if let deviceSession = configuration.ownerDeviceSession {
+            request.setValue(deviceSession, forHTTPHeaderField: "X-Owner-Device-Session")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (name, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: name) }
@@ -439,6 +443,9 @@ actor AdminControlClient {
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(configuration.ownerToken)", forHTTPHeaderField: "Authorization")
+        if let deviceSession = configuration.ownerDeviceSession {
+            request.setValue(deviceSession, forHTTPHeaderField: "X-Owner-Device-Session")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await session.data(for: request)
@@ -514,7 +521,37 @@ final class AdminControlModel {
         restoreConfiguration()
     }
 
+    func configureApprovedFamilyOwner(_ owner: FamilyOwnerSession, endpoint: URL) throws {
+        guard FamilyBootstrapClient.configuredURL() == endpoint,
+              owner.role == "owner",
+              owner.isValid(haUserID: owner.haUserID, deviceID: owner.deviceID) else {
+            throw AdminControlError.forbidden
+        }
+        invalidateOwnerReadTasks()
+        // No Master token, enrollment secret or short-lived Owner grant is
+        // persisted in Keychain or UserDefaults by the family path.
+        configuration = AdminControlConfiguration(
+            baseURL: endpoint,
+            ownerToken: owner.accessToken,
+            ownerDeviceSession: owner.deviceSession
+        )
+        deviceSessionToken = owner.deviceSession
+        deviceSessionExpiresAt = Date(timeIntervalSince1970: TimeInterval(owner.expiresAt))
+        deviceBindingPhase = .trusted(Date(timeIntervalSince1970: TimeInterval(owner.expiresAt)))
+        state = .locked
+    }
+
+    func clearFamilyOwnerSession() {
+        invalidateOwnerReadTasks()
+        configuration = nil
+        resetV2State()
+        state = .notConfigured
+    }
+
     func configure(endpoint: String, ownerToken: String, enrollmentSecret: String = "") throws {
+        guard FamilyBootstrapClient.configuredURL() == nil else {
+            throw AdminControlError.forbidden
+        }
         invalidateOwnerReadTasks()
         guard let url = URL(string: endpoint), url.scheme?.lowercased() == "https", !ownerToken.isEmpty else {
             throw AdminControlError.invalidConfiguration
@@ -1087,6 +1124,8 @@ final class AdminControlModel {
     }
 
     private func restoreConfiguration() {
+        // A family-mode login cannot silently inherit a legacy Owner master token.
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard let endpoint = UserDefaults.standard.string(forKey: endpointKey),
               let url = URL(string: endpoint),
               let token = try? KeychainStore.value(account: tokenAccount),
