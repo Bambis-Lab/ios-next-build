@@ -130,8 +130,12 @@ final class ChatModel {
                 let recipient = previouslyBoundHAUser == family.haUserID && !recipientUserID.isEmpty
                     ? recipientUserID : family.haUserID
                 do {
-                    if previouslyBoundHAUser == family.haUserID,
-                       existing != nil, !isFamilyCredentialActive {
+                    if ChatDeviceKeys.mayMigrateLegacyKeys(
+                        previouslyBoundHAUserID: previouslyBoundHAUser,
+                        verifiedHAUserID: family.haUserID,
+                        hasOldChatConfiguration: existing != nil,
+                        alreadyUsingFamilyCredential: isFamilyCredentialActive
+                    ) {
                         // Never import old keys after an HA account switch.
                         // Preserve old key material for rollback / original chats.
                         try ChatDeviceKeys.migrateLegacyKeysForVerifiedAccount(family.haUserID)
