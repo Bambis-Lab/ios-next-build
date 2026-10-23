@@ -46,6 +46,7 @@ final class ChatModel {
     private let relay = ChatRelayClient()
     private var configuration: ChatConfiguration?
     private var isFamilyCredentialActive = false
+    private var familyRenewalTask: Task<Void, Never>?
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
@@ -134,7 +135,8 @@ final class ChatModel {
                         token: family.grant.accessToken,
                         userID: family.haUserID,
                         recipientUserID: recipient,
-                        deviceID: family.deviceID
+                        deviceID: family.deviceID,
+                        preservingStartup: true
                     )
                     UserDefaults.standard.set(family.haUserID, forKey: haUserKey)
                     isFamilyCredentialActive = true
@@ -144,6 +146,9 @@ final class ChatModel {
                 }
             }
             await performRelayStart(epoch: epoch)
+            if case .online = state {
+                scheduleFamilyRenewal(using: appModel, grant: family.grant)
+            }
             return
         }
         if let context = appModel.chatBootstrapContext() {
@@ -192,7 +197,8 @@ final class ChatModel {
 
     func configure(
         endpoint: String, token: String, userID: String, recipientUserID: String,
-        deviceID explicitDeviceID: String? = nil
+        deviceID explicitDeviceID: String? = nil,
+        preservingStartup: Bool = false
     ) throws {
         guard let url = URL(string: endpoint), isAllowedEndpoint(url),
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
@@ -204,7 +210,12 @@ final class ChatModel {
         let replacesIdentity = configuration.map {
             $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
         } ?? false
-        stop()
+        if preservingStartup {
+            receiveTask?.cancel()
+            receiveTask = nil
+        } else {
+            stop()
+        }
         configurationGeneration &+= 1
         if replacesIdentity {
             draft = ""
@@ -302,6 +313,8 @@ final class ChatModel {
         startupToken = nil
         receiveTask?.cancel()
         receiveTask = nil
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
         // Decrypted previews must not outlive an app/chat lifecycle stop.
         ChatMediaThumbnailCache.shared.clear()
         if configuration != nil { state = .offline("Empfang pausiert") }
@@ -366,7 +379,9 @@ final class ChatModel {
               isAllowedEndpoint(endpoint) else {
             throw ChatError.invalidConfiguration
         }
-        stop()
+        // Do not cancel the startup Task that owns this automatic bootstrap.
+        receiveTask?.cancel()
+        receiveTask = nil
         state = .connecting
         let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
@@ -397,6 +412,22 @@ final class ChatModel {
             userID: bootstrap.userID,
             deviceID: deviceID
         )
+    }
+
+    private func scheduleFamilyRenewal(using appModel: AppModel, grant: FamilyChatGrant) {
+        familyRenewalTask?.cancel()
+        let remaining = grant.expiresAt - Int(Date().timeIntervalSince1970)
+        let delay = max(20, remaining - 120)
+        familyRenewalTask = Task { [weak self, weak appModel] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, let appModel else { return }
+            self.familyRenewalTask = nil
+            await appModel.refreshFamilyChatGrantIfNeeded(minimumValidity: 180)
+            guard !Task.isCancelled, appModel.familyChatContext() != nil else { return }
+            self.receiveTask?.cancel()
+            self.receiveTask = nil
+            await self.start(using: appModel)
+        }
     }
 
     func sendDraft() async {
