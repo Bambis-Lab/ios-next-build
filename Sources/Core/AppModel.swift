@@ -258,7 +258,30 @@ final class AppModel {
         }
     }
 
-    var familyBrokerConfigured: Bool { FamilyBootstrapClient.configuredURL() != nil }
+    #if DEBUG
+    // Simulator-only deterministic identity fixture. No actual HA token,
+    // broker, P-256 registration or Owner device authorization is synthesized.
+    private var acceptanceFamilyBrokerOverride: Bool?
+
+    func seedVerifiedFamilyPreview() {
+        acceptanceFamilyBrokerOverride = true
+        registeredFamilyProfile = .nico
+        selectedProfile = .nico
+    }
+
+    func seedUnverifiedFamilyPreview() {
+        acceptanceFamilyBrokerOverride = true
+        registeredFamilyProfile = nil
+        selectedProfile = .gabi
+    }
+    #endif
+
+    var familyBrokerConfigured: Bool {
+        #if DEBUG
+        if let acceptanceFamilyBrokerOverride { return acceptanceFamilyBrokerOverride }
+        #endif
+        return FamilyBootstrapClient.configuredURL() != nil
+    }
 
     func familyChatContext() -> FamilyChatContext? {
         guard let endpoint = FamilyBootstrapClient.configuredURL(),
