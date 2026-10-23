@@ -17,7 +17,7 @@ xcodebuild build-for-testing -collect-test-diagnostics never \
   -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
   -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO \
   -derivedDataPath build/g99/DerivedData \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
   2>&1 | tee build/g99/BuildForTesting.log
 APP="build/g99/DerivedData/Build/Products/Debug-iphonesimulator/IOSNext.app"
 XCTESTRUN_PATH="$(find build/g99/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
@@ -41,7 +41,7 @@ run_startup_probe() {
     -parallel-testing-enabled NO -disable-concurrent-destination-testing \
     -resultBundlePath "$STARTUP_DIR/$name.xcresult" \
     "-only-testing:IOSNextUITests/IOSNextUITests/testAccessibilityCoreScreenRenders" \
-    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
     2>&1 | tee "$STARTUP_DIR/$name.log"
   status=${PIPESTATUS[0]}
   set -e
@@ -68,21 +68,27 @@ else
   fi
 fi
 
-# Mandatory manifest contains nine product UI cases and two simulator-supported
-# accessibility cases. Light/Dark is asserted by the visual UI case.
-# The optional Settings-switch tests are deliberately outside the release gate.
+# Mandatory manifest: ten standard UI tests (including the unverified
+# family Home regression) and two independent accessibility tests.
+# Validate the exact contract before creating the main test selection.
+python3 Scripts/Acceptance/validate_fam_g99_manifest.py
 set --
 n=0
-while IFS= read -r selector; do
+while IFS= read -r selector || [ -n "$selector" ]; do
+  [ -n "$selector" ] || { echo "G99_MANIFEST=FAIL blank entry" >&2; exit 65; }
   n=$((n+1))
-  if [ "$n" -le 9 ]; then set -- "$@" "-only-testing:$selector"; fi
+  if [ "$n" -le 10 ]; then set -- "$@" "-only-testing:$selector"; fi
 done < Scripts/Acceptance/g99_iphone_manifest.txt
-test "$n" -eq 11
+if [ "$n" -ne 12 ] || [ "$#" -ne 10 ]; then
+  echo "G99_MANIFEST=FAIL expected=12 selected_regular=10 observed=$n" >&2
+  exit 65
+fi
+echo "G99_MANIFEST=PASS total=12 regular=10 accessibility=2"
 xcodebuild test-without-building -collect-test-diagnostics never \
   -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
   -parallel-testing-enabled NO -disable-concurrent-destination-testing \
   -resultBundlePath build/g99/UI-base.xcresult "$@" \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
   2>&1 | tee build/g99/UI-base.log
 xcrun xcresulttool export attachments --path build/g99/UI-base.xcresult --output-path build/g99/attachments/base
 
@@ -105,7 +111,7 @@ run_a11y() {
     -parallel-testing-enabled NO -disable-concurrent-destination-testing \
     -resultBundlePath "build/g99/a11y-$label.xcresult" \
     "-only-testing:IOSNextUITests/IOSNextUITests/$method" \
-    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
     2>&1 | tee "build/g99/a11y-$label.log"
   xcrun xcresulttool export attachments --path "build/g99/a11y-$label.xcresult" --output-path "build/g99/attachments/$label"
 }
