@@ -275,6 +275,24 @@ final class AppModel {
         )
     }
 
+    func requestApprovedFamilyOwnerSession() async throws -> FamilyOwnerSession {
+        guard registeredFamilyProfile == .nico,
+              let userID = homeAssistantCurrentUser?.id,
+              let configuration = currentConfiguration,
+              let url = FamilyBootstrapClient.configuredURL() else {
+            throw FamilyBootstrapError.unauthorized
+        }
+        let generation = connectionGeneration
+        let session = try await FamilyBootstrapClient(baseURL: url).ownerSession(
+            haToken: configuration.accessToken, verifiedHAUserID: userID
+        )
+        guard generation == connectionGeneration, homeAssistantCurrentUser?.id == userID,
+              registeredFamilyProfile == .nico else {
+            throw FamilyBootstrapError.unauthorized
+        }
+        return session
+    }
+
     func chatBootstrapIdentityContext() async throws -> (baseURL: URL, accessToken: String, userID: String) {
         guard let configuration = currentConfiguration else { throw HomeAssistantClientError.disconnected }
         let identity = try await client.currentUserIdentity()
