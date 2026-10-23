@@ -83,7 +83,10 @@ jobs:
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/fam/FAM-Unit.log
           grep -q "Test Suite 'FamilyIdentityTests' passed" build/fam/FAM-Unit.log
-          grep -Fq '** TEST SUCCEEDED **' build/fam/FAM-Unit.log
+          # Xcode 27 emits TEST EXECUTE SUCCEEDED for test-without-building,
+          # while xcodebuild test may emit TEST SUCCEEDED. Both mean a
+          # terminally successful XCTest run, not just a successful build.
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/fam/FAM-Unit.log
       - name: Execute Mika and Juli UI XCTest independently with bounded infra recovery
         shell: bash
         run: |
