@@ -31,6 +31,9 @@
             </array>
         </dict>
     </array>
+    <!-- Build-time deployment configuration only; never embed credentials. -->
+    <key>IOSNextFamilyBrokerURL</key>
+    <string>$(IOSNEXT_FAMILY_BROKER_URL)</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>iOS Next verbindet sich mit deinem Home-Assistant-Server im lokalen Netzwerk.</string>
     <key>NSAppTransportSecurity</key>

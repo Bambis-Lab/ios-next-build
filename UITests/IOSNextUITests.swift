@@ -619,6 +619,19 @@ final class IOSNextUITests: XCTestCase {
         return true
     }
 
+    func testUnverifiedFamilyHomeDoesNotExposePersonalizedShortcuts() {
+        // An explicitly unverified family fixture must not inherit Nico's Home.
+        let application = launch("home", extraArguments: ["--product-ui-test-unverified"])
+        XCTAssertTrue(
+            application.staticTexts["Familienprofil noch nicht bestätigt"].waitForExistence(timeout: 6),
+            "Unverified family account must see neutral Rooms instead of personalized Home"
+        )
+        let personalized = application.descendants(matching: .any)
+            .matching(identifier: "home-shortcut-timo").firstMatch
+        XCTAssertFalse(personalized.exists, "Unverified family account must not inherit Nico shortcuts")
+        attachScreenshot("family-unverified-rooms-home", app: application)
+    }
+
     func testAccessibilityCoreScreenRenders() {
         let application = launch("home")
         XCTAssertTrue(application.staticTexts["Häufig genutzt"].waitForExistence(timeout: 3))

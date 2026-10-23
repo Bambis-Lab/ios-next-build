@@ -42,7 +42,7 @@ enum ProfileCatalog {
         case .juli:
             ProfileDefinition(profile: .juli, roomNames: ["Juli Zimmer"], favoriteEntityIDs: [])
         case .gabi:
-            ProfileDefinition(profile: .gabi, roomNames: ["Zuhause"], favoriteEntityIDs: [])
+            ProfileDefinition(profile: .gabi, roomNames: ["Wohnzimmer", "Flur"], favoriteEntityIDs: [])
         }
     }
 }

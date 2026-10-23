@@ -106,6 +106,7 @@ struct AdminControlConfiguration: Equatable, Sendable {
 
     let baseURL: URL
     let ownerToken: String
+    var ownerDeviceSession: String? = nil
 }
 
 enum AdminControlError: LocalizedError {
@@ -414,6 +415,9 @@ actor AdminControlClient {
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(configuration.ownerToken)", forHTTPHeaderField: "Authorization")
+        if let deviceSession = configuration.ownerDeviceSession {
+            request.setValue(deviceSession, forHTTPHeaderField: "X-Owner-Device-Session")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         for (name, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: name) }
@@ -439,6 +443,9 @@ actor AdminControlClient {
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(configuration.ownerToken)", forHTTPHeaderField: "Authorization")
+        if let deviceSession = configuration.ownerDeviceSession {
+            request.setValue(deviceSession, forHTTPHeaderField: "X-Owner-Device-Session")
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in extraHeaders { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await session.data(for: request)
@@ -500,6 +507,8 @@ final class AdminControlModel {
     private let tokenAccount = "ownerAdminToken"
     private let enrollmentSecretAccount = "ownerDeviceEnrollmentSecret"
     private var configuration: AdminControlConfiguration?
+    private var familyApprovedOwnerUserID: String?
+    private var familyApprovedDeviceID: String?
     private var deviceSessionToken: String?
     private var breakGlassSessionToken: String?
     private var lastEventSequence = 0
@@ -514,7 +523,55 @@ final class AdminControlModel {
         restoreConfiguration()
     }
 
+    func configureApprovedFamilyOwner(_ owner: FamilyOwnerSession, endpoint: URL) throws {
+        guard FamilyBootstrapClient.configuredURL() == endpoint,
+              owner.role == "owner",
+              owner.isValid(haUserID: owner.haUserID, deviceID: owner.deviceID) else {
+            throw AdminControlError.forbidden
+        }
+        let sameIdentity = familyApprovedOwnerUserID == owner.haUserID &&
+            familyApprovedDeviceID == owner.deviceID && configuration?.baseURL == endpoint
+        if !sameIdentity { invalidateOwnerReadTasks() }
+        familyApprovedOwnerUserID = owner.haUserID
+        familyApprovedDeviceID = owner.deviceID
+        // No Master token, enrollment secret or short-lived Owner grant is
+        // persisted in Keychain or UserDefaults by the family path.
+        configuration = AdminControlConfiguration(
+            baseURL: endpoint,
+            ownerToken: owner.accessToken,
+            ownerDeviceSession: owner.deviceSession
+        )
+        deviceSessionToken = owner.deviceSession
+        deviceSessionExpiresAt = Date(timeIntervalSince1970: TimeInterval(owner.expiresAt))
+        deviceBindingPhase = .trusted(Date(timeIntervalSince1970: TimeInterval(owner.expiresAt)))
+        // Renewal must not unexpectedly lock an already authenticated Owner.
+        if !sameIdentity { state = .locked }
+    }
+
+    func clearFamilyOwnerSession() {
+        invalidateOwnerReadTasks()
+        familyApprovedOwnerUserID = nil
+        familyApprovedDeviceID = nil
+        configuration = nil
+        deviceSessionToken = nil
+        deviceSessionExpiresAt = nil
+        breakGlassSessionToken = nil
+        breakGlassExpiresAt = nil
+        backendStatus = nil
+        auditEvents = []
+        supportTickets = []
+        ticketDetails = [:]
+        projectRoutes = []
+        lastDispatch = nil
+        lastError = nil
+        resetV2State()
+        state = .notConfigured
+    }
+
     func configure(endpoint: String, ownerToken: String, enrollmentSecret: String = "") throws {
+        guard FamilyBootstrapClient.configuredURL() == nil else {
+            throw AdminControlError.forbidden
+        }
         invalidateOwnerReadTasks()
         guard let url = URL(string: endpoint), url.scheme?.lowercased() == "https", !ownerToken.isEmpty else {
             throw AdminControlError.invalidConfiguration
@@ -822,15 +879,31 @@ final class AdminControlModel {
             try await authenticateOwner(reason: "Break-Glass für 5 Minuten öffnen")
             try await ensureDeviceSession()
             guard let deviceSessionToken else { throw AdminControlError.deviceBindingFailed }
-            let identity = try OwnerDeviceBindingStore.identity()
+            // Family Owner approval trusts the same registered P-256 key.
+            // The legacy Owner key belongs only to legacy non-family sessions.
+            let deviceID: String
+            if familyApprovedOwnerUserID != nil {
+                let familyIdentity = try FamilyDeviceBinding.identity()
+                guard familyIdentity.deviceID == familyApprovedDeviceID else {
+                    throw AdminControlError.deviceBindingFailed
+                }
+                deviceID = familyIdentity.deviceID
+            } else {
+                deviceID = try OwnerDeviceBindingStore.identity().deviceID
+            }
             let challenge = try await client.deviceChallengeV2(
-                deviceID: identity.deviceID,
+                deviceID: deviceID,
                 purpose: "break_glass",
                 configuration: configuration
             )
-            let signature = try OwnerDeviceBindingStore.sign(challengeBase64: challenge.challenge)
+            let signature: String
+            if familyApprovedOwnerUserID != nil {
+                signature = try FamilyDeviceBinding.sign(challenge: challenge.challenge)
+            } else {
+                signature = try OwnerDeviceBindingStore.sign(challengeBase64: challenge.challenge)
+            }
             let session = try await client.breakGlassV2(
-                deviceID: identity.deviceID,
+                deviceID: deviceID,
                 challengeID: challenge.challengeID,
                 signature: signature,
                 reason: normalized,
@@ -855,6 +928,15 @@ final class AdminControlModel {
         if let deviceSessionExpiresAt, deviceSessionToken != nil, deviceSessionExpiresAt.timeIntervalSinceNow > 30 {
             deviceBindingPhase = .trusted(deviceSessionExpiresAt)
             return
+        }
+        // The family credential already represents an independently
+        // approved, bound device. Never re-enroll a second legacy key using
+        // an absent Owner enrollment secret.
+        if familyApprovedOwnerUserID != nil {
+            deviceSessionToken = nil
+            deviceSessionExpiresAt = nil
+            deviceBindingPhase = .failed("Owner-Gerätesitzung abgelaufen; erneute HA-Freigabe erforderlich.")
+            throw AdminControlError.deviceBindingFailed
         }
         guard v2Capabilities?.capabilities.contains("device_binding") == true else {
             deviceBindingPhase = .unavailable
@@ -1087,6 +1169,8 @@ final class AdminControlModel {
     }
 
     private func restoreConfiguration() {
+        // A family-mode login cannot silently inherit a legacy Owner master token.
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard let endpoint = UserDefaults.standard.string(forKey: endpointKey),
               let url = URL(string: endpoint),
               let token = try? KeychainStore.value(account: tokenAccount),

@@ -20,7 +20,14 @@ struct AdminAreaView: View {
     var body: some View {
         ZStack {
             OwnerBackground()
-            if factoryEmbedded {
+            if FamilyBootstrapClient.configuredURL() != nil &&
+               appModel?.registeredFamilyProfile != .nico {
+                ContentUnavailableView(
+                    "Owner-Zugriff nicht verfügbar",
+                    systemImage: "lock.shield",
+                    description: Text("Für diesen HA-Benutzer ist kein Owner-Zugang freigegeben.")
+                )
+            } else if factoryEmbedded {
                 ownerContent
             } else {
                 NavigationStack {
@@ -43,6 +50,46 @@ struct AdminAreaView: View {
         .sheet(isPresented: $isPresentingFactoryPreview) {
             NavigationStack { FactoryPreviewView() }
         }
+        .task(id: "\(appModel?.homeAssistantCurrentUser?.id ?? "")|\(appModel?.registeredFamilyProfile?.rawValue ?? "")") {
+            guard FamilyBootstrapClient.configuredURL() != nil else { return }
+            model.clearFamilyOwnerSession()
+            guard let appModel, appModel.registeredFamilyProfile == .nico,
+                  let approvedUserID = appModel.homeAssistantCurrentUser?.id,
+                  let endpoint = FamilyBootstrapClient.configuredURL() else { return }
+            // Credentials are short-lived and never stored persistently.
+            // Renewal is scoped to this visible Owner view and current HA user.
+            while !Task.isCancelled {
+                guard appModel.registeredFamilyProfile == .nico,
+                      appModel.homeAssistantCurrentUser?.id == approvedUserID else {
+                    model.clearFamilyOwnerSession()
+                    return
+                }
+                do {
+                    let session = try await appModel.requestApprovedFamilyOwnerSession()
+                    guard !Task.isCancelled,
+                          appModel.homeAssistantCurrentUser?.id == approvedUserID else {
+                        model.clearFamilyOwnerSession()
+                        return
+                    }
+                    try model.configureApprovedFamilyOwner(session, endpoint: endpoint)
+                    let secondsUntilRenewal = session.expiresAt - Int(Date().timeIntervalSince1970) - 120
+                    try await Task.sleep(for: .seconds(max(20, secondsUntilRenewal)))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    model.clearFamilyOwnerSession()
+                    guard !Task.isCancelled else { return }
+                    model.lastError = "Owner-Gerät benötigt separate Freigabe oder eine neue Sitzung: " + error.localizedDescription
+                    // No legacy token fallback or automatic device approval.
+                    return
+                }
+            }
+        }
+        .onChange(of: appModel?.homeAssistantCurrentUser?.id) { _, _ in
+            if FamilyBootstrapClient.configuredURL() != nil {
+                model.clearFamilyOwnerSession()
+            }
+        }
         .onAppear {
             let active = scenePhase == .active
             model.setPollingActive(active)
@@ -56,8 +103,14 @@ struct AdminAreaView: View {
             let active = phase == .active
             model.setPollingActive(active)
             runtime.setRunnerPollingActive("control-center", active: active)
-            if active, case .unlocked = model.state {
-                Task { await model.refreshStatusV2() }
+            if active {
+                if let expiry = model.deviceSessionExpiresAt,
+                   expiry.timeIntervalSinceNow <= 30,
+                   FamilyBootstrapClient.configuredURL() != nil {
+                    model.clearFamilyOwnerSession()
+                } else if case .unlocked = model.state {
+                    Task { await model.refreshStatusV2() }
+                }
             }
         }
     }
@@ -165,12 +218,18 @@ struct AdminAreaView: View {
                     tint: .blue
                 )
                 VStack(alignment: .leading, spacing: 12) {
-                    Button("Control Center einrichten") {
-                        isPresentingConfiguration = true
+                    if FamilyBootstrapClient.configuredURL() == nil {
+                        Button("Control Center einrichten") {
+                            isPresentingConfiguration = true
+                        }
+                        .buttonStyle(.glassProminent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("control-center-setup-action")
+                    } else {
+                        Text("Owner-Gerätefreigabe erforderlich. Neue Geräte müssen zuerst im Backend durch den Owner genehmigt werden.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.glassProminent)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("control-center-setup-action")
                     Button("Factory Vorschau") {
                         isPresentingFactoryPreview = true
                     }

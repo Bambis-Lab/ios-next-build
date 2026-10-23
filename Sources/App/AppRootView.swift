@@ -9,7 +9,11 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            if ProcessInfo.processInfo.arguments.contains("--nico-room-layout-acceptance") {
+            if ProcessInfo.processInfo.arguments.contains("--fam-acceptance-mika") {
+                FamilyAcceptanceView(profile: .mika)
+            } else if ProcessInfo.processInfo.arguments.contains("--fam-acceptance-juli") {
+                FamilyAcceptanceView(profile: .juli)
+            } else if ProcessInfo.processInfo.arguments.contains("--nico-room-layout-acceptance") {
                 NicoRoomVisualAcceptanceView()
             } else if isMotionAcceptanceMode {
                 MotionAcceptanceView()
@@ -43,6 +47,12 @@ struct AppRootView: View {
         }
         .task(id: appModel.isConnected) {
             guard !isTestHarnessMode else { return }
+            await runtime.lifecycleCoordinator.homeAssistantConnectionChanged(
+                appModel.isConnected, appModel: appModel
+            )
+        }
+        .task(id: appModel.registeredFamilyProfile) {
+            guard !isTestHarnessMode, appModel.registeredFamilyProfile != nil else { return }
             await runtime.lifecycleCoordinator.homeAssistantConnectionChanged(
                 appModel.isConnected, appModel: appModel
             )
@@ -115,6 +125,8 @@ struct AppRootView: View {
         isLiveCardTestMode || isAnimationAcceptanceMode || isProductAcceptanceMode
             || isMotionAcceptanceMode || ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance")
             || ProcessInfo.processInfo.arguments.contains("--factory-workspace-acceptance")
+            || ProcessInfo.processInfo.arguments.contains("--fam-acceptance-mika")
+            || ProcessInfo.processInfo.arguments.contains("--fam-acceptance-juli")
             || ProcessInfo.processInfo.arguments.contains("--nico-room-layout-acceptance")
     }
 
@@ -199,8 +211,10 @@ private struct ConnectionLandingView: View {
                     Text("Ohne Home Assistant einrichten, ansehen oder verwalten.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    service("Chat Relay", detail: "Verschlüsselter Chat · eigener Zugang",
-                            symbol: "message.badge.shield.fill", route: .chat)
+                    if !appModel.familyBrokerConfigured {
+                        service("Chat Relay", detail: "Verschlüsselter Chat · eigener Zugang",
+                                symbol: "message.badge.shield.fill", route: .chat)
+                    }
                     // Legacy screenshots exercise these historical routes without network access.
                     // Production exposes a single admin entry; no Owner or Runner entitlement is merged.
                     if ProcessInfo.processInfo.arguments.contains("--preconnect-ui-acceptance") {
@@ -209,8 +223,10 @@ private struct ConnectionLandingView: View {
                         service("Runner", detail: "Runner-Dienst · Ressourcen und Steuerung",
                                 symbol: "server.rack", route: .runner)
                     }
-                    service("Factory", detail: "Owner · Runner · Live · MCP und Governance",
-                            symbol: "network", route: .factory)
+                    if !appModel.familyBrokerConfigured {
+                        service("Factory", detail: "Owner · Runner · Live · MCP und Governance",
+                                symbol: "network", route: .factory)
+                    }
                 }
 
                 Label("Kein Login für die Navigation erforderlich. Live-Aktionen benötigen ihre jeweiligen Berechtigungen.",

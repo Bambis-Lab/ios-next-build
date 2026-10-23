@@ -49,27 +49,42 @@ struct SystemView: View {
                             .lineLimit(1)
                     }
                 }
-                NavigationLink {
-                    FactoryStandaloneView(appModel: appModel)
-                } label: {
-                    Label("Factory", systemImage: "network")
+                if appModel.registeredFamilyProfile == .nico {
+                    NavigationLink {
+                        FactoryStandaloneView(appModel: appModel)
+                    } label: {
+                        Label("Factory", systemImage: "network")
+                    }
+                    .accessibilityIdentifier("system-factory-workspace")
                 }
-                .accessibilityIdentifier("system-factory-workspace")
                 NavigationLink {
                     PermissionsCenterView(appModel: appModel)
                 } label: {
                     Label("Berechtigungen", systemImage: "checkmark.shield.fill")
                 }
-                NavigationLink {
-                    LiveOperationsView()
-                } label: {
-                    Label("Live Operations", systemImage: "waveform.path.ecg")
+                if appModel.registeredFamilyProfile == .nico {
+                    NavigationLink {
+                        LiveOperationsView()
+                    } label: {
+                        Label("Live Operations", systemImage: "waveform.path.ecg")
+                    }
+                    .accessibilityIdentifier("system-live-operations")
                 }
-                .accessibilityIdentifier("system-live-operations")
                 NavigationLink {
                     DiagnosticsView(appModel: appModel)
                 } label: {
                     Label("Diagnose", systemImage: "stethoscope")
+                }
+            }
+
+            Section("Familienkonto") {
+                if let profile = appModel.registeredFamilyProfile {
+                    LabeledContent("Profil", value: profile.title)
+                    LabeledContent("Berechtigung", value: profile == .nico ? "Owner-Gerätefreigabe erforderlich" : "Member")
+                } else {
+                    Text(appModel.familyRegistrationNotice ?? "Identität noch nicht bestätigt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 

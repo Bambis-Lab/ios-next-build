@@ -22,7 +22,11 @@ final class AppModel {
         }
     }
 
-    var selectedProfile: HomeProfile = .nico
+    // Safe generic presentation until the server verifies a family identity.
+    var selectedProfile: HomeProfile = .gabi
+    private(set) var registeredFamilyProfile: HomeProfile?
+    private(set) var familyRegistrationNotice: String?
+    @ObservationIgnored private var familyChatGrant: FamilyChatGrant?
     var connectionState: ConnectionState = .notConfigured
     var entities: [HomeAssistantEntity] = []
     private(set) var searchRevision: UInt64 = 0
@@ -89,6 +93,7 @@ final class AppModel {
     }
 
     var profileFavorites: [HomeAssistantEntity] {
+        guard !familyBrokerConfigured || registeredFamilyProfile != nil else { return [] }
         let explicit = profileDefinition.favoriteEntityIDs.compactMap { requestedID in
             if let index = entityIndexByID[requestedID], entities.indices.contains(index) {
                 return entities[index]
@@ -136,6 +141,10 @@ final class AppModel {
     }
 
     func connectOAuth(using configuration: HomeAssistantOAuthConfiguration) async {
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
+        registeredFamilyProfile = nil
+        familyChatGrant = nil
+        homeAssistantCurrentUser = nil
         connectionState = .connecting
         do {
             let tokens = try await oauthService.authorize(using: configuration)
@@ -165,6 +174,11 @@ final class AppModel {
         persist: Bool = true,
         failurePrefix: String? = nil
     ) async {
+        // Must execute before the first asynchronous HA login/reconnect call.
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
+        registeredFamilyProfile = nil
+        familyChatGrant = nil
+        homeAssistantCurrentUser = nil
         let trace = IOSNextPerformance.begin("HA.Connect")
         defer { IOSNextPerformance.end("HA.Connect", trace) }
         connectionGeneration &+= 1
@@ -189,6 +203,10 @@ final class AppModel {
             reconnectAttempt = 0
             apply(snapshot)
             homeAssistantCurrentUser = snapshot.currentUser
+            registeredFamilyProfile = nil
+            familyChatGrant = nil
+            selectedProfile = .gabi
+            familyRegistrationNotice = "Familienprofil wird überprüft."
             connectionState = .connected
             isPresentingConnection = false
             observeStateChanges()
@@ -196,6 +214,11 @@ final class AppModel {
                 UserDefaults.standard.set(serverURL.absoluteString, forKey: serverURLKey)
                 try KeychainStore.save(accessToken, account: tokenAccount)
             }
+            await enrollFamilyAfterLogin(
+                homeAssistantUserID: snapshot.currentUser.id,
+                accessToken: accessToken,
+                generation: connectGeneration
+            )
         } catch {
             guard connectGeneration == connectionGeneration, !Task.isCancelled else { return }
             let message = error.localizedDescription
@@ -205,6 +228,107 @@ final class AppModel {
         }
     }
 
+    private func enrollFamilyAfterLogin(
+        homeAssistantUserID: String,
+        accessToken: String,
+        generation: UInt64
+    ) async {
+        guard let endpoint = FamilyBootstrapClient.configuredURL() else {
+            // Explicit legacy compatibility: the shipped personal 1.7.0 app
+            // starts on Nico's dashboard when family enrollment is disabled.
+            // This does NOT issue any Owner credentials or bypass HA ACLs.
+            selectedProfile = .nico
+            familyRegistrationNotice = nil
+            return
+        }
+        do {
+            let identity = try await FamilyBootstrapClient(baseURL: endpoint).enroll(
+                haToken: accessToken,
+                verifiedHAUserID: homeAssistantUserID
+            )
+            guard generation == connectionGeneration, homeAssistantCurrentUser?.id == homeAssistantUserID else {
+                return
+            }
+            registeredFamilyProfile = identity.profile
+            familyChatGrant = identity.chat
+            selectedProfile = identity.profile
+            familyRegistrationNotice = nil
+        } catch {
+            guard generation == connectionGeneration else { return }
+            registeredFamilyProfile = nil
+            familyChatGrant = nil
+            selectedProfile = .gabi
+            familyRegistrationNotice = "Familienregistrierung nicht verfügbar: " + error.localizedDescription
+        }
+    }
+
+    #if DEBUG
+    // Simulator-only deterministic identity fixture. No actual HA token,
+    // broker, P-256 registration or Owner device authorization is synthesized.
+    private var acceptanceFamilyBrokerOverride: Bool?
+
+    func seedVerifiedFamilyPreview() {
+        acceptanceFamilyBrokerOverride = true
+        registeredFamilyProfile = .nico
+        selectedProfile = .nico
+    }
+
+    func seedUnverifiedFamilyPreview() {
+        acceptanceFamilyBrokerOverride = true
+        registeredFamilyProfile = nil
+        selectedProfile = .gabi
+    }
+    #endif
+
+    var familyBrokerConfigured: Bool {
+        #if DEBUG
+        if let acceptanceFamilyBrokerOverride { return acceptanceFamilyBrokerOverride }
+        #endif
+        return FamilyBootstrapClient.configuredURL() != nil
+    }
+
+    func familyChatContext() -> FamilyChatContext? {
+        guard let endpoint = FamilyBootstrapClient.configuredURL(),
+              let grant = familyChatGrant, grant.isValid,
+              registeredFamilyProfile != nil,
+              let userID = homeAssistantCurrentUser?.id,
+              let device = try? FamilyDeviceBinding.identity() else { return nil }
+        return FamilyChatContext(
+            endpoint: endpoint, haUserID: userID, deviceID: device.deviceID, grant: grant
+        )
+    }
+
+    func refreshFamilyChatGrantIfNeeded(minimumValidity: Int = 30) async {
+        guard familyBrokerConfigured,
+              familyChatGrant == nil ||
+                  (familyChatGrant?.expiresAt ?? 0) <= Int(Date().timeIntervalSince1970) + minimumValidity,
+              let configuration = currentConfiguration,
+              let user = homeAssistantCurrentUser else { return }
+        await enrollFamilyAfterLogin(
+            homeAssistantUserID: user.id,
+            accessToken: configuration.accessToken,
+            generation: connectionGeneration
+        )
+    }
+
+    func requestApprovedFamilyOwnerSession() async throws -> FamilyOwnerSession {
+        guard registeredFamilyProfile == .nico,
+              let userID = homeAssistantCurrentUser?.id,
+              let configuration = currentConfiguration,
+              let url = FamilyBootstrapClient.configuredURL() else {
+            throw FamilyBootstrapError.unauthorized
+        }
+        let generation = connectionGeneration
+        let session = try await FamilyBootstrapClient(baseURL: url).ownerSession(
+            haToken: configuration.accessToken, verifiedHAUserID: userID
+        )
+        guard generation == connectionGeneration, homeAssistantCurrentUser?.id == userID,
+              registeredFamilyProfile == .nico else {
+            throw FamilyBootstrapError.unauthorized
+        }
+        return session
+    }
+
     func chatBootstrapIdentityContext() async throws -> (baseURL: URL, accessToken: String, userID: String) {
         guard let configuration = currentConfiguration else { throw HomeAssistantClientError.disconnected }
         let identity = try await client.currentUserIdentity()
@@ -212,6 +336,7 @@ final class AppModel {
     }
 
     func disconnect() {
+        IOSNextRuntime.shared.lifecycleCoordinator.invalidateForAccountTransition()
         connectionGeneration &+= 1
         deviceCommands.invalidatePending()
         entityStateRevisions.removeAll()
@@ -233,6 +358,10 @@ final class AppModel {
         entityIndexByID.removeAll()
         entityIDsByDomain.removeAll()
         homeAssistantCurrentUser = nil
+        registeredFamilyProfile = nil
+        familyChatGrant = nil
+        selectedProfile = .gabi
+        familyRegistrationNotice = nil
         connectionState = .notConfigured
     }
 

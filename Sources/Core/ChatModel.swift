@@ -45,6 +45,8 @@ final class ChatModel {
 
     private let relay = ChatRelayClient()
     private var configuration: ChatConfiguration?
+    private var isFamilyCredentialActive = false
+    private var familyRenewalTask: Task<Void, Never>?
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
@@ -102,6 +104,63 @@ final class ChatModel {
     }
 
     private func performStart(using appModel: AppModel, epoch: UInt64) async {
+        if appModel.familyBrokerConfigured {
+            // Do not fall back to an insecure legacy chat-bootstrap route while
+            // the registered family device identity is still being verified.
+            guard appModel.registeredFamilyProfile != nil else {
+                state = .offline("Familienregistrierung wird überprüft.")
+                return
+            }
+            await appModel.refreshFamilyChatGrantIfNeeded()
+            guard epoch == startupEpoch, !Task.isCancelled,
+                  let family = appModel.familyChatContext() else {
+                state = .offline("Familien-Chat-Berechtigung konnte nicht bestätigt werden.")
+                return
+            }
+            let previouslyBoundHAUser = UserDefaults.standard.string(forKey: haUserKey)
+            if let previouslyBoundHAUser, previouslyBoundHAUser != family.haUserID {
+                forgetConfiguration(preservingStartup: true)
+            }
+            let existing = configuration
+            if existing?.token != family.grant.accessToken ||
+               existing?.userID != family.haUserID ||
+               existing?.baseURL != family.endpoint ||
+               existing?.deviceID != family.deviceID ||
+               !isFamilyCredentialActive {
+                let recipient = previouslyBoundHAUser == family.haUserID && !recipientUserID.isEmpty
+                    ? recipientUserID : family.haUserID
+                do {
+                    if ChatDeviceKeys.mayMigrateLegacyKeys(
+                        previouslyBoundHAUserID: previouslyBoundHAUser,
+                        verifiedHAUserID: family.haUserID,
+                        hasOldChatConfiguration: existing != nil,
+                        alreadyUsingFamilyCredential: isFamilyCredentialActive
+                    ) {
+                        // Never import old keys after an HA account switch.
+                        // Preserve old key material for rollback / original chats.
+                        try ChatDeviceKeys.migrateLegacyKeysForVerifiedAccount(family.haUserID)
+                    }
+                    try configure(
+                        endpoint: family.endpoint.absoluteString,
+                        token: family.grant.accessToken,
+                        userID: family.haUserID,
+                        recipientUserID: recipient,
+                        deviceID: family.deviceID,
+                        preservingStartup: true
+                    )
+                    UserDefaults.standard.set(family.haUserID, forKey: haUserKey)
+                    isFamilyCredentialActive = true
+                } catch {
+                    state = .offline("Familien-Chat-Konfiguration fehlgeschlagen.")
+                    return
+                }
+            }
+            await performRelayStart(epoch: epoch)
+            if case .online = state {
+                scheduleFamilyRenewal(using: appModel, grant: family.grant)
+            }
+            return
+        }
         if let context = appModel.chatBootstrapContext() {
             let boundHAUser = UserDefaults.standard.string(forKey: haUserKey)
             if let boundHAUser, boundHAUser != context.homeAssistantUserID {
@@ -146,16 +205,27 @@ final class ChatModel {
         await performRelayStart(epoch: epoch)
     }
 
-    func configure(endpoint: String, token: String, userID: String, recipientUserID: String) throws {
+    func configure(
+        endpoint: String, token: String, userID: String, recipientUserID: String,
+        deviceID explicitDeviceID: String? = nil,
+        preservingStartup: Bool = false
+    ) throws {
         guard let url = URL(string: endpoint), isAllowedEndpoint(url),
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
             throw ChatError.invalidConfiguration
         }
-        let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
+        let deviceID = explicitDeviceID ??
+            UserDefaults.standard.string(forKey: deviceKey) ??
+            "ios-\(UUID().uuidString.lowercased())"
         let replacesIdentity = configuration.map {
             $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
         } ?? false
-        stop()
+        if preservingStartup {
+            receiveTask?.cancel()
+            receiveTask = nil
+        } else {
+            stop()
+        }
         configurationGeneration &+= 1
         if replacesIdentity {
             draft = ""
@@ -164,17 +234,25 @@ final class ChatModel {
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
             ChatMediaThumbnailCache.shared.clear()
         }
+        // Persist the credential first. A failed Keychain write must not leave
+        // new account metadata paired with an unrelated previous account token.
+        try KeychainStore.save(token, account: tokenAccount)
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
         UserDefaults.standard.set(userID, forKey: userKey)
         UserDefaults.standard.set(recipientUserID, forKey: recipientKey)
-        try KeychainStore.save(token, account: tokenAccount)
         self.recipientUserID = recipientUserID
         configuration = ChatConfiguration(baseURL: url, token: token, userID: userID, deviceID: deviceID)
         state = .connecting
     }
 
     func start() async {
+        // Pre-HA standalone chat cannot reuse a stale legacy credential when
+        // authenticated family enrollment is mandatory.
+        guard FamilyBootstrapClient.configuredURL() == nil || isFamilyCredentialActive else {
+            state = .offline("Zuerst mit deinem Home-Assistant-Familienkonto anmelden.")
+            return
+        }
         if let existingStartupTask = startupTask {
             await existingStartupTask.value
             return
@@ -200,7 +278,9 @@ final class ChatModel {
         guard epoch == startupEpoch, !Task.isCancelled,
               receiveTask == nil, let configuration else { return }
         do {
-            let keys = try ChatDeviceKeys.loadOrCreate()
+            let keys = try ChatDeviceKeys.loadOrCreate(
+                forUserID: isFamilyCredentialActive ? configuration.userID : nil
+            )
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             self.keys = keys
             ownSafetyNumber = keys.safetyNumber
@@ -251,6 +331,8 @@ final class ChatModel {
         startupToken = nil
         receiveTask?.cancel()
         receiveTask = nil
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
         // Decrypted previews must not outlive an app/chat lifecycle stop.
         ChatMediaThumbnailCache.shared.clear()
         if configuration != nil { state = .offline("Empfang pausiert") }
@@ -270,6 +352,13 @@ final class ChatModel {
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
+        isFamilyCredentialActive = false
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
+        keys = nil
+        ownSafetyNumber = ""
+        recipientSafetyNumbers = []
+        lastError = nil
         contacts = []
         recipientUserID = ""
         accessRole = nil
@@ -314,7 +403,9 @@ final class ChatModel {
               isAllowedEndpoint(endpoint) else {
             throw ChatError.invalidConfiguration
         }
-        stop()
+        // Do not cancel the startup Task that owns this automatic bootstrap.
+        receiveTask?.cancel()
+        receiveTask = nil
         state = .connecting
         let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
@@ -345,6 +436,22 @@ final class ChatModel {
             userID: bootstrap.userID,
             deviceID: deviceID
         )
+    }
+
+    private func scheduleFamilyRenewal(using appModel: AppModel, grant: FamilyChatGrant) {
+        familyRenewalTask?.cancel()
+        let remaining = grant.expiresAt - Int(Date().timeIntervalSince1970)
+        let delay = max(20, remaining - 120)
+        familyRenewalTask = Task { [weak self, weak appModel] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, let appModel else { return }
+            self.familyRenewalTask = nil
+            await appModel.refreshFamilyChatGrantIfNeeded(minimumValidity: 180)
+            guard !Task.isCancelled, appModel.familyChatContext() != nil else { return }
+            self.receiveTask?.cancel()
+            self.receiveTask = nil
+            await self.start(using: appModel)
+        }
     }
 
     func sendDraft() async {
@@ -590,6 +697,9 @@ final class ChatModel {
     }
 
     private func restoreConfiguration() {
+        // Family deployments must never restore a stale legacy chat bearer
+        // before a verified HA user and registered device are established.
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard let endpoint = UserDefaults.standard.string(forKey: endpointKey),
               let url = URL(string: endpoint), isAllowedEndpoint(url),
               let userID = UserDefaults.standard.string(forKey: userKey),
