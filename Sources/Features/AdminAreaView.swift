@@ -50,6 +50,25 @@ struct AdminAreaView: View {
         .sheet(isPresented: $isPresentingFactoryPreview) {
             NavigationStack { FactoryPreviewView() }
         }
+        .task(id: appModel?.registeredFamilyProfile) {
+            guard FamilyBootstrapClient.configuredURL() != nil else { return }
+            model.clearFamilyOwnerSession()
+            guard let appModel, appModel.registeredFamilyProfile == .nico,
+                  let endpoint = FamilyBootstrapClient.configuredURL() else { return }
+            do {
+                let session = try await appModel.requestApprovedFamilyOwnerSession()
+                guard !Task.isCancelled, appModel.registeredFamilyProfile == .nico else { return }
+                try model.configureApprovedFamilyOwner(session, endpoint: endpoint)
+            } catch {
+                guard !Task.isCancelled else { return }
+                model.lastError = "Owner-Gerät benötigt separate Freigabe: " + error.localizedDescription
+            }
+        }
+        .onChange(of: appModel?.homeAssistantCurrentUser?.id) { _, _ in
+            if FamilyBootstrapClient.configuredURL() != nil {
+                model.clearFamilyOwnerSession()
+            }
+        }
         .onAppear {
             let active = scenePhase == .active
             model.setPollingActive(active)
@@ -172,12 +191,18 @@ struct AdminAreaView: View {
                     tint: .blue
                 )
                 VStack(alignment: .leading, spacing: 12) {
-                    Button("Control Center einrichten") {
-                        isPresentingConfiguration = true
+                    if FamilyBootstrapClient.configuredURL() == nil {
+                        Button("Control Center einrichten") {
+                            isPresentingConfiguration = true
+                        }
+                        .buttonStyle(.glassProminent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("control-center-setup-action")
+                    } else {
+                        Text("Owner-Gerätefreigabe erforderlich. Neue Geräte müssen zuerst im Backend durch den Owner genehmigt werden.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.glassProminent)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("control-center-setup-action")
                     Button("Factory Vorschau") {
                         isPresentingFactoryPreview = true
                     }
