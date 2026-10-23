@@ -44,13 +44,20 @@ struct ProductAcceptanceRootView: View {
     private let options: ProductAcceptanceOptions
     @State private var screen: ProductAcceptanceScreen
     @State private var isDarkMode: Bool
-    @State private var appModel = AppModel.preview
+    @State private var appModel: AppModel
     @State private var chatModel = ChatModel.preview
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
         let initialScreen = Self.screen(from: arguments)
         let options = ProductAcceptanceOptions(arguments: arguments)
         self.options = options
+        let fixtureModel = AppModel.preview
+        #if DEBUG
+        if arguments.contains("--product-ui-test-unverified") {
+            fixtureModel.seedUnverifiedFamilyPreview()
+        }
+        #endif
+        _appModel = State(initialValue: fixtureModel)
         _screen = State(initialValue: initialScreen)
         _isDarkMode = State(initialValue: options.initialDarkMode)
     }
