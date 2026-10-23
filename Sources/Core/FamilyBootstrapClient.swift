@@ -51,6 +51,13 @@ enum FamilyDeviceBinding {
     }
 }
 
+struct FamilyChatContext: Sendable {
+    let endpoint: URL
+    let haUserID: String
+    let deviceID: String
+    let grant: FamilyChatGrant
+}
+
 struct FamilyChatGrant: Decodable, Equatable, Sendable {
     let accessToken: String
     let expiresAt: Int
