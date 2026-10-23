@@ -288,7 +288,7 @@ jobs:
           (cd build/rc171-out && /usr/bin/zip -qry IOSNext-1.7.1-build29-UNSIGNED-RC.ipa Payload)
           unzip -t build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa >/dev/null
           shasum -a 256 build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa > build/rc171-out/SHA256SUMS.txt
-          printf 'source_sha=%s\\nbackend_sha=%s\\nstaging_evidence_sha256=%s\\nstatus=UNSIGNED_RC_NOT_PUBLISHED\\n' "$GITHUB_SHA" "$STAGED_BACKEND_SHA" "$STAGING_EVIDENCE_SHA256" > build/rc171-out/provenance.txt
+          printf 'source_sha=%s\nbackend_sha=%s\nstaging_evidence_sha256=%s\nstatus=UNSIGNED_RC_NOT_PUBLISHED\n' "$GITHUB_SHA" "$STAGED_BACKEND_SHA" "$STAGING_EVIDENCE_SHA256" > build/rc171-out/provenance.txt
       - name: Upload unsigned RC to CI artifact storage only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
