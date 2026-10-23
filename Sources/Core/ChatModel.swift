@@ -45,6 +45,7 @@ final class ChatModel {
 
     private let relay = ChatRelayClient()
     private var configuration: ChatConfiguration?
+    private var isFamilyCredentialActive = false
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
@@ -102,6 +103,49 @@ final class ChatModel {
     }
 
     private func performStart(using appModel: AppModel, epoch: UInt64) async {
+        if appModel.familyBrokerConfigured {
+            // Do not fall back to an insecure legacy chat-bootstrap route while
+            // the registered family device identity is still being verified.
+            guard appModel.registeredFamilyProfile != nil else {
+                state = .offline("Familienregistrierung wird überprüft.")
+                return
+            }
+            await appModel.refreshFamilyChatGrantIfNeeded()
+            guard epoch == startupEpoch, !Task.isCancelled,
+                  let family = appModel.familyChatContext() else {
+                state = .offline("Familien-Chat-Berechtigung konnte nicht bestätigt werden.")
+                return
+            }
+            let previouslyBoundHAUser = UserDefaults.standard.string(forKey: haUserKey)
+            if let previouslyBoundHAUser, previouslyBoundHAUser != family.haUserID {
+                forgetConfiguration(preservingStartup: true)
+            }
+            let existing = configuration
+            if existing?.token != family.grant.accessToken ||
+               existing?.userID != family.haUserID ||
+               existing?.baseURL != family.endpoint ||
+               existing?.deviceID != family.deviceID ||
+               !isFamilyCredentialActive {
+                let recipient = previouslyBoundHAUser == family.haUserID && !recipientUserID.isEmpty
+                    ? recipientUserID : family.haUserID
+                do {
+                    try configure(
+                        endpoint: family.endpoint.absoluteString,
+                        token: family.grant.accessToken,
+                        userID: family.haUserID,
+                        recipientUserID: recipient,
+                        deviceID: family.deviceID
+                    )
+                    UserDefaults.standard.set(family.haUserID, forKey: haUserKey)
+                    isFamilyCredentialActive = true
+                } catch {
+                    state = .offline("Familien-Chat-Konfiguration fehlgeschlagen.")
+                    return
+                }
+            }
+            await performRelayStart(epoch: epoch)
+            return
+        }
         if let context = appModel.chatBootstrapContext() {
             let boundHAUser = UserDefaults.standard.string(forKey: haUserKey)
             if let boundHAUser, boundHAUser != context.homeAssistantUserID {
@@ -146,12 +190,17 @@ final class ChatModel {
         await performRelayStart(epoch: epoch)
     }
 
-    func configure(endpoint: String, token: String, userID: String, recipientUserID: String) throws {
+    func configure(
+        endpoint: String, token: String, userID: String, recipientUserID: String,
+        deviceID explicitDeviceID: String? = nil
+    ) throws {
         guard let url = URL(string: endpoint), isAllowedEndpoint(url),
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
             throw ChatError.invalidConfiguration
         }
-        let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
+        let deviceID = explicitDeviceID ??
+            UserDefaults.standard.string(forKey: deviceKey) ??
+            "ios-\(UUID().uuidString.lowercased())"
         let replacesIdentity = configuration.map {
             $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
         } ?? false
@@ -200,7 +249,9 @@ final class ChatModel {
         guard epoch == startupEpoch, !Task.isCancelled,
               receiveTask == nil, let configuration else { return }
         do {
-            let keys = try ChatDeviceKeys.loadOrCreate()
+            let keys = try ChatDeviceKeys.loadOrCreate(
+                forUserID: isFamilyCredentialActive ? configuration.userID : nil
+            )
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             self.keys = keys
             ownSafetyNumber = keys.safetyNumber
@@ -270,6 +321,7 @@ final class ChatModel {
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
+        isFamilyCredentialActive = false
         contacts = []
         recipientUserID = ""
         accessRole = nil
