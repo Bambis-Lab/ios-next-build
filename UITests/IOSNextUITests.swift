@@ -350,6 +350,39 @@ final class IOSNextUITests: XCTestCase {
     func testPrimaryProductScreensRenderLightAndDark() {
         captureAllProductScreens(prefix: "product-light", dark: false)
         captureAllProductScreens(prefix: "product-dark", dark: true)
+
+        // Four additional screenshots of the actual redesigned pages with
+        // synthetic data. Safe for iPhone CI without Owner/Runner credentials.
+        for screen in ["runner", "projects"] {
+            for dark in [false, true] {
+                let mode = dark ? "dark" : "light"
+                let arguments = dark ? ["--product-ui-test-dark"] : []
+                let application = launch(screen, extraArguments: arguments)
+                if screen == "runner" {
+                    XCTAssertTrue(
+                        application.staticTexts["Kapazität"].waitForExistence(timeout: 8),
+                        "Runner dashboard capacity section did not render"
+                    )
+                    XCTAssertTrue(
+                        application.staticTexts["Laufende Jobs"].waitForExistence(timeout: 5),
+                        "Runner fixture did not render active jobs"
+                    )
+                } else {
+                    XCTAssertTrue(
+                        application.staticTexts["Deine Projekte"].waitForExistence(timeout: 8),
+                        "Owner Projects screen did not render"
+                    )
+                    let populatedProject = application.descendants(matching: .any)
+                        .matching(NSPredicate(format: "label CONTAINS[c] %@", "Master Control Factory"))
+                        .firstMatch
+                    XCTAssertTrue(
+                        populatedProject.waitForExistence(timeout: 5),
+                        "Project fixture is not populated or accessible"
+                    )
+                }
+                attachScreenshot("g99-fix03-\(screen)-\(mode)", app: application)
+            }
+        }
     }
 
     func testNativeTabNavigationAndMediaDetail() throws {

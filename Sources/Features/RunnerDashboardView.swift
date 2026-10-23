@@ -6,6 +6,14 @@ struct RunnerDashboardView: View {
     @State private var pendingAction: RunnerAction?
     @State private var showsTechnicalDetails = false
 
+    private var isLocalG99Fixture: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--product-ui-test-screen=runner")
+#else
+        false
+#endif
+    }
+
     init() {
         _model = State(initialValue: IOSNextRuntime.shared.runnerModel)
     }
@@ -39,9 +47,11 @@ struct RunnerDashboardView: View {
         .navigationTitle("Runner")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            guard !isLocalG99Fixture else { return }
             runtime.setRunnerPollingActive("runner-dashboard", active: true)
         }
         .onDisappear {
+            guard !isLocalG99Fixture else { return }
             runtime.setRunnerPollingActive("runner-dashboard", active: false)
         }
         .alert("Runner-Aktion fehlgeschlagen", isPresented: Binding(
@@ -60,7 +70,10 @@ struct RunnerDashboardView: View {
                 .labelStyle(.iconOnly)
             }
         }
-        .refreshable { await model.refresh() }
+        .refreshable {
+            guard !isLocalG99Fixture else { return }
+            await model.refresh()
+        }
         .sheet(isPresented: $model.isPresentingConfiguration) {
             RunnerConfigurationView(model: model)
         }
@@ -157,7 +170,7 @@ struct RunnerDashboardView: View {
                                 Image(systemName: "gearshape.2.fill").foregroundStyle(.blue)
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(job.name).font(.subheadline.weight(.semibold)).lineLimit(2)
-                                    Text(job.state.replacingOccurrences(of: "_", with: " ").localizedCapitalized)
+                                    Text(localizedJobState(job.state))
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength: 0)
@@ -290,13 +303,16 @@ struct RunnerDashboardView: View {
                     .accessibilityHidden(true)
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { heroMetadata(status) }
-                VStack(alignment: .leading, spacing: 8) { heroMetadata(status) }
+            // Two compact rows on iPhone instead of a four-line vertical fallback.
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
+                alignment: .leading, spacing: 8
+            ) {
+                heroMetadata(status)
             }
         }
-        .padding(20)
-        .ios27ContentSurface(radius: 28, elevated: true)
+        .padding(16)
+        .ios27ContentSurface(radius: 24, elevated: true)
         .accessibilityElement(children: .contain)
     }
 
@@ -314,7 +330,7 @@ struct RunnerDashboardView: View {
             .background(Color.primary.opacity(0.055), in: Capsule())
         }
         if let activeJobs = status.activeJobs?.count, activeJobs > 0 {
-            Label("\(activeJobs) Jobs aktiv", systemImage: "gearshape.2.fill")
+            Label("\(activeJobs) \(activeJobs == 1 ? "Job" : "Jobs") aktiv", systemImage: "gearshape.2.fill")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.blue)
                 .padding(.horizontal, 9)
@@ -469,7 +485,25 @@ struct RunnerDashboardView: View {
     }
 
     private func formattedDate(_ date: Date) -> String {
-        date.formatted(date: .abbreviated, time: .shortened)
+        date.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .shortened)
+                .locale(Locale(identifier: "de_DE"))
+        )
+    }
+
+    private func localizedJobState(_ state: String) -> String {
+        switch state.lowercased() {
+        case "in_progress", "running": return "Läuft"
+        case "queued": return "Wartet"
+        case "pending": return "Ausstehend"
+        case "completed", "resolved": return "Abgeschlossen"
+        case "success", "succeeded": return "Erfolgreich"
+        case "failure", "failed": return "Fehlgeschlagen"
+        case "cancelled", "canceled": return "Abgebrochen"
+        case "skipped": return "Übersprungen"
+        case "idle": return "Bereit"
+        default: return state.replacingOccurrences(of: "_", with: " ").localizedCapitalized
+        }
     }
 
     private func formatUptime(_ seconds: Double) -> String {
