@@ -123,7 +123,7 @@ jobs:
             -derivedDataPath build/fam-full-unit/DerivedData \
             -resultBundlePath build/fam-full-unit/FullUnit.xcresult \
             '-only-testing:IOSNextTests' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/fam-full-unit/FullUnit.log
       - name: Preserve full unit gate artifacts
         if: always()
