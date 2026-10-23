@@ -15,6 +15,17 @@ final class AppServiceLifecycleCoordinator {
 
     init(chat: ChatModel) { self.chat = chat }
 
+    /// Synchronously invalidate the old identity before HA OAuth/account
+    /// changes; a still-open ChatView must never display another user's data.
+    func invalidateForAccountTransition() {
+        lifecycleGeneration &+= 1
+        homeAssistantConnected = false
+        chatStartup?.cancel()
+        chatStartup = nil
+        chatStartupToken = nil
+        chat.forgetConfiguration()
+    }
+
     func homeAssistantConnectionChanged(_ connected: Bool, appModel: AppModel) async {
         lifecycleGeneration &+= 1
         homeAssistantConnected = connected
