@@ -658,9 +658,8 @@ final class IOSNextTests: XCTestCase {
 
     @MainActor
     func testAppModelReconnectsAfterFakeHAServerDrop() async throws {
-        let model = AppModel(
-            client: HomeAssistantClient(timing: .integrationTest)
-        )
+        let client = HomeAssistantClient(timing: .integrationTest)
+        let model = AppModel(client: client)
         await model.connect(
             serverURL: fakeHABaseURL("close_once"),
             accessToken: "integration-test-token",
@@ -673,6 +672,16 @@ final class IOSNextTests: XCTestCase {
                 $0.entityID == "media_player.fire_tv_companion"
             })?.mediaTitle,
             "Companion Initial"
+        )
+
+        // Test-fixture-only trigger: the fake server acknowledges the request
+        // and then closes this first WebSocket. Unlike a wall-clock-based
+        // disconnect, this cannot happen before the initial snapshot is
+        // committed to AppModel. It still exercises a real socket drop.
+        try await client.callService(
+            domain: "test_fixture",
+            service: "drop_after_initial_snapshot",
+            targetEntityID: "light.fake"
         )
 
         var restored = false

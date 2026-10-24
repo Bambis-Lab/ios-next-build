@@ -322,10 +322,10 @@ class Handler(socketserver.BaseRequestHandler):
                         },
                     )
 
-                    should_close = mode == "close_after_subscribe" or (
-                        mode == "close_once" and connection_number == 1
-                    )
-                    if should_close:
+                    # Do not race the client applying its first snapshot:
+                    # close_once is explicitly triggered only after the test
+                    # has observed the initial connected state.
+                    if mode == "close_after_subscribe":
                         time.sleep(1.0)
                         send_frame(sock, 0x8, struct.pack("!H", 1001))
                         return
@@ -333,6 +333,21 @@ class Handler(socketserver.BaseRequestHandler):
                 elif msg_type == "call_service":
                     if mode == "call_stall":
                         continue
+                    if (
+                        mode == "close_once"
+                        and connection_number == 1
+                        and message.get("domain") == "test_fixture"
+                        and message.get("service") == "drop_after_initial_snapshot"
+                    ):
+                        # Respond first so the test can distinguish a valid
+                        # acknowledged command from a connection failure.
+                        send_json(sock, {
+                            "id": msg_id, "type": "result",
+                            "success": True, "result": None,
+                        })
+                        time.sleep(0.1)
+                        send_frame(sock, 0x8, struct.pack("!H", 1001))
+                        return
 
                     send_json(
                         sock,
