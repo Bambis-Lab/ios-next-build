@@ -87,6 +87,7 @@ extension ChatModel {
             ChatMessage(
                 id: "preview-incoming",
                 senderUserID: "Mika",
+                recipientUserID: "Timo",
                 kind: .text,
                 contentType: "text/plain; charset=utf-8",
                 data: Data("Bin gleich da 👋".utf8),
@@ -97,6 +98,7 @@ extension ChatModel {
             ChatMessage(
                 id: "preview-outgoing",
                 senderUserID: "Timo",
+                recipientUserID: "Mika",
                 kind: .text,
                 contentType: "text/plain; charset=utf-8",
                 data: Data("Perfekt, bis gleich.".utf8),
