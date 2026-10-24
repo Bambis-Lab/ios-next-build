@@ -132,7 +132,8 @@ struct ChatDeviceKeys: Sendable {
         chunkCount: Int,
         sender: ChatIdentity,
         recipient: ChatIdentity,
-        createdAt: String
+        createdAt: String,
+        conversationID: String? = nil
     ) throws -> ChatEnvelope {
         guard let recipientKeyData = Data(base64Encoded: recipient.agreementPublicKey) else {
             throw ChatError.invalidEnvelope
@@ -164,6 +165,7 @@ struct ChatDeviceKeys: Sendable {
             chunkCount: chunkCount,
             createdAt: createdAt
         )
+        envelope.conversationID = conversationID
         envelope.signature = try signing.signature(for: envelope.signingData()).base64EncodedString()
         return envelope
     }

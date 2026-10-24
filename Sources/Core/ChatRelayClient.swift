@@ -83,6 +83,15 @@ actor ChatRelayClient {
         return contact
     }
 
+    func familyGroup(configuration: ChatConfiguration) async throws -> ChatFamilyGroup {
+        try await request(
+            path: "v1/chat/groups/family",
+            method: "GET",
+            body: Optional<String>.none,
+            configuration: configuration
+        )
+    }
+
     func contacts(configuration: ChatConfiguration) async throws -> [ChatContact] {
         try await request(
             path: "v1/chat/contacts",

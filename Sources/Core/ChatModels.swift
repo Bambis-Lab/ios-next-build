@@ -47,6 +47,8 @@ struct ChatEnvelope: Codable, Equatable, Sendable {
     let chunkIndex: Int
     let chunkCount: Int
     let createdAt: String
+    // Optional, signed conversation scope. Legacy direct envelopes omit it.
+    var conversationID: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -63,6 +65,7 @@ struct ChatEnvelope: Codable, Equatable, Sendable {
         case chunkIndex = "chunk_index"
         case chunkCount = "chunk_count"
         case createdAt = "created_at"
+        case conversationID = "conversation_id"
     }
 
     func signingData() throws -> Data {
@@ -99,6 +102,40 @@ struct ChatContact: Codable, Equatable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case displayName = "display_name"
+    }
+}
+
+struct ChatFamilyGroup: Codable, Equatable, Sendable {
+    struct Member: Codable, Equatable, Sendable {
+        let userID: String
+        let profile: String
+        let chatRegistered: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case userID = "user_id"
+            case profile
+            case chatRegistered = "chat_registered"
+        }
+    }
+
+    let id: String
+    let title: String
+    let members: [Member]
+    let maxParticipants: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, members
+        case maxParticipants = "max_participants"
+    }
+
+    // A partial roster may render, but never silently deliver to only some.
+    var isReady: Bool {
+        id == "family" &&
+        maxParticipants == 5 &&
+        members.count == 5 &&
+        Set(members.map(\.profile)) == Set(["nico", "gabi", "timo", "mika", "juli"]) &&
+        Set(members.map(\.userID)).count == 5 &&
+        members.allSatisfy(\.chatRegistered)
     }
 }
 
@@ -156,6 +193,8 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
     let createdAt: Date
     let direction: Direction
     var delivery: Delivery
+    // A signed family-group envelope never appears in an individual chat.
+    var conversationID: String? = nil
 
     var text: String? {
         guard kind == .text else { return nil }
