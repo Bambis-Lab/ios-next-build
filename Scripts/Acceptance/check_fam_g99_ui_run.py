@@ -12,15 +12,15 @@ from pathlib import Path
 MANIFEST = Path("Scripts/Acceptance/g99_iphone_manifest.txt")
 SUITE = "IOSNextUITests.IOSNextUITests"
 LAUNCH_ERROR = re.compile(
-    r"error: -\\[" + re.escape(SUITE) +
-    r" (test\\w+)\\] : Failed to launch .* via Xcode: "
-    r"Timed out while launching application via Xcode\\."
+    r"error: -\[" + re.escape(SUITE) +
+    r" (test\w+)\] : Failed to launch .* via Xcode: "
+    r"Timed out while launching application via Xcode\."
 )
 FAILED = re.compile(
-    r"Test Case '-\\[" + re.escape(SUITE) + r" (test\\w+)\\]' failed \\("
+    r"Test Case '-\[" + re.escape(SUITE) + r" (test\w+)\]' failed \("
 )
 PASSED = re.compile(
-    r"Test Case '-\\[" + re.escape(SUITE) + r" (test\\w+)\\]' passed \\("
+    r"Test Case '-\[" + re.escape(SUITE) + r" (test\w+)\]' passed \("
 )
 
 
@@ -42,7 +42,7 @@ def is_infrastructure_only(log: str) -> bool:
         return False
     if failing[0] not in mandatory_names():
         return False
-    if re.search(r"XCTAssert\\w* failed|Assertion Failure|XCTFail", log):
+    if re.search(r"XCTAssert\w* failed|Assertion Failure|XCTFail", log):
         return False
     # Every test-level Xcode error must be this exact launch timeout.
     for line in log.splitlines():

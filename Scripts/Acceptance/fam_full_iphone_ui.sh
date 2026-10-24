@@ -96,6 +96,7 @@ echo "G99_MANIFEST=PASS total=12 regular=10 accessibility=2"
 # mandatory selectors to actually PASS on the final run.
 run_base_matrix() {
   local suffix="$1" code=0
+  shift
   set +e
   xcodebuild test-without-building -collect-test-diagnostics never \
     -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
