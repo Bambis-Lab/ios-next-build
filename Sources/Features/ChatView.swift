@@ -35,7 +35,7 @@ struct ChatView: View {
                     }
             }
         }
-        .navigationTitle(chatModel.recipientUserID.isEmpty ? "Chat" : chatModel.recipientUserID)
+        .navigationTitle(chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -195,7 +195,7 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    if chatModel.messages.isEmpty {
+                    if chatModel.visibleMessages.isEmpty {
                         ContentUnavailableView(
                             "Noch keine Nachrichten",
                             systemImage: "message.badge.shield.fill",
@@ -203,7 +203,7 @@ struct ChatView: View {
                         )
                         .padding(.top, 60)
                     }
-                    ForEach(chatModel.messages) { message in
+                    ForEach(chatModel.visibleMessages) { message in
                         ChatBubble(message: message)
                             .id(message.id)
                     }
@@ -212,8 +212,8 @@ struct ChatView: View {
                 .padding(.vertical, 8)
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: chatModel.messages.count) { _, _ in
-                guard let id = chatModel.messages.last?.id else { return }
+            .onChange(of: chatModel.visibleMessages.map(\.id)) { _, _ in
+                guard let id = chatModel.visibleMessages.last?.id else { return }
                 withAnimation(.smooth) { proxy.scrollTo(id, anchor: .bottom) }
             }
         }

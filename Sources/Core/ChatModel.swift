@@ -35,6 +35,11 @@ final class ChatModel {
     var messages: [ChatMessage] = []
     var draft = ""
     var recipientUserID = ""
+    private var draftsByPeer: [String: String] = [:]
+    var visibleMessages: [ChatMessage] {
+        guard !recipientUserID.isEmpty else { return [] }
+        return messages.filter { $0.peerUserID == recipientUserID }
+    }
     var contacts: [ChatContact] = []
     var lastError: String?
     var ownSafetyNumber = ""
@@ -229,6 +234,7 @@ final class ChatModel {
         configurationGeneration &+= 1
         if replacesIdentity {
             draft = ""
+            draftsByPeer.removeAll(keepingCapacity: false)
             messages.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
@@ -341,6 +347,7 @@ final class ChatModel {
     func forgetConfiguration(preservingStartup: Bool = false) {
         configurationGeneration &+= 1
         draft = ""
+        draftsByPeer.removeAll(keepingCapacity: false)
         if preservingStartup {
             receiveTask?.cancel()
             receiveTask = nil
@@ -372,7 +379,10 @@ final class ChatModel {
     }
 
     func selectContact(_ contact: ChatContact) {
+        guard recipientUserID != contact.userID else { return }
+        if !recipientUserID.isEmpty { draftsByPeer[recipientUserID] = draft }
         recipientUserID = contact.userID
+        draft = draftsByPeer[contact.userID] ?? ""
         UserDefaults.standard.set(contact.userID, forKey: recipientKey)
         recipientSafetyNumbers = []
         Task { try? await updateRecipientSafetyNumbers() }
@@ -458,10 +468,11 @@ final class ChatModel {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         let originalDraft = draft
+        let selectedPeer = recipientUserID
         let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
         // A failed preflight/relay request must not erase text the user typed.
         // Never erase edits made while the send was in flight.
-        if accepted && draft == originalDraft { draft = "" }
+        if accepted && recipientUserID == selectedPeer && draft == originalDraft { draft = "" }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -496,10 +507,12 @@ final class ChatModel {
         isSending = true
         defer { isSending = false }
         let sendGeneration = configurationGeneration
+        let selectedPeer = recipientUserID
         let groupID = UUID().uuidString.lowercased()
         let localMessage = ChatMessage(
             id: groupID,
             senderUserID: configuration.userID,
+            recipientUserID: selectedPeer,
             kind: kind,
             contentType: contentType,
             data: data,
@@ -509,7 +522,7 @@ final class ChatModel {
         )
         appendMessage(localMessage)
         do {
-            let recipients = try await relay.identities(for: recipientUserID, configuration: configuration)
+            let recipients = try await relay.identities(for: selectedPeer, configuration: configuration)
             guard sendGeneration == configurationGeneration else { return false }
             guard !recipients.isEmpty else { throw ChatError.noRecipientDevice }
             recipientSafetyNumbers = try recipients.map { identity in
@@ -673,6 +686,7 @@ final class ChatModel {
         appendMessage(ChatMessage(
             id: envelope.groupID,
             senderUserID: partial.senderUserID,
+            recipientUserID: configuration.userID,
             kind: partial.kind,
             contentType: partial.contentType,
             data: complete,

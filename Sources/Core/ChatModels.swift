@@ -146,6 +146,10 @@ struct ChatMessage: Identifiable, Equatable, Sendable {
 
     let id: String
     let senderUserID: String
+    // For outgoing messages, the actual destination is captured before transport.
+    // For incoming messages, this is the verified local user.
+    let recipientUserID: String
+    var peerUserID: String { direction == .incoming ? senderUserID : recipientUserID }
     let kind: ChatMessageKind
     let contentType: String
     let data: Data
