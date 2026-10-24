@@ -15,6 +15,7 @@ final class ChatModel {
 
     private struct PartialMessage {
         let senderUserID: String
+        let conversationID: String?
         let kind: ChatMessageKind
         let contentType: String
         let createdAt: Date
@@ -35,10 +36,18 @@ final class ChatModel {
     var messages: [ChatMessage] = []
     var draft = ""
     var recipientUserID = ""
+    var showingFamilyGroup = false
+    var familyGroup: ChatFamilyGroup?
     private var draftsByPeer: [String: String] = [:]
+
     var visibleMessages: [ChatMessage] {
+        if showingFamilyGroup {
+            return messages.filter { $0.conversationID == "family" }
+        }
         guard !recipientUserID.isEmpty else { return [] }
-        return messages.filter { $0.peerUserID == recipientUserID }
+        return messages.filter {
+            $0.conversationID == nil && $0.peerUserID == recipientUserID
+        }
     }
     var contacts: [ChatContact] = []
     var lastError: String?
@@ -72,7 +81,7 @@ final class ChatModel {
     }
 
     var canSend: Bool {
-        state == .online && !recipientUserID.isEmpty
+        state == .online && (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
     }
 
     func start(using appModel: AppModel) async {
@@ -234,6 +243,8 @@ final class ChatModel {
         configurationGeneration &+= 1
         if replacesIdentity {
             draft = ""
+            showingFamilyGroup = false
+            familyGroup = nil
             draftsByPeer.removeAll(keepingCapacity: false)
             messages.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
@@ -322,6 +333,18 @@ final class ChatModel {
             }
             try await updateRecipientSafetyNumbers()
             guard epoch == startupEpoch, !Task.isCancelled else { return }
+            if isFamilyCredentialActive {
+                // The group does not exist until the family broker confirms its
+                // five verified HA identities and active device enrollment.
+                familyGroup = try? await relay.familyGroup(configuration: configuration)
+            } else {
+                familyGroup = nil
+            }
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
+            if showingFamilyGroup && familyGroup == nil {
+                showingFamilyGroup = false
+                draft = draftsByPeer[recipientUserID] ?? ""
+            }
             state = .online
             receiveTask = Task { [weak self] in await self?.receiveLoop() }
         } catch {
@@ -347,6 +370,8 @@ final class ChatModel {
     func forgetConfiguration(preservingStartup: Bool = false) {
         configurationGeneration &+= 1
         draft = ""
+        showingFamilyGroup = false
+        familyGroup = nil
         draftsByPeer.removeAll(keepingCapacity: false)
         if preservingStartup {
             receiveTask?.cancel()
@@ -379,13 +404,23 @@ final class ChatModel {
     }
 
     func selectContact(_ contact: ChatContact) {
-        guard recipientUserID != contact.userID else { return }
-        if !recipientUserID.isEmpty { draftsByPeer[recipientUserID] = draft }
+        guard showingFamilyGroup || recipientUserID != contact.userID else { return }
+        let previousConversation = showingFamilyGroup ? "family" : recipientUserID
+        if !previousConversation.isEmpty { draftsByPeer[previousConversation] = draft }
+        showingFamilyGroup = false
         recipientUserID = contact.userID
         draft = draftsByPeer[contact.userID] ?? ""
         UserDefaults.standard.set(contact.userID, forKey: recipientKey)
         recipientSafetyNumbers = []
         Task { try? await updateRecipientSafetyNumbers() }
+    }
+
+    func selectFamilyGroup() {
+        guard familyGroup != nil, !showingFamilyGroup else { return }
+        if !recipientUserID.isEmpty { draftsByPeer[recipientUserID] = draft }
+        showingFamilyGroup = true
+        draft = draftsByPeer["family"] ?? ""
+        recipientSafetyNumbers = []
     }
 
     nonisolated static func legacyIdentityMatchesHomeAssistant(
@@ -469,10 +504,12 @@ final class ChatModel {
         guard !value.isEmpty else { return }
         let originalDraft = draft
         let selectedPeer = recipientUserID
+        let selectedGroup = showingFamilyGroup
         let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
         // A failed preflight/relay request must not erase text the user typed.
         // Never erase edits made while the send was in flight.
-        if accepted && recipientUserID == selectedPeer && draft == originalDraft { draft = "" }
+        if accepted && recipientUserID == selectedPeer &&
+            showingFamilyGroup == selectedGroup && draft == originalDraft { draft = "" }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -496,7 +533,8 @@ final class ChatModel {
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys, !recipientUserID.isEmpty else {
+        guard let configuration, let keys,
+              showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
         }
@@ -508,11 +546,19 @@ final class ChatModel {
         defer { isSending = false }
         let sendGeneration = configurationGeneration
         let selectedPeer = recipientUserID
+        let selectedGroup = showingFamilyGroup
+        if selectedGroup {
+            guard let familyGroup, familyGroup.isReady,
+                  familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
+                lastError = "Alle fünf Familienmitglieder müssen sichere Chatgeräte registriert haben."
+                return false
+            }
+        }
         let groupID = UUID().uuidString.lowercased()
-        let localMessage = ChatMessage(
+        var localMessage = ChatMessage(
             id: groupID,
             senderUserID: configuration.userID,
-            recipientUserID: selectedPeer,
+            recipientUserID: selectedGroup ? "family" : selectedPeer,
             kind: kind,
             contentType: contentType,
             data: data,
@@ -520,16 +566,26 @@ final class ChatModel {
             direction: .outgoing,
             delivery: .sending
         )
+        localMessage.conversationID = selectedGroup ? "family" : nil
         appendMessage(localMessage)
         do {
-            let recipients = try await relay.identities(for: selectedPeer, configuration: configuration)
+            let targetUsers: [String] = selectedGroup
+                ? (familyGroup?.members.map(\.userID).filter { $0 != configuration.userID } ?? [])
+                : [selectedPeer]
+            guard !targetUsers.isEmpty else { throw ChatError.noRecipientDevice }
+            var recipients: [ChatIdentity] = []
+            for userID in targetUsers {
+                let devices = try await relay.identities(for: userID, configuration: configuration)
+                guard !devices.isEmpty else { throw ChatError.noRecipientDevice }
+                recipients.append(contentsOf: devices)
+            }
             guard sendGeneration == configurationGeneration else { return false }
-            guard !recipients.isEmpty else { throw ChatError.noRecipientDevice }
-            recipientSafetyNumbers = try recipients.map { identity in
+            let safetyNumbers = try recipients.map { identity in
                 try ChatDeviceKeys.pin(identity)
                 guard let number = ChatDeviceKeys.safetyNumber(for: identity) else { throw ChatError.invalidEnvelope }
                 return number
             }
+            recipientSafetyNumbers = selectedGroup ? [] : safetyNumbers
             let chunks = Self.chunks(of: data)
             let sender = keys.publicIdentity(userID: configuration.userID, deviceID: configuration.deviceID)
             let createdAt = ISO8601DateFormatter().string(from: localMessage.createdAt)
@@ -544,7 +600,8 @@ final class ChatModel {
                         chunkCount: chunks.count,
                         sender: sender,
                         recipient: recipient,
-                        createdAt: createdAt
+                        createdAt: createdAt,
+                        conversationID: selectedGroup ? "family" : nil
                     )
                     _ = try await relay.send(envelope, configuration: configuration)
                     guard sendGeneration == configurationGeneration else { return false }
@@ -647,6 +704,14 @@ final class ChatModel {
         guard let sender = identities.first(where: { $0.deviceID == envelope.senderDeviceID }) else {
             throw ChatError.invalidEnvelope
         }
+        if let conversationID = envelope.conversationID {
+            guard conversationID == "family",
+                  let familyGroup, familyGroup.isReady,
+                  familyGroup.members.contains(where: { $0.userID == envelope.senderUserID }),
+                  familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
+                throw ChatError.invalidEnvelope
+            }
+        }
         try ChatDeviceKeys.pin(sender)
         let plaintext = try keys.decrypt(envelope, sender: sender)
         seenEnvelopeIDs[envelope.id] = now
@@ -661,6 +726,7 @@ final class ChatModel {
         let assemblyID = "\(envelope.senderUserID)|\(envelope.senderDeviceID)|\(envelope.groupID)"
         var partial = partialMessages[assemblyID] ?? PartialMessage(
             senderUserID: envelope.senderUserID,
+            conversationID: envelope.conversationID,
             kind: envelope.messageType,
             contentType: envelope.contentType,
             createdAt: envelopeDate,
@@ -669,6 +735,7 @@ final class ChatModel {
             lastUpdated: now
         )
         guard partial.senderUserID == envelope.senderUserID,
+              partial.conversationID == envelope.conversationID,
               partial.kind == envelope.messageType,
               partial.contentType == envelope.contentType,
               partial.chunkCount == envelope.chunkCount else { throw ChatError.invalidEnvelope }
@@ -683,7 +750,7 @@ final class ChatModel {
         }
         partialMessages.removeValue(forKey: assemblyID)
         guard complete.count <= (Self.maximumBytes[partial.kind] ?? 0) else { throw ChatError.contentTooLarge }
-        appendMessage(ChatMessage(
+        var receivedMessage = ChatMessage(
             id: envelope.groupID,
             senderUserID: partial.senderUserID,
             recipientUserID: configuration.userID,
@@ -693,7 +760,9 @@ final class ChatModel {
             createdAt: partial.createdAt,
             direction: .incoming,
             delivery: .received
-        ))
+        )
+        receivedMessage.conversationID = partial.conversationID
+        appendMessage(receivedMessage)
     }
 
     private func updateDelivery(id: String, to delivery: ChatMessage.Delivery) {

@@ -52,4 +52,41 @@ final class ChatDraftSafetyTests: XCTestCase {
         XCTAssertEqual(chat.draft, "")
     }
 
+
+    func testSignedFamilyGroupContextSeparatesMessagesFromDirectChats() throws {
+        let chat = ChatModel()
+        let profiles = ["nico", "gabi", "timo", "mika", "juli"]
+        let members = profiles.map {
+            ChatFamilyGroup.Member(userID: "ha-\($0)", profile: $0, chatRegistered: true)
+        }
+        chat.familyGroup = ChatFamilyGroup(id: "family", title: "Familie",
+                                           members: members, maxParticipants: 5)
+        XCTAssertEqual(chat.familyGroup?.isReady, true)
+        chat.selectFamilyGroup()
+        XCTAssertTrue(chat.showingFamilyGroup)
+        var message = ChatMessage(id: "g1", senderUserID: "ha-mika",
+                                  recipientUserID: "ha-nico", kind: .text,
+                                  contentType: "text/plain", data: Data("Hallo Familie".utf8),
+                                  createdAt: .now, direction: .incoming, delivery: .received)
+        message.conversationID = "family"
+        chat.messages = [message]
+        XCTAssertEqual(chat.visibleMessages.map(\.id), ["g1"])
+        chat.selectContact(ChatContact(userID: "ha-mika", displayName: "Mika"))
+        XCTAssertTrue(chat.visibleMessages.isEmpty)
+    }
+
+    func testFamilyGroupDoesNotPretendUnregisteredMemberCanReceive() {
+        let profiles = ["nico", "gabi", "timo", "mika", "juli"]
+        var members = profiles.map {
+            ChatFamilyGroup.Member(userID: "ha-\($0)", profile: $0, chatRegistered: $0 != "juli")
+        }
+        let group = ChatFamilyGroup(id: "family", title: "Familie",
+                                    members: members, maxParticipants: 5)
+        XCTAssertFalse(group.isReady)
+        members.removeLast()
+        XCTAssertFalse(ChatFamilyGroup(id: "family", title: "Familie",
+                                      members: members, maxParticipants: 5).isReady)
+    }
+
+
 }

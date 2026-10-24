@@ -35,7 +35,7 @@ struct ChatView: View {
                     }
             }
         }
-        .navigationTitle(chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName ?? "Chat")
+        .navigationTitle(chatModel.showingFamilyGroup ? "Familie" : (chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName ?? "Chat"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -149,17 +149,24 @@ struct ChatView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if chatModel.contacts.isEmpty {
+                if chatModel.contacts.isEmpty && chatModel.familyGroup == nil {
                     Label("Noch keine Chat-Kontakte registriert", systemImage: "person.crop.circle.badge.questionmark")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
                     Menu {
+                        if chatModel.familyGroup != nil {
+                            Button {
+                                chatModel.selectFamilyGroup()
+                            } label: {
+                                Label("Familie · Gruppenchat", systemImage: chatModel.showingFamilyGroup ? "checkmark" : "person.3.fill")
+                            }
+                        }
                         ForEach(chatModel.contacts) { contact in
                             Button {
                                 chatModel.selectContact(contact)
                             } label: {
-                                if chatModel.recipientUserID == contact.userID {
+                                if !chatModel.showingFamilyGroup && chatModel.recipientUserID == contact.userID {
                                     Label(contact.displayName, systemImage: "checkmark")
                                 } else {
                                     Text(contact.displayName)
@@ -168,12 +175,18 @@ struct ChatView: View {
                         }
                     } label: {
                         Label(
-                            chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName
-                                ?? "Chat-Kontakt auswählen",
+                            chatModel.showingFamilyGroup ? "Familie" :
+                                (chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName
+                                    ?? "Chat-Kontakt auswählen"),
                             systemImage: "person.2.fill"
                         )
                         .font(.caption.weight(.semibold))
                     }
+                }
+                if chatModel.showingFamilyGroup && chatModel.familyGroup?.isReady != true {
+                    Label("Familiengruppe: Chatgeräte noch nicht vollständig registriert", systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
                 }
             }
             .padding(.vertical, 8)
