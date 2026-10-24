@@ -18,6 +18,11 @@ final class IOSNextUITests: XCTestCase {
             _ = setAccessibilityPreference(path: original.path, toggle: original.toggle, enabled: original.enabled, recordRestore: false)
             accessibilityRestore = nil
         }
+        // A failed XCUIApplication.launch() must not strand its process.
+        // Ownership is set before launch(), including its error path.
+        if let application = app, application.state != .notRunning {
+            application.terminate()
+        }
         app = nil
         XCUIDevice.shared.orientation = .portrait
     }
@@ -26,6 +31,7 @@ final class IOSNextUITests: XCTestCase {
     private func launch(_ screen: String, extraArguments: [String] = []) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = ["--product-ui-test-screen=\(screen)"] + extraArguments
+        app = application
         NSLog("G99-01 launch begin screen=\(screen) arguments=\(application.launchArguments) orientation=\(XCUIDevice.shared.orientation.rawValue)")
         application.launch()
         NSLog("G99-01 launch end screen=\(screen) appState=\(application.state.rawValue)")

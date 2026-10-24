@@ -37,6 +37,7 @@ jobs:
           print("FAM_IOS_SOURCE=PASS")
           PY
           python3 Scripts/Acceptance/validate_fam_g99_manifest.py
+          PYTHONPATH=Scripts/Acceptance python3 -m unittest Scripts/Acceptance/test_check_fam_g99_ui_run.py -v
   iphone-simulator:
     # The self-hosted Xcode runner may reuse the same iOS simulator between
     # jobs. Serialize all three macOS test jobs to prevent CoreSimulator races.
@@ -223,6 +224,11 @@ jobs:
           path: |
             build/g99/UI-base.log
             build/g99/UI-base.xcresult
+            build/g99/UI-base-retry1.log
+            build/g99/UI-base-retry1.xcresult
+            build/g99/post-startup-bootstatus.log
+            build/g99/UI-recovery-bootstatus.log
+            build/g99/UI-recovery-prewarm.log
             build/g99/a11y-dynamic-type.log
             build/g99/a11y-dynamic-type.xcresult
             build/g99/a11y-increase-contrast.log

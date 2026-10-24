@@ -68,6 +68,13 @@ else
   fi
 fi
 
+# The probe and mandatory matrix are separate Xcode test sessions.
+# Terminate the app left behind by the first session, then confirm that the
+# SAME booted iPhone simulator is ready. Do not reboot or erase it.
+xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+xcrun simctl bootstatus "$SIM_ID" -b > build/g99/post-startup-bootstatus.log 2>&1
+echo "G99_POST_STARTUP_CLEAN=PASS"
+
 # Mandatory manifest: ten standard UI tests (including the unverified
 # family Home regression) and two independent accessibility tests.
 # Validate the exact contract before creating the main test selection.
@@ -84,13 +91,48 @@ if [ "$n" -ne 12 ] || [ "$#" -ne 10 ]; then
   exit 65
 fi
 echo "G99_MANIFEST=PASS total=12 regular=10 accessibility=2"
-xcodebuild test-without-building -collect-test-diagnostics never \
-  -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
-  -parallel-testing-enabled NO -disable-concurrent-destination-testing \
-  -resultBundlePath build/g99/UI-base.xcresult "$@" \
-  CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
-  2>&1 | tee build/g99/UI-base.log
-xcrun xcresulttool export attachments --path build/g99/UI-base.xcresult --output-path build/g99/attachments/base
+# A single verified Xcode launch-timeout (not an XCTest assertion) may
+# trigger ONE complete matrix retry. Keep both full runs and require all 10
+# mandatory selectors to actually PASS on the final run.
+run_base_matrix() {
+  local suffix="$1" code=0
+  set +e
+  xcodebuild test-without-building -collect-test-diagnostics never \
+    -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+    -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+    -resultBundlePath "build/g99/UI-base${suffix}.xcresult" "$@" \
+    CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+    2>&1 | tee "build/g99/UI-base${suffix}.log"
+  code=${PIPESTATUS[0]}
+  set -e
+  return "$code"
+}
+FINAL_UI_RESULT="build/g99/UI-base.xcresult"
+FINAL_UI_LOG="build/g99/UI-base.log"
+if run_base_matrix "" "$@"; then
+  python3 Scripts/Acceptance/check_fam_g99_ui_run.py verify "$FINAL_UI_LOG"
+  echo "G99_UI_MATRIX=PASS retry=0"
+else
+  if ! python3 Scripts/Acceptance/check_fam_g99_ui_run.py classify "$FINAL_UI_LOG"; then
+    echo "G99_UI_MATRIX=FAIL reason=functional_or_unknown no_retry"
+    exit 65
+  fi
+  echo "G99_UI_MATRIX=INFRA_RETRY_COUNT_1"
+  xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+  xcrun simctl bootstatus "$SIM_ID" -b > build/g99/UI-recovery-bootstatus.log 2>&1
+  xcrun simctl launch --terminate-running-process "$SIM_ID" \
+    de.nicofroeba16.iosnext --product-ui-test-screen=home > build/g99/UI-recovery-prewarm.log 2>&1
+  xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+  FINAL_UI_RESULT="build/g99/UI-base-retry1.xcresult"
+  FINAL_UI_LOG="build/g99/UI-base-retry1.log"
+  if ! run_base_matrix "-retry1" "$@"; then
+    echo "G99_UI_MATRIX=FAIL reason=retry_exhausted"
+    exit 65
+  fi
+  python3 Scripts/Acceptance/check_fam_g99_ui_run.py verify "$FINAL_UI_LOG"
+  echo "G99_UI_MATRIX=PASS retry=1"
+fi
+xcrun xcresulttool export attachments --path "$FINAL_UI_RESULT" --output-path build/g99/attachments/base
 
 # Two required independent tests observe real simulator-supported settings.
 # Reduce Motion / Reduce Transparency Settings.app automation remains optional
