@@ -346,6 +346,41 @@ final class IOSNextTests: XCTestCase {
         XCTAssertEqual(try recipientKeys.decrypt(envelope, sender: sender), plaintext)
     }
 
+    func testChatDecryptsPinnedPythonChaChaWireFixture() throws {
+        // Fixed synthetic cross-language reference, not a production credential.
+        // Generated independently with X25519, HKDF-SHA256 (groupID salt),
+        // ChaCha20-Poly1305 combined and Ed25519 over sorted unsigned JSON.
+        // This catches silent incompatibility between CryptoKit and the
+        // backend's Python reference wire test.
+        let recipientAgreement = try Curve25519.KeyAgreement.PrivateKey(
+            rawRepresentation: XCTUnwrap(Data(base64Encoded: "ISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISE="))
+        )
+        let recipientKeys = ChatDeviceKeys(
+            agreement: recipientAgreement,
+            signing: Curve25519.Signing.PrivateKey()
+        )
+        let sender = ChatIdentity(
+            userID: "synthetic-ha-gabi",
+            deviceID: "ios-gabi-wire",
+            agreementPublicKey: Data(repeating: 0, count: 32).base64EncodedString(),
+            signingPublicKey: "Md6+VdN8cidosTcTHKpghwgLLgtguUvXhdFFdc+kmLw=",
+            updatedAt: nil
+        )
+        let fixture = #"""
+        {"chunk_count":1,"chunk_index":0,"ciphertext":"ABEiM0RVZneImaq7EoOKWv7y8icdfdY0bp479ys4S2JtL2MvPZBBIud34SybgyqTw12eVCO+4JmAPi6ShtucRyIlURLG","content_type":"text/plain","created_at":"2026-10-24T20:00:00Z","ephemeral_public_key":"EyxEK+AQ+9V+cmAzKKp25x/MwVA6riGTJ9FNnJmT9HI=","group_id":"fam12-group-001","id":"fam12-msg-001","message_type":"text","recipient_device_id":"ios-timo-wire","recipient_user_id":"synthetic-ha-timo","sender_device_id":"ios-gabi-wire","sender_user_id":"synthetic-ha-gabi","signature":"QlwaPhRxYv5e/fiMna6IXIIIz8VB+VBsMFyy5Fsbd8covkDs8JMEeIrwgdEshM5FVjyRWvCfxUr8oH3JMT6TBw=="}
+        """#
+        let envelope = try JSONDecoder().decode(ChatEnvelope.self, from: Data(fixture.utf8))
+        XCTAssertEqual(
+            try recipientKeys.decrypt(envelope, sender: sender),
+            Data("FAM12 native Swift cross-language fixture".utf8)
+        )
+        var corruptedSignature = envelope
+        corruptedSignature.signature = Data(repeating: 0, count: 64).base64EncodedString()
+        XCTAssertThrowsError(try recipientKeys.decrypt(corruptedSignature, sender: sender)) { error in
+            XCTAssertEqual(error as? ChatError, .invalidSignature)
+        }
+    }
+
     func testChatEnvelopeRejectsCiphertextTampering() throws {
         let senderKeys = ChatDeviceKeys(
             agreement: Curve25519.KeyAgreement.PrivateKey(),
