@@ -13,6 +13,7 @@ struct ChatView: View {
     @State private var isPresentingConfiguration = false
     @State private var isPresentingSecurity = false
     @State private var isPresentingSupportTicket = false
+    @State private var isPresentingMemberTickets = false
     @State private var voicePressIsActive = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -47,6 +48,9 @@ struct ChatView: View {
                         isPresentingConfiguration = true
                     }
                     if chatModel.accessRole == .member {
+                        Button("Meine Admin-Tickets", systemImage: "tray.full.fill") {
+                            isPresentingMemberTickets = true
+                        }
                         Button("Ticket an Owner", systemImage: "ticket.fill") {
                             isPresentingSupportTicket = true
                         }
@@ -71,6 +75,9 @@ struct ChatView: View {
         }
         .sheet(isPresented: $isPresentingSupportTicket) {
             SupportTicketComposerView(chatModel: chatModel)
+        }
+        .sheet(isPresented: $isPresentingMemberTickets) {
+            MemberTicketInboxView(chatModel: chatModel)
         }
         .fullScreenCover(isPresented: $isPresentingCamera) {
             InMemoryCameraPicker { image in

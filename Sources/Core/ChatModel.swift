@@ -56,6 +56,8 @@ final class ChatModel {
     var isSending = false
     var accessRole: ChatAccessRole?
     var lastCreatedTicketID: String?
+    var memberTickets: [SupportTicket] = []
+    var memberTicketDetails: [String: SupportTicket] = [:]
 
     private let relay = ChatRelayClient()
     private var configuration: ChatConfiguration?
@@ -247,6 +249,8 @@ final class ChatModel {
             familyGroup = nil
             draftsByPeer.removeAll(keepingCapacity: false)
             messages.removeAll(keepingCapacity: false)
+            memberTickets.removeAll(keepingCapacity: false)
+            memberTicketDetails.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
             ChatMediaThumbnailCache.shared.clear()
@@ -380,6 +384,8 @@ final class ChatModel {
             stop()
         }
         messages.removeAll(keepingCapacity: false)
+        memberTickets.removeAll(keepingCapacity: false)
+        memberTicketDetails.removeAll(keepingCapacity: false)
         ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
@@ -618,6 +624,53 @@ final class ChatModel {
         }
     }
 
+    func loadMemberTickets() async {
+        guard let configuration, accessRole == .member else { return }
+        let generation = configurationGeneration
+        do {
+            let items = try await relay.memberTickets(configuration: configuration)
+            guard generation == configurationGeneration else { return }
+            memberTickets = items
+        } catch {
+            guard generation == configurationGeneration else { return }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func loadMemberTicket(_ id: String) async {
+        guard let configuration, accessRole == .member else { return }
+        let generation = configurationGeneration
+        do {
+            let item = try await relay.memberTicket(id, configuration: configuration)
+            guard generation == configurationGeneration else { return }
+            memberTicketDetails[id] = item
+        } catch {
+            guard generation == configurationGeneration else { return }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func replyMemberTicket(_ id: String, message: String) async -> Bool {
+        guard let configuration, accessRole == .member else { return false }
+        let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, body.count <= 4000 else {
+            lastError = "Die Antwort muss zwischen 1 und 4.000 Zeichen enthalten."
+            return false
+        }
+        let generation = configurationGeneration
+        do {
+            let ticket = try await relay.replyMemberTicket(id, text: body, configuration: configuration)
+            guard generation == configurationGeneration else { return false }
+            memberTicketDetails[id] = ticket
+            await loadMemberTickets()
+            return true
+        } catch {
+            guard generation == configurationGeneration else { return false }
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     @discardableResult
     func createSupportTicket(message: String) async -> String? {
         guard let configuration else { return nil }
@@ -633,6 +686,8 @@ final class ChatModel {
                 configuration: configuration
             )
             lastCreatedTicketID = ticket.id
+            memberTicketDetails[ticket.id] = ticket
+            await loadMemberTickets()
             return ticket.id
         } catch {
             lastError = error.localizedDescription
