@@ -640,7 +640,9 @@ final class IOSNextTests: XCTestCase {
     }
 
     func testFakeHACommandTimeout() async throws {
-        let client = HomeAssistantClient(timing: .integrationTest)
+        // The 8-second deliberately stalled call retains its strict deadline.
+        // Only the preceding, healthy login gets simulator scheduling headroom.
+        let client = HomeAssistantClient(timing: .integrationTestStableConnection)
         _ = try await client.connect(configuration: fakeHAConfiguration("call_stall"))
 
         do {
@@ -693,7 +695,7 @@ final class IOSNextTests: XCTestCase {
 
     @MainActor
     func testAppModelReconnectsAfterFakeHAServerDrop() async throws {
-        let client = HomeAssistantClient(timing: .integrationTest)
+        let client = HomeAssistantClient(timing: .integrationTestStableConnection)
         let model = AppModel(client: client)
         await model.connect(
             serverURL: fakeHABaseURL("close_once"),
@@ -701,7 +703,10 @@ final class IOSNextTests: XCTestCase {
             persist: false
         )
 
-        XCTAssertTrue(model.isConnected, "Initial fake-HA connection must succeed before the drop.")
+        XCTAssertTrue(
+            model.isConnected,
+            "Initial fake-HA connection must succeed before the drop. State: \(model.connectionState)"
+        )
         XCTAssertEqual(
             model.entities.first(where: {
                 $0.entityID == "media_player.fire_tv_companion"

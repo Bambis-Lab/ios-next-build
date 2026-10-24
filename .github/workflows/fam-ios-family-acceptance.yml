@@ -173,18 +173,11 @@ jobs:
           python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/fam-full-unit/fake-ha.log 2>&1 &
           FAKE_HA_PID=$!
           trap 'kill "$FAKE_HA_PID" 2>/dev/null || true' EXIT
-          python3 - <<'PY'
-          import socket,time
-          for _ in range(60):
-              try:
-                  with socket.create_connection(("127.0.0.1",18765),timeout=1):
-                      print("FAM_FAKE_HA_READY=PASS")
-                      break
-              except OSError:
-                  time.sleep(0.5)
-          else:
-              raise SystemExit("FAM_FAKE_HA_READY=FAIL")
-          PY
+          # TCP accept alone does not prove that the correct local fixture
+          # responds to WebSocket authentication. Fail closed before XCTest.
+          python3 Scripts/Acceptance/preflight_fake_ha.py --host 127.0.0.1 --port 18765
+          kill -0 "$FAKE_HA_PID"
+          echo "FAM_FAKE_HA_PROCESS_ALIVE=PASS"
           xcodebuild test -collect-test-diagnostics never \
             -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
             -destination "platform=iOS Simulator,id=$SIM_ID" \

@@ -69,6 +69,19 @@ struct HomeAssistantClientTimingPolicy: Sendable {
         pingTimeoutSeconds: 1.5
     )
 
+    // Positive-path WebSocket integration fixtures run on a contended Xcode 27
+    // simulator and must establish a healthy connection *before* their
+    // disconnect/command-timeout scenario begins. Production and the
+    // negative auth/heartbeat deadlines above remain strictly unchanged.
+    // This is NOT used for testFakeHAAuthHandshakeTimeout (still 12 seconds).
+    static let integrationTestStableConnection = HomeAssistantClientTimingPolicy(
+        authHandshakeSeconds: 24.0,
+        getStatesSeconds: 24.0,
+        commandSeconds: 8.0,
+        heartbeatIntervalSeconds: 0.75,
+        pingTimeoutSeconds: 1.5
+    )
+
     func commandTimeoutSeconds(for type: String) -> Double {
         type == "get_states" ? getStatesSeconds : commandSeconds
     }
