@@ -47,7 +47,7 @@ def check(host: str, port: int) -> None:
             raise ValueError("unexpected WebSocket status")
         from hashlib import sha1
         expected = base64.b64encode(sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
-        if f"sec-websocket-accept: {expected}".encode() not in header.lower():
+        if f"sec-websocket-accept: {expected}".lower().encode("ascii") not in header.lower():
             raise ValueError("WebSocket accept key mismatch")
         buffer = bytearray(remaining)
         def take(n: int) -> bytes:
