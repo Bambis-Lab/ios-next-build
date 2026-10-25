@@ -8,11 +8,13 @@ struct OwnerSystemsView: View {
     var body: some View {
         OwnerPage {
             VStack(alignment: .leading, spacing: IOSNextLayout.pageSpacing) {
-                IOSNextSectionHeader(
-                    title: "Systeme",
-                    subtitle: "Ressourcen zuerst, technische Details im Drill-down",
-                    symbol: "server.rack"
-                )
+                // The navigation bar already displays "Systeme". Avoid a second
+                // large header directly under its translucent iOS 27 chrome.
+                Text("Ressourcen zuerst, technische Details im Drill-down")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("owner-systems-intro")
 
                 if capabilities.supports(.backendStatus), let status = model.backendStatus {
                     NavigationLink {
