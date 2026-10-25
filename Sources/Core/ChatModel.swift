@@ -3,6 +3,14 @@ import LocalAuthentication
 import Observation
 import UIKit
 
+/// A verified Family Broker must never be substituted with a locally
+/// remembered or self-asserted contact when its discovery route fails.
+enum ChatContactDiscoveryPolicy {
+    static func mayUseLegacyRecipient(statusCode: Int, familyCredentialActive: Bool) -> Bool {
+        statusCode == 404 && !familyCredentialActive
+    }
+}
+
 @MainActor
 @Observable
 final class ChatModel {
@@ -320,12 +328,14 @@ final class ChatModel {
                 contacts = loadedContacts
                     .filter { $0.userID != configuration.userID }
                     .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-            } catch ChatError.rejected(404) {
+            } catch ChatError.rejected(let status) {
                 // Legacy installations may have a preconfigured private peer.
                 // A *verified* family session must never create a plausible
                 // contact from a saved user ID when broker discovery failed.
-                guard !isFamilyCredentialActive else {
-                    throw ChatError.rejected(404)
+                guard ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+                    statusCode: status, familyCredentialActive: isFamilyCredentialActive
+                ) else {
+                    throw ChatError.rejected(status)
                 }
                 guard epoch == startupEpoch, !Task.isCancelled else { return }
                 contacts = recipientUserID.isEmpty
