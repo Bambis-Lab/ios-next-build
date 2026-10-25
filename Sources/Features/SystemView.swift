@@ -132,6 +132,12 @@ struct SystemView: View {
                 if let profile = appModel.registeredFamilyProfile {
                     LabeledContent("Profil", value: profile.title)
                     LabeledContent("Berechtigung", value: profile == .nico ? "Owner-Gerätefreigabe erforderlich" : "Member")
+                } else if !appModel.familyBrokerConfigured,
+                          appModel.homeAssistantCurrentUser != nil {
+                    LabeledContent("Modus", value: "Persönliche App (Legacy)")
+                    Text("Home Assistant ist verbunden. Die Familienrolle ist nicht verifiziert; Factory, Runner und Owner Control prüfen ihre Zugänge weiterhin unabhängig.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 } else {
                     Text(appModel.familyRegistrationNotice ?? "Identität noch nicht bestätigt")
                         .font(.caption)
