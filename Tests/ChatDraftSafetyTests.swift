@@ -81,6 +81,39 @@ final class ChatDraftSafetyTests: XCTestCase {
         XCTAssertEqual(accepted, ["valid-1", "valid-2"])
     }
 
+    func testRelayAuthorizationFailureIsNotMisclassifiedAsCorruptCiphertext() async {
+        let items = [batchEnvelope("unauthorized"), batchEnvelope("would-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "unauthorized" { throw ChatError.rejected(401) }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Relay 401 must fail the receive loop, not falsely report online")
+        } catch ChatError.rejected(401) {
+            XCTAssertTrue(accepted.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(type(of: error))")
+        }
+    }
+
+    func testNetworkTimeoutIsNotMisclassifiedAsCorruptCiphertext() async {
+        let items = [batchEnvelope("timed-out"), batchEnvelope("would-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "timed-out" { throw URLError(.timedOut) }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Network timeout must remain a transport failure")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+            XCTAssertTrue(accepted.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(type(of: error))")
+        }
+    }
+
     func testBatchCancellationPropagatesInsteadOfBeingSwallowedAsInvalidMessage() async {
         let items = [batchEnvelope("valid"), batchEnvelope("cancel"), batchEnvelope("must-not-process")]
         var accepted: [String] = []
