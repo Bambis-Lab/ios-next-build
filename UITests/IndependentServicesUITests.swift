@@ -44,6 +44,10 @@ final class IndependentServicesUITests: XCTestCase {
                        "Settings accidentally displayed the message composer")
         XCTAssertFalse(app.buttons["Chatoptionen"].exists,
                        "Settings accidentally navigated into ChatView")
+        let chatAttachment = XCTAttachment(screenshot: app.screenshot())
+        chatAttachment.name = "ios173-real-chat-settings"
+        chatAttachment.lifetime = .keepAlways
+        add(chatAttachment)
         let done = app.buttons["Fertig"]
         XCTAssertTrue(done.waitForExistence(timeout: 8),
                       "Chat settings must be dismissible")
@@ -59,6 +63,10 @@ final class IndependentServicesUITests: XCTestCase {
         let ownerSetup = app.buttons["Control Center einrichten"]
         XCTAssertTrue(ownerSetup.waitForExistence(timeout: 5),
                       "Control Center has no setup action")
+        let ownerAttachment = XCTAttachment(screenshot: app.screenshot())
+        ownerAttachment.name = "ios173-real-control-center"
+        ownerAttachment.lifetime = .keepAlways
+        add(ownerAttachment)
         app.buttons["Schließen"].tap()
 
         tapService("runner", in: app)
@@ -66,6 +74,10 @@ final class IndependentServicesUITests: XCTestCase {
                       "Runner cannot be opened before HA configuration")
         XCTAssertTrue(app.buttons["Einrichten"].waitForExistence(timeout: 5),
                       "Runner setup is not accessible")
+        let runnerAttachment = XCTAttachment(screenshot: app.screenshot())
+        runnerAttachment.name = "ios173-real-runner"
+        runnerAttachment.lifetime = .keepAlways
+        add(runnerAttachment)
         app.buttons["Schließen"].tap()
 
         tapService("factory", in: app)
