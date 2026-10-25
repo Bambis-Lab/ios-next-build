@@ -3,6 +3,51 @@ import XCTest
 
 @MainActor
 final class ChatDraftSafetyTests: XCTestCase {
+    func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
+        let delegate = ChatRelayNoRedirects()
+        let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))
+        let untrusted = try XCTUnwrap(URL(string: "https://untrusted.example.invalid/collect"))
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: source)
+        defer {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+        for status in [301, 302, 307, 308] {
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: source, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Location": untrusted.absoluteString]
+            ))
+            var redirectWasConsidered = false
+            var forwarded: URLRequest?
+            delegate.urlSession(
+                session, task: task,
+                willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: untrusted)
+            ) { candidate in
+                redirectWasConsidered = true
+                forwarded = candidate
+            }
+            XCTAssertTrue(redirectWasConsidered)
+            XCTAssertNil(forwarded, "Chat or HA bearer may not follow HTTP redirect \(status)")
+        }
+    }
+
+    func testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails() {
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: true
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 401, familyCredentialActive: false
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 503, familyCredentialActive: false
+        ))
+        XCTAssertTrue(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: false
+        ))
+    }
+
     func testDraftIsPreservedWhenNoContactSelected() async {
         let chat = ChatModel()
         chat.recipientUserID = ""
