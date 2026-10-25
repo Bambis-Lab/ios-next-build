@@ -29,7 +29,13 @@ jobs:
           assert "ha_user_id" in client
           assert "separate_device_approval_required" in client
           assert 'url.scheme == "https"' in client
-          assert "if appModel.registeredFamilyProfile == .nico" in system
+          assert "OwnerServiceNavigationPolicy.showServices(" in system
+          assert "if familyBrokerConfigured { return registeredProfile == .nico }" in system
+          assert "return hasHAIdentity && selectedProfile == .nico" in system
+          assert "system-owner-recovery" in system
+          assert "system-factory-workspace" in system
+          assert "system-runner-dashboard" in system
+          assert "system-owner-control" in system
           assert "PRODUCT_BUNDLE_IDENTIFIER: de.nicofroeba16.iosnext" in project
           assert "MARKETING_VERSION: 1.6.4" in project, "source lock changed prematurely"
           assert Path("Tests/FamilyIdentityTests.swift").exists()
