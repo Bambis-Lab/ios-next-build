@@ -321,6 +321,12 @@ final class ChatModel {
                     .filter { $0.userID != configuration.userID }
                     .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
             } catch ChatError.rejected(404) {
+                // Legacy installations may have a preconfigured private peer.
+                // A *verified* family session must never create a plausible
+                // contact from a saved user ID when broker discovery failed.
+                guard !isFamilyCredentialActive else {
+                    throw ChatError.rejected(404)
+                }
                 guard epoch == startupEpoch, !Task.isCancelled else { return }
                 contacts = recipientUserID.isEmpty
                     ? []
