@@ -165,9 +165,10 @@ jobs:
             '-only-testing:IOSNextTests/FactoryMCPIntegrationTests' \
             '-only-testing:IOSNextTests/LiveOperationsTests' \
             '-only-testing:IOSNextTests/ChatDraftSafetyTests' \
+            '-only-testing:IOSNextTests/ProjectRegistryTests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/ios173/OwnerNavigation.log
-          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests; do
+          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests ProjectRegistryTests; do
             grep -Fq "Test Suite '$suite' passed" build/ios173/OwnerNavigation.log
           done
           grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/OwnerNavigation.log
