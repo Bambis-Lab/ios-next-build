@@ -40,7 +40,16 @@ final class IndependentServicesUITests: XCTestCase {
         app.buttons["chat-inbox-settings"].tap()
         XCTAssertTrue(app.buttons["Chatoptionen"].waitForExistence(timeout: 8),
                       "Chat Relay setup must remain accessible without HA")
-        app.buttons["Schließen"].tap()
+        // Chat options is pushed onto the standalone inbox NavigationStack.
+        // Return to the inbox first; only the inbox owns the modal close button.
+        let backToChats = app.buttons["Chats"]
+        XCTAssertTrue(backToChats.waitForExistence(timeout: 8),
+                      "Chat options is missing its inbox back navigation")
+        backToChats.tap()
+        let closeChat = app.buttons["Schließen"]
+        XCTAssertTrue(closeChat.waitForExistence(timeout: 8),
+                      "Standalone chat inbox is missing its close button")
+        closeChat.tap()
 
         tapService("controlCenter", in: app)
         XCTAssertTrue(app.navigationBars["Control Center"].waitForExistence(timeout: 8),
