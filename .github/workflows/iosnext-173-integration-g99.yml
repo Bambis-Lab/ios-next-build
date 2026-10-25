@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/iosnext-173-integration-00-07
+      - diagnostic/iosnext-173-factory-oauth-readonly
   workflow_dispatch:
 permissions:
   contents: read
@@ -56,6 +57,9 @@ jobs:
           assert 'app.navigationBars["Chat-Einstellungen"]' in ui_tests
           assert 'XCTAttachment(screenshot: app.screenshot())' in ui_tests
           assert "registrationRejected(Int)" in oauth
+          assert "class FactoryNoRedirects" in oauth and "completionHandler(nil)" in oauth
+          assert "configuration: .ephemeral," in oauth and "delegate: FactoryNoRedirects()" in oauth
+          assert "testOAuthTransportRefusesOffOriginRedirectsIncluding307TokenPost" in Path("Tests/FactoryMCPIntegrationTests.swift").read_text()
           assert "incompatibleRunnerStream" in live
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY

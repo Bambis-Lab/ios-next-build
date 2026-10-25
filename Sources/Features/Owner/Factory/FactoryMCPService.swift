@@ -50,6 +50,18 @@ enum FactoryConnectionError: LocalizedError {
     }
 }
 
+/// All OAuth metadata, registration, token and MCP HTTP requests use a
+/// no-redirect transport. A 30x must never forward a bearer token,
+/// authorization code, refresh token or registration payload to a new host.
+final class FactoryNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 struct FactoryAuthorization: Sendable {
     let endpoint: URL
     let tokenEndpoint: URL
@@ -101,7 +113,11 @@ final class FactoryMCPService {
     private var endpoint: URL?
 
     init(
-        session: URLSession = .shared,
+        session: URLSession = URLSession(
+            configuration: .ephemeral,
+            delegate: FactoryNoRedirects(),
+            delegateQueue: nil
+        ),
         credentials: FactoryCredentialStore? = nil
     ) {
         self.session = session
