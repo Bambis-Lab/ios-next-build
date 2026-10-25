@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// A verified family Owner receives only a *member-scoped* Chat token until
+/// the separate P-256 Owner device approval succeeds. Chat role must never
+/// gate visibility of the Owner-ticket entry or imply Owner authority.
+enum ChatTicketVisibilityPolicy {
+    static func ownerEntry(
+        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?,
+        chatRole: ChatAccessRole?
+    ) -> Bool {
+        familyBrokerConfigured && verifiedProfile == .nico && chatRole != nil
+    }
+
+    static func memberEntry(
+        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?,
+        chatRole: ChatAccessRole?
+    ) -> Bool {
+        guard chatRole == .member else { return false }
+        if familyBrokerConfigured {
+            return verifiedProfile != nil && verifiedProfile != .nico
+        }
+        return verifiedProfile != .nico
+    }
+}
+
 /// Inbox owns navigation only. Encryption, verified HA identities, draft
 /// isolation and delivery remain solely in ChatModel / the authenticated relay.
 struct ChatInboxView: View {
@@ -32,13 +55,19 @@ struct ChatInboxView: View {
     }
 
     private var showOwnerTickets: Bool {
-        chatModel.accessRole == .owner &&
-        appModel.registeredFamilyProfile == .nico
+        ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: appModel.familyBrokerConfigured,
+            verifiedProfile: appModel.registeredFamilyProfile,
+            chatRole: chatModel.accessRole
+        )
     }
 
     private var showMemberTickets: Bool {
-        chatModel.accessRole == .member &&
-        appModel.registeredFamilyProfile != .nico
+        ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: appModel.familyBrokerConfigured,
+            verifiedProfile: appModel.registeredFamilyProfile,
+            chatRole: chatModel.accessRole
+        )
     }
 
     var body: some View {
