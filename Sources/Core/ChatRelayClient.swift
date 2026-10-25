@@ -1,5 +1,18 @@
 import Foundation
 
+/// Fail closed for every relay request carrying HA or chat bearer tokens.
+/// No 301/302/307/308 may replay a sensitive request to a different origin.
+final class ChatRelayNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
 actor ChatRelayClient {
     private let session: URLSession
     private let encoder: JSONEncoder
@@ -16,7 +29,11 @@ actor ChatRelayClient {
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 12
         configuration.timeoutIntervalForResource = 20
-        session = URLSession(configuration: configuration)
+        session = URLSession(
+            configuration: configuration,
+            delegate: ChatRelayNoRedirects(),
+            delegateQueue: nil
+        )
         encoder = JSONEncoder()
         decoder = JSONDecoder()
     }

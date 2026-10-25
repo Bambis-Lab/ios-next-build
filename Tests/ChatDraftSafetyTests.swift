@@ -1,8 +1,95 @@
+import Foundation
 import XCTest
 @testable import IOSNext
 
 @MainActor
 final class ChatDraftSafetyTests: XCTestCase {
+    func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
+        let delegate = ChatRelayNoRedirects()
+        let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))
+        let untrusted = try XCTUnwrap(URL(string: "https://untrusted.example.invalid/collect"))
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: source)
+        defer {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+        for status in [301, 302, 307, 308] {
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: source, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Location": untrusted.absoluteString]
+            ))
+            var redirectWasConsidered = false
+            var forwarded: URLRequest?
+            delegate.urlSession(
+                session, task: task,
+                willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: untrusted)
+            ) { candidate in
+                redirectWasConsidered = true
+                forwarded = candidate
+            }
+            XCTAssertTrue(redirectWasConsidered)
+            XCTAssertNil(forwarded, "Chat or HA bearer may not follow HTTP redirect \(status)")
+        }
+    }
+
+    func testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails() {
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: true
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 401, familyCredentialActive: false
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 503, familyCredentialActive: false
+        ))
+        XCTAssertTrue(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: false
+        ))
+    }
+
+    func testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken() {
+        // The Owner inbox is independent from the Chat relay; the tap still
+        // enters AdminAreaView which requires a separate approved P-256 Owner
+        // device session before showing or mutating Owner tickets.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: false, verifiedProfile: .nico
+        ))
+        // No Chat token is required for the *navigation link*: Owner rights
+        // remain exclusively in the independently authorized backend.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico
+        ))
+    }
+
+    func testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured() {
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi, chatRole: .member
+        ))
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .timo, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .owner
+        ))
+    }
+
     func testDraftIsPreservedWhenNoContactSelected() async {
         let chat = ChatModel()
         chat.recipientUserID = ""
