@@ -2,8 +2,34 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// Navigation is not an Owner authorization decision. Family role remains
+/// authoritative whenever a broker is configured; legacy personal builds
+/// retain their independently authenticated Owner/Factory services.
+enum OwnerServiceNavigationPolicy {
+    static func showServices(
+        familyBrokerConfigured: Bool, registeredProfile: HomeProfile?,
+        selectedProfile: HomeProfile, hasHAIdentity: Bool
+    ) -> Bool {
+        if familyBrokerConfigured { return registeredProfile == .nico }
+        return hasHAIdentity && selectedProfile == .nico
+    }
+
+    static func showRecovery(familyBrokerConfigured: Bool, registeredProfile: HomeProfile?) -> Bool {
+        familyBrokerConfigured && registeredProfile == nil
+    }
+}
+
 struct SystemView: View {
     let appModel: AppModel
+
+    private var showOwnerServices: Bool {
+        OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: appModel.familyBrokerConfigured,
+            registeredProfile: appModel.registeredFamilyProfile,
+            selectedProfile: appModel.selectedProfile,
+            hasHAIdentity: appModel.homeAssistantCurrentUser != nil
+        )
+    }
 
     var body: some View {
         List {
@@ -49,26 +75,51 @@ struct SystemView: View {
                             .lineLimit(1)
                     }
                 }
-                if appModel.registeredFamilyProfile == .nico {
+                NavigationLink {
+                    PermissionsCenterView(appModel: appModel)
+                } label: {
+                    Label("Berechtigungen", systemImage: "checkmark.shield.fill")
+                }
+                if showOwnerServices {
                     NavigationLink {
                         FactoryStandaloneView(appModel: appModel)
                     } label: {
                         Label("Factory", systemImage: "network")
                     }
                     .accessibilityIdentifier("system-factory-workspace")
-                }
-                NavigationLink {
-                    PermissionsCenterView(appModel: appModel)
-                } label: {
-                    Label("Berechtigungen", systemImage: "checkmark.shield.fill")
-                }
-                if appModel.registeredFamilyProfile == .nico {
+                    NavigationLink {
+                        RunnerDashboardView(model: IOSNextRuntime.shared.runnerModel)
+                    } label: {
+                        Label("Runner", systemImage: "server.rack")
+                    }
+                    .accessibilityIdentifier("system-runner-dashboard")
+                    NavigationLink {
+                        AdminAreaView(appModel: appModel)
+                    } label: {
+                        Label("Owner Control Center", systemImage: "person.badge.key.fill")
+                    }
+                    .accessibilityIdentifier("system-owner-control")
                     NavigationLink {
                         LiveOperationsView()
                     } label: {
                         Label("Live Operations", systemImage: "waveform.path.ecg")
                     }
                     .accessibilityIdentifier("system-live-operations")
+                } else if OwnerServiceNavigationPolicy.showRecovery(
+                    familyBrokerConfigured: appModel.familyBrokerConfigured,
+                    registeredProfile: appModel.registeredFamilyProfile
+                ) {
+                    NavigationLink {
+                        ContentUnavailableView(
+                            "Owner-Identität noch nicht bestätigt",
+                            systemImage: "lock.shield",
+                            description: Text("Home Assistant ist unabhängig verbunden. Für den Owner-Zugang ist die sichere Familienregistrierung und Gerätefreigabe erforderlich. Es werden keine Owner-Daten ohne Autorisierung geladen.")
+                        )
+                        .navigationTitle("Owner-Zugang")
+                    } label: {
+                        Label("Owner-Zugang prüfen", systemImage: "lock.shield")
+                    }
+                    .accessibilityIdentifier("system-owner-recovery")
                 }
                 NavigationLink {
                     DiagnosticsView(appModel: appModel)
