@@ -1,0 +1,141 @@
+name: iOS Next 1.7.3 Build 31 — Isolated Unsigned Test IPA
+
+on:
+  push:
+    branches:
+      - release-prep/iosnext-173-build31-unsigned
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iosnext-173-build31-unsigned-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Verify tested base and source-only testbuild allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("project.yml").read_text()
+          assert p.count("        MARKETING_VERSION: 1.7.3\n        CURRENT_PROJECT_VERSION: 31\n") == 1
+          assert Path("Docs/Releases/1.7.3.md").is_file()
+          assert Path("Info.plist").is_file()
+          print("IOS173_UNSIGNED_VERSION=PASS; RELEASE_AUTHORITY=NOT_GRANTED; REAL_E2E=UNVERIFIED")
+          PY
+          BASE_SHA=a5e1706eb1ed38b2a30e58a528f362dfda79d4d0
+          git cat-file -e "$BASE_SHA^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" HEAD
+          python3 - "$BASE_SHA" <<'PY'
+          import subprocess, sys
+          diff = set(subprocess.check_output(
+              ["git", "diff", "--name-only", sys.argv[1], "HEAD"], text=True
+          ).splitlines())
+          permitted = {
+              "project.yml", "Docs/Releases/1.7.3.md",
+              ".github/workflows/iosnext-173-unsigned-test-ipa.yml",
+          }
+          assert diff == permitted, f"unreviewed testbuild changes: {sorted(diff ^ permitted)}"
+          print("IOS173_TESTBUILD_SOURCE_PIN=PASS; APP_SOURCE_UNCHANGED")
+          PY
+          python3 - <<'PY'
+          import json, urllib.request
+          req = urllib.request.Request(
+              "https://api.github.com/repos/Bambis-Lab/ios-next-build/actions/runs/40194680124",
+              headers={"User-Agent": "IOSNext-gated-testbuild"},
+          )
+          with urllib.request.urlopen(req, timeout=15) as response:
+              run = json.load(response)
+          assert run["status"] == "completed" and run["conclusion"] == "success"
+          assert run["head_sha"] == "a5e1706eb1ed38b2a30e58a528f362dfda79d4d0"
+          print("IOS173_TESTBUILD_UPSTREAM_XCODE27_G99=PASS")
+          PY
+
+  unsigned-ipa:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      CM_COMMIT: a5e1706eb1ed38b2a30e58a528f362dfda79d4d0
+      EXPECTED_VERSION: 1.7.3
+      EXPECTED_BUILD: '31'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare isolated free-sideload app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          [[ "$(xcrun --sdk iphoneos --show-sdk-version)" == 27.* ]]
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          bash Scripts/prepare_free_sideload_project.sh
+          grep -Fq 'MARKETING_VERSION: 1.7.3' project.free.yml
+          grep -Fq 'CURRENT_PROJECT_VERSION: 31' project.free.yml
+      - name: Build unsigned iPhoneOS ARM64 development IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project IOSNext.xcodeproj \
+            -scheme IOSNext \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios173-unsigned-derived" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+          echo "IOS173_UNSIGNED_DEVICE_BUILD=PASS"
+      - name: Verify bundle provenance and archive unsigned test IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/ios173-unsigned-derived/Build/Products/Release-iphoneos/IOSNext.app"
+          test -x "$APP/IOSNext"
+          PLIST="$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = 'de.nicofroeba16.iosnext'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = '1.7.3'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")" = '31'
+          file "$APP/IOSNext" | grep -q arm64
+          ! find "$APP" -type d -name '*.appex' | grep -q .
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("Sources/Resources/build_info.json").read_text())
+          assert data["source_commit"] == "a5e1706eb1ed38b2a30e58a528f362dfda79d4d0"
+          assert data["version"] == "1.7.3" and data["build"] == "31"
+          assert data["build_flavor"] == "free-sideload"
+          print("IOS173_TESTBUILD_METADATA=PASS")
+          PY
+          OUT="$RUNNER_TEMP/ios173-unsigned-out"
+          mkdir -p "$OUT/Payload"
+          cp -R "$APP" "$OUT/Payload/IOSNext.app"
+          (cd "$OUT" && /usr/bin/zip -qry IOSNext-1.7.3-Build31-unsigned.ipa Payload)
+          unzip -t "$OUT/IOSNext-1.7.3-Build31-unsigned.ipa" >/dev/null
+          (cd "$OUT" && shasum -a 256 IOSNext-1.7.3-Build31-unsigned.ipa > SHA256SUMS.txt)
+          printf '%s\n' 'Unsigned test artifact only; SideStore/GitHub release v1.7.2 remains unchanged. E2E gate not passed.' > "$OUT/UNRELEASED.txt"
+          echo "IOS173_UNSIGNED_IPA_PACKAGING=PASS; SIDESTORE_PUBLICATION=NO"
+      - name: Preserve unsigned test IPA only — never publish a release or feed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-1.7.3-Build31-UNSIGNED-TEST-ONLY
+          path: |
+            ${{ runner.temp }}/ios173-unsigned-out/IOSNext-1.7.3-Build31-unsigned.ipa
+            ${{ runner.temp }}/ios173-unsigned-out/SHA256SUMS.txt
+            ${{ runner.temp }}/ios173-unsigned-out/UNRELEASED.txt
+          retention-days: 30
+          if-no-files-found: error
