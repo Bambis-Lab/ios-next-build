@@ -60,12 +60,23 @@ struct ChatInboxView: View {
                         .accessibilityIdentifier("chat-inbox-family")
                         .buttonStyle(.plain)
                     }
-                } else if appModel.familyBrokerConfigured &&
-                            appModel.registeredFamilyProfile != nil {
+                } else {
                     Section("Familie") {
-                        Label("Familiengruppe noch nicht verfügbar", systemImage: "person.3.sequence")
+                        Label(
+                            !appModel.familyBrokerConfigured
+                                ? "Familienchat noch nicht eingerichtet"
+                                : appModel.registeredFamilyProfile == nil
+                                    ? "Familienidentität wird geprüft"
+                                    : "Familiengruppe noch nicht verfügbar",
+                            systemImage: "person.3.sequence"
+                        )
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("chat-inbox-family-pending")
+                        Text(!appModel.familyBrokerConfigured
+                            ? "Ein verifizierter Familien-Broker ist für die fünf echten Kontakte und den Gruppenchat erforderlich."
+                            : "Kontakte erscheinen erst nach bestätigter Home-Assistant- und Geräteregistrierung.")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("chat-inbox-family-pending")
                     }
                 }
 
@@ -196,7 +207,7 @@ struct ChatInboxView: View {
         }
         .onDisappear {
             // Conversation detail owns its own lifecycle while pushed.
-            if destination == nil {
+            if destination == nil && !showingChatSettings {
                 IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared()
             }
         }
