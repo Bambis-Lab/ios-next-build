@@ -35,6 +35,26 @@ struct LiveOperationsView: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 statusCard
 
+                // The existing Runner endpoint can expose Commander rather
+                // than the separate MCP/SentinelX operations protocol.
+                // Display its independently authenticated telemetry without
+                // inventing MCP events or claiming operations are LIVE.
+                if let error = model.lastError,
+                   error.contains("Commander-Live-Ereignisse") {
+                    NavigationLink {
+                        CommanderLiveDetailView(model: runtime.runnerModel)
+                    } label: {
+                        IOS27StatusCard(
+                            title: "Runner Live",
+                            value: "Kompatibler Datenstrom",
+                            symbol: "server.rack",
+                            tint: .blue,
+                            detail: "Der Runner liefert Commander-Daten. Die vorhandene Runner-Live-Ansicht kann diese separat anzeigen. MCP-/SentinelX-Operationen benötigen einen eigenen verifizierten Backend-Vertrag."
+                        )
+                    }
+                    .accessibilityIdentifier("live-operations-commander-fallback")
+                }
+
                 if !model.activeOperations.isEmpty {
                     IOS27SectionHeader(title: "Aktive Vorgänge", subtitle: "Sanitisierte Master-Ereignisse")
                     ForEach(model.activeOperations) { operation in
