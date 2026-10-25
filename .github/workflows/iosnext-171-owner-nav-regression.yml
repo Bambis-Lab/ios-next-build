@@ -1,0 +1,92 @@
+name: iOS Next 1.7.1 Owner Navigation Regression
+on:
+  push:
+    branches:
+      - fix/iosnext-171-owner-navigation-regression
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ios171-owner-navigation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Assert legacy navigation restored without owner privilege bypass
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          ui = Path("Sources/Features/SystemView.swift").read_text()
+          admin = Path("Sources/Features/AdminAreaView.swift").read_text()
+          backend = Path("Sources/Core/FamilyBootstrapClient.swift").read_text()
+          model = Path("Sources/Core/AppModel.swift").read_text()
+          tests = Path("Tests/FamilyIdentityTests.swift").read_text()
+          assert "enum OwnerServiceNavigationPolicy" in ui
+          assert "if familyBrokerConfigured { return registeredProfile == .nico }" in ui
+          assert "return hasHAIdentity && selectedProfile == .nico" in ui
+          assert "system-factory-workspace" in ui and "system-runner-dashboard" in ui
+          assert "system-owner-control" in ui and "system-live-operations" in ui
+          assert "system-owner-recovery" in ui
+          assert "appModel?.registeredFamilyProfile != .nico" in admin
+          assert "model.clearFamilyOwnerSession()" in admin
+          assert "role == \"owner\" && self.haUserID == haUserID && self.deviceID == deviceID" in backend
+          assert 'role == "member" && profile != .nico' in backend
+          assert "selectedProfile = .nico" in model
+          for name in (
+              "testLegacyPersonalNavigationRestoresOwnerModulesAfterHALogin",
+              "testFamilyMemberNeverReceivesOwnerNavigationFromSelectedProfile",
+              "testVerifiedNicoNavigationIsIndependentOfRunnerOrFactoryConnectivity",
+              "testUnverifiedFamilyIdentityOnlyOffersOwnerRecovery",
+          ):
+              assert "func " + name in tests, name
+          print("IOS171_OWNER_NAV_SOURCE=PASS; OWNER_BYPASS=DENIED")
+          PY
+
+  xcode27:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare iPhone 18 Pro Max simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/owner-nav
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" > build/owner-nav/boot.log 2>&1
+      - name: Run owner navigation and family authorization XCTest
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/owner-nav/DerivedData \
+            -resultBundlePath build/owner-nav/OwnerNavigation.xcresult \
+            '-only-testing:IOSNextTests/FamilyIdentityTests' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/owner-nav/OwnerNavigation.log
+          grep -Eq '\\*\\* TEST (EXECUTE )?SUCCEEDED \\*\\*' build/owner-nav/OwnerNavigation.log
+          echo "IOS171_OWNER_NAV_XCTEST=PASS"
+      - name: Preserve regression evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOS171-OwnerNavigation-GatedEvidence
+          path: |
+            build/owner-nav/OwnerNavigation.log
+            build/owner-nav/OwnerNavigation.xcresult
+            build/owner-nav/boot.log
+          retention-days: 14
+          if-no-files-found: warn
