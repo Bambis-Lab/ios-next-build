@@ -48,6 +48,45 @@ final class ChatDraftSafetyTests: XCTestCase {
         ))
     }
 
+    func testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken() {
+        // Backend /v2/family/register intentionally grants Nico a
+        // member-scoped chat token; Owner authorization requires a second,
+        // separately approved P-256 device session in AdminAreaView.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil, chatRole: .owner
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi, chatRole: .owner
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: false, verifiedProfile: .nico, chatRole: .owner
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: nil
+        ))
+    }
+
+    func testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured() {
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi, chatRole: .member
+        ))
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .timo, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .owner
+        ))
+    }
+
     func testDraftIsPreservedWhenNoContactSelected() async {
         let chat = ChatModel()
         chat.recipientUserID = ""
