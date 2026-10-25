@@ -8,6 +8,7 @@ struct ChatInboxView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var searchText = ""
     @State private var destination: ChatInboxDestination?
+    @State private var showingChatSettings = false
     @State private var showingMemberTickets = false
     @State private var showingNewTicket = false
     @State private var showingOwnerTickets = false
@@ -15,12 +16,10 @@ struct ChatInboxView: View {
     private enum ChatInboxDestination: Hashable, Identifiable {
         case family
         case person(String)
-        case setup
         var id: String {
             switch self {
             case .family: "family"
             case .person(let userID): "person:\(userID)"
-            case .setup: "setup"
             }
         }
     }
@@ -152,13 +151,19 @@ struct ChatInboxView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Chat einrichten", systemImage: "gearshape") {
-                    destination = .setup
+                    showingChatSettings = true
                 }
                 .accessibilityIdentifier("chat-inbox-settings")
             }
         }
-        .navigationDestination(item: $destination) { _ in
-            ChatView(appModel: appModel, chatModel: chatModel)
+        .navigationDestination(item: $destination) { selected in
+            switch selected {
+            case .family, .person:
+                ChatView(appModel: appModel, chatModel: chatModel)
+            }
+        }
+        .sheet(isPresented: $showingChatSettings) {
+            ChatSettingsView(appModel: appModel, chatModel: chatModel)
         }
         .sheet(isPresented: $showingMemberTickets) {
             MemberTicketInboxView(chatModel: chatModel)
