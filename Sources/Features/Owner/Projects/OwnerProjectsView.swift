@@ -40,6 +40,14 @@ struct OwnerProjectsView: View {
                             Text("Bei \(missingCISnapshots) von \(snapshots.count) \(snapshots.count == 1 ? "Projekt" : "Projekten") fehlen CI-Snapshots.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                            Text("Backend-CI-Adapter, GitHub-App-Zugriff und Repository-Zuordnung prüfen. Das Fehlen eines Snapshots bedeutet weder CI-Erfolg noch keine Läufe.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Button("CI-Status erneut abfragen", systemImage: "arrow.clockwise") {
+                                Task { await model.refreshStatusV2() }
+                            }
+                            .font(.caption.weight(.semibold))
+                            .accessibilityIdentifier("owner-projects-ci-reload")
                         }
                         Spacer(minLength: 0)
                     }
