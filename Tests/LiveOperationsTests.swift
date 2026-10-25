@@ -4,6 +4,24 @@ import XCTest
 final class LiveOperationsTests: XCTestCase {
     private let token = "0123456789abcdef0123456789abcdef"
 
+    func testCommanderEnvelopeIsNotSilentlyMislabelledAsMCPOperation() throws {
+        let commander = Data(#"{"schema":1,"seq":1,"type":"commander.snapshot","timestamp":"2026-10-25T08:00:00Z","payload":{}}"#.utf8)
+        XCTAssertThrowsError(try LiveOperationsClient.decodeEnvelope(commander)) { error in
+            guard case LiveOperationsError.incompatibleRunnerStream = error else {
+                return XCTFail("The Commander stream must be diagnosed, never shown as MCP LIVE: \(error)")
+            }
+        }
+    }
+
+    func testMalformedOperationsEnvelopeReportsSafeGermanError() throws {
+        let bad = Data(#"{"schema":1,"source":"mcp","type":"heartbeat","payload":{}}"#.utf8)
+        XCTAssertThrowsError(try LiveOperationsClient.decodeEnvelope(bad)) { error in
+            guard case LiveOperationsError.invalidMessage = error else {
+                return XCTFail("Unexpected decoding failure: \(error)")
+            }
+        }
+    }
+
     func testLiveURLMapsHTTPSAndCarriesBothSequences() throws {
         let configuration = LiveOperationsConfiguration(
             baseURL: URL(string: "https://live.example/base/")!,
