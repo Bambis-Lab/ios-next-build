@@ -1,0 +1,103 @@
+name: iOS Next 1.7.1 - iPhoneOS Unsigned Installation Candidate
+on:
+  push:
+    branches:
+      - build/iosnext-171-ipa-candidate
+permissions:
+  contents: read
+concurrency:
+  group: iosnext-171-device-ipa-build
+  cancel-in-progress: true
+jobs:
+  build-unsigned-ipa:
+    runs-on: xcode-27
+    timeout-minutes: 75
+    env:
+      EXPECTED_SOURCE_SHA: bcaedcdc622ea298e4dd20670f2b2c8aeabeacbe
+      BACKEND_SHA: 47eda63a49f37ba21937d5ab9056852d60bc9b24
+      FAMILY_BROKER_URL: ${{ vars.IOSNEXT_FAMILY_BROKER_URL }}
+    steps:
+      - name: Checkout isolated pinned release-build branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify exact source tree and configure free sideload package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_SOURCE_SHA"
+          test -z "$(git diff --name-only HEAD^ HEAD -- Sources Tests UITests project.yml Info.plist Scripts)"
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
+          xcodebuild -version
+          test -f Docs/Releases/1.7.1.md
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("project.yml")
+          src=p.read_text()
+          before="        MARKETING_VERSION: 1.6.4\n        CURRENT_PROJECT_VERSION: 27\n"
+          assert src.count(before)==1, "unexpected source metadata, refusing package"
+          p.write_text(src.replace(before,"        MARKETING_VERSION: 1.7.1\n        CURRENT_PROJECT_VERSION: 29\n",1))
+          PY
+          if [ -n "$FAMILY_BROKER_URL" ]; then
+            case "$FAMILY_BROKER_URL" in
+              https://*) ;;
+              *) echo "::error::Family broker must be an HTTPS URL"; exit 1;;
+            esac
+          fi
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          fi
+          CM_COMMIT="$EXPECTED_SOURCE_SHA" EXPECTED_VERSION=1.7.1 EXPECTED_BUILD=29 \
+            bash Scripts/prepare_free_sideload_project.sh
+      - name: Build real iPhoneOS Release arm64 without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/iosnext-171
+          xcodebuild build -project IOSNext.xcodeproj -scheme IOSNext \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/iosnext-171/DerivedData \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            "IOSNEXT_FAMILY_BROKER_URL=$FAMILY_BROKER_URL" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/iosnext-171/build.log
+      - name: Validate app and package isolated unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=build/iosnext-171/DerivedData/Build/Products/Release-iphoneos/IOSNext.app
+          test -d "$APP" && test -x "$APP/IOSNext"
+          PLIST="$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = de.nicofroeba16.iosnext
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")" = 1.7.1
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")" = 29
+          file "$APP/IOSNext" | grep -q arm64
+          if find "$APP" -type d -name '*.appex' | grep -q .; then
+            echo "::error::Unsupported extension in SideStore candidate"; exit 1
+          fi
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          data=json.loads(Path("Sources/Resources/build_info.json").read_text())
+          assert data["source_commit"] == os.environ["EXPECTED_SOURCE_SHA"]
+          assert data["version"] == "1.7.1" and data["build"] == "29"
+          assert data["build_flavor"] == "free-sideload"
+          PY
+          mkdir -p build/iosnext-171/out/Payload
+          cp -R "$APP" build/iosnext-171/out/Payload/IOSNext.app
+          (cd build/iosnext-171/out && /usr/bin/zip -qry IOSNext-1.7.1-build29-UNSIGNED-TEST-ONLY.ipa Payload)
+          IPA=build/iosnext-171/out/IOSNext-1.7.1-build29-UNSIGNED-TEST-ONLY.ipa
+          unzip -t "$IPA" > /dev/null
+          shasum -a 256 "$IPA" > build/iosnext-171/out/SHA256SUMS.txt
+          printf 'source_sha=%s\nbackend_sha=%s\nbuild_workflow_sha=%s\nstatus=UNSIGNED_TEST_ONLY_NOT_RELEASED\nfamily_staging_e2e=UNVERIFIED\n' \
+            "$EXPECTED_SOURCE_SHA" "$BACKEND_SHA" "$GITHUB_SHA" > build/iosnext-171/out/provenance.txt
+          echo "IOSNEXT_171_DEVICE_IPA=PASS_UNPUBLISHED_TEST_ARTIFACT"
+      - name: Upload isolated IPA for real-device validation, never publish
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-1.7.1-build29-UNSIGNED-TEST-ONLY
+          path: |
+            build/iosnext-171/out/IOSNext-1.7.1-build29-UNSIGNED-TEST-ONLY.ipa
+            build/iosnext-171/out/SHA256SUMS.txt
+            build/iosnext-171/out/provenance.txt
+            build/iosnext-171/build.log
+          retention-days: 14
+          if-no-files-found: error
