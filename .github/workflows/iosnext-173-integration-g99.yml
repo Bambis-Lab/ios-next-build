@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/iosnext-173-integration-00-07
+      - fix/iosnext-173-chat-transport-security
       - diagnostic/iosnext-173-factory-oauth-readonly
   workflow_dispatch:
 permissions:
@@ -61,6 +62,15 @@ jobs:
           assert "configuration: .ephemeral," in oauth and "delegate: FactoryNoRedirects()" in oauth
           assert "testOAuthTransportRefusesOffOriginRedirectsIncluding307TokenPost" in Path("Tests/FactoryMCPIntegrationTests.swift").read_text()
           assert "incompatibleRunnerStream" in live
+          relay = Path("Sources/Core/ChatRelayClient.swift").read_text()
+          chatmodel = Path("Sources/Core/ChatModel.swift").read_text()
+          chattests = Path("Tests/ChatDraftSafetyTests.swift").read_text()
+          assert "class ChatRelayNoRedirects" in relay
+          assert "completionHandler(nil)" in relay
+          assert "delegate: ChatRelayNoRedirects()" in relay
+          assert "ChatContactDiscoveryPolicy.mayUseLegacyRecipient" in chatmodel
+          assert "testChatRelayAlwaysRefusesTokenBearingHTTPRedirects" in chattests
+          assert "testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails" in chattests
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY
 
