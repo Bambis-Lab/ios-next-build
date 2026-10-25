@@ -68,7 +68,7 @@ struct ChatView: View {
         .task { await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel) }
         .onDisappear { IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared() }
         .sheet(isPresented: $isPresentingConfiguration) {
-            ChatConfigurationView(chatModel: chatModel)
+            ChatSettingsView(appModel: appModel, chatModel: chatModel)
         }
         .sheet(isPresented: $isPresentingSecurity) {
             ChatSecurityView(chatModel: chatModel)
@@ -542,7 +542,7 @@ private struct ChatImagePreview: View {
     }
 }
 
-private struct ChatConfigurationView: View {
+struct ChatConfigurationView: View {
     let chatModel: ChatModel
     @Environment(\.dismiss) private var dismiss
     @State private var endpoint = ""
