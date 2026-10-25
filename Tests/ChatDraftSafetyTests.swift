@@ -50,26 +50,28 @@ final class ChatDraftSafetyTests: XCTestCase {
     }
 
     func testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken() {
-        // Backend /v2/family/register intentionally grants Nico a
-        // member-scoped chat token; Owner authorization requires a second,
-        // separately approved P-256 device session in AdminAreaView.
+        // The Owner inbox is independent from the Chat relay; the tap still
+        // enters AdminAreaView which requires a separate approved P-256 Owner
+        // device session before showing or mutating Owner tickets.
         XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
-            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
+            familyBrokerConfigured: true, verifiedProfile: .nico
         ))
         XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
             familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
         ))
         XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
-            familyBrokerConfigured: true, verifiedProfile: nil, chatRole: .owner
+            familyBrokerConfigured: true, verifiedProfile: nil
         ))
         XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
-            familyBrokerConfigured: true, verifiedProfile: .gabi, chatRole: .owner
+            familyBrokerConfigured: true, verifiedProfile: .gabi
         ))
         XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
-            familyBrokerConfigured: false, verifiedProfile: .nico, chatRole: .owner
+            familyBrokerConfigured: false, verifiedProfile: .nico
         ))
-        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
-            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: nil
+        // No Chat token is required for the *navigation link*: Owner rights
+        // remain exclusively in the independently authorized backend.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico
         ))
     }
 
