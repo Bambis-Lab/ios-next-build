@@ -38,6 +38,13 @@ struct ProjectPresentationSnapshot: Identifiable, Equatable, Sendable {
     var hasCISnapshot: Bool {
         ciStatus != nil || ciConclusion != nil || ciWorkflow != nil || ciHeadSHA != nil || ciUpdatedAt != nil || ciError != nil
     }
+
+    /// Only repository-backed projects require GitHub CI evidence. A reported
+    /// adapter error is diagnostic metadata, not a verified Actions run.
+    var requiresCISnapshotReview: Bool {
+        guard repository != nil else { return false }
+        return !hasCISnapshot || ciStatus == "adapter_not_configured" || ciStatus == "unavailable"
+    }
 }
 
 extension Array where Element == AdminProjectStatusV2 {
