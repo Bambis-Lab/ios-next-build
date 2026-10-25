@@ -440,6 +440,13 @@ final class IOSNextUITests: XCTestCase {
 
     func testChatComposerInteraction() {
         let application = launch("chat")
+        XCTAssertTrue(application.navigationBars["Chats"].waitForExistence(timeout: 5),
+                      "New chats inbox must be the root of the Chat tab")
+        XCTAssertTrue(application.buttons["chat-inbox-family"].waitForExistence(timeout: 5),
+                      "Synthetic five-person family group row missing")
+        let mika = application.buttons["chat-inbox-person-Mika"].firstMatch
+        XCTAssertTrue(mika.waitForExistence(timeout: 5), "Verified preview contact not visible")
+        mika.tap()
         let field = application.textFields["chat-composer-field"].firstMatch
         tapWhenVisible(field, in: application, label: "Chat composer")
         application.typeText("Hallo aus XCUITest")
@@ -915,6 +922,10 @@ extension IOSNextUITests {
 
     private func phase2RunChatInteraction() {
         let application = phase2Product("chat")
+        XCTAssertTrue(application.navigationBars["Chats"].waitForExistence(timeout: 5),
+                      "PHASE2_CLASS=wrong_surface new chats inbox missing")
+        let mika = application.buttons["chat-inbox-person-Mika"].firstMatch
+        tapWhenVisible(mika, in: application, label: "Mika private conversation")
         let field = application.textFields["chat-composer-field"].firstMatch
         tapWhenVisible(field, in: application, label: "Chat composer")
         application.typeText("Phase2 Visual")

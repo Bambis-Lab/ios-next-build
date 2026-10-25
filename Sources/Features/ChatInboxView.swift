@@ -210,8 +210,8 @@ struct ChatInboxView: View {
             Image(systemName: symbol)
                 .font(.title2)
                 .frame(width: 44, height: 44)
-                .foregroundStyle(.tint)
-                .background(.tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                .foregroundStyle(Color.accentColor)
+                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)

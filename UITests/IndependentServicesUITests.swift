@@ -33,8 +33,13 @@ final class IndependentServicesUITests: XCTestCase {
         }
 
         tapService("chat", in: app)
+        XCTAssertTrue(app.navigationBars["Chats"].waitForExistence(timeout: 8),
+                      "Chats inbox cannot be opened before HA configuration")
+        XCTAssertTrue(app.buttons["chat-inbox-settings"].waitForExistence(timeout: 5),
+                      "Chats inbox has no setup entry")
+        app.buttons["chat-inbox-settings"].tap()
         XCTAssertTrue(app.buttons["Chatoptionen"].waitForExistence(timeout: 8),
-                      "Chat Relay cannot be opened before HA configuration")
+                      "Chat Relay setup must remain accessible without HA")
         app.buttons["Schließen"].tap()
 
         tapService("controlCenter", in: app)
