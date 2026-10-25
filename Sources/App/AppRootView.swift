@@ -280,7 +280,7 @@ private struct StandaloneChatView: View {
 
     var body: some View {
         NavigationStack {
-            ChatView(appModel: appModel, chatModel: chatModel)
+            ChatInboxView(appModel: appModel, chatModel: chatModel)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Schließen", systemImage: "xmark") { dismiss() }

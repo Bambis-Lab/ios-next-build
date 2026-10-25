@@ -5,6 +5,7 @@ struct AdminAreaView: View {
     @Environment(\.scenePhase) private var scenePhase
     let appModel: AppModel?
     let factoryEmbedded: Bool
+    let ticketsOnly: Bool
     @State private var model = AdminControlModel()
     @State private var runtime = IOSNextRuntime.shared
     @State private var isPresentingConfiguration = false
@@ -12,9 +13,10 @@ struct AdminAreaView: View {
     @State private var isLockingControlCenter = false
     @State private var dismissAfterLock = false
 
-    init(appModel: AppModel? = nil, factoryEmbedded: Bool = false) {
+    init(appModel: AppModel? = nil, factoryEmbedded: Bool = false, ticketsOnly: Bool = false) {
         self.appModel = appModel
         self.factoryEmbedded = factoryEmbedded
+        self.ticketsOnly = ticketsOnly
     }
 
     var body: some View {
@@ -117,7 +119,7 @@ struct AdminAreaView: View {
 
     private var ownerContent: some View {
         content
-                    .navigationTitle(factoryEmbedded ? "Owner & Projekte" : "Control Center")
+                    .navigationTitle(ticketsOnly ? "Admin-Anfragen" : (factoryEmbedded ? "Owner & Projekte" : "Control Center"))
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
@@ -162,6 +164,9 @@ struct AdminAreaView: View {
             lockedSurface(message: "Der Bereich ist lokal gesperrt.", authenticating: false)
         case .unlocking:
             lockedSurface(message: "Der Bereich ist lokal gesperrt.", authenticating: true)
+        case .unlocked where ticketsOnly:
+            OwnerTicketInboxView(model: model)
+                .task { await model.refresh() }
         case .unlocked:
             IOSNextControlCenterLockHost(isLocking: isLockingControlCenter, onFinished: finishLock) {
                 IOSNextControlCenterUnlockHost {

@@ -129,7 +129,7 @@ struct AppShellView: View {
                 }
             }
         case .rooms: RoomsView(appModel: appModel)
-        case .chat: ChatView(appModel: appModel, chatModel: chatModel)
+        case .chat: ChatInboxView(appModel: appModel, chatModel: chatModel)
         case .media: MediaView(appModel: appModel)
         case .system: SystemView(appModel: appModel)
         }

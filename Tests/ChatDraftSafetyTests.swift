@@ -89,4 +89,29 @@ final class ChatDraftSafetyTests: XCTestCase {
     }
 
 
+    func testInboxPreviewsRemainIsolatedAcrossDirectAndFamilyChats() {
+        var family = ChatMessage(
+            id: "family-message", senderUserID: "ha-mika", recipientUserID: "ha-nico",
+            kind: .text, contentType: "text/plain", data: Data("Alle".utf8),
+            createdAt: .now, direction: .incoming, delivery: .received
+        )
+        family.conversationID = "family"
+        let mika = ChatMessage(
+            id: "mika-message", senderUserID: "ha-mika", recipientUserID: "ha-nico",
+            kind: .text, contentType: "text/plain", data: Data("Privat Mika".utf8),
+            createdAt: .now, direction: .incoming, delivery: .received
+        )
+        let juli = ChatMessage(
+            id: "juli-message", senderUserID: "ha-nico", recipientUserID: "ha-juli",
+            kind: .text, contentType: "text/plain", data: Data("Privat Juli".utf8),
+            createdAt: .now, direction: .outgoing, delivery: .queued
+        )
+        let items = [family, mika, juli]
+        XCTAssertEqual(ChatInboxPolicy.previewText(items, peerUserID: nil), "Alle")
+        XCTAssertEqual(ChatInboxPolicy.previewText(items, peerUserID: "ha-mika"), "Privat Mika")
+        XCTAssertEqual(ChatInboxPolicy.previewText(items, peerUserID: "ha-juli"), "Privat Juli")
+        XCTAssertEqual(ChatInboxPolicy.previewText(items, peerUserID: "ha-timo"), "Noch keine Nachrichten")
+    }
+
+
 }
