@@ -33,7 +33,7 @@ final class LiveOperationsTests: XCTestCase {
             lastSentinelSequence: 9
         ))
         XCTAssertEqual(url.scheme, "wss")
-        XCTAssertTrue(url.path.hasSuffix("/v1/live"))
+        XCTAssertTrue(url.path.hasSuffix("/v1/operations/live"))
         let items = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(items["last_mcp_seq"], "42")
         XCTAssertEqual(items["last_sentinelx_seq"], "9")
