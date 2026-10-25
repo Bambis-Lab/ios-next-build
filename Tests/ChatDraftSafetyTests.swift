@@ -4,6 +4,54 @@ import XCTest
 
 @MainActor
 final class ChatDraftSafetyTests: XCTestCase {
+    func testQuietFamilyChatLongPollDoesNotTimeoutBeforeBackendResponse() {
+        XCTAssertEqual(ChatRelayPollingPolicy.serverWaitSeconds, 25)
+        XCTAssertGreaterThan(
+            ChatRelayPollingPolicy.longPollRequestTimeout,
+            Double(ChatRelayPollingPolicy.serverWaitSeconds) + 10,
+            "A healthy empty 25-second backend wait must not turn Chat offline"
+        )
+        XCTAssertGreaterThan(
+            ChatRelayPollingPolicy.sessionResourceTimeout,
+            ChatRelayPollingPolicy.longPollRequestTimeout,
+            "The URLSession resource timeout may not preempt an authenticated long-poll request"
+        )
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-mika&wait=25&limit=64",
+                method: "GET"
+            ),
+            ChatRelayPollingPolicy.longPollRequestTimeout
+        )
+    }
+
+    func testOnlyAuthenticatedMessageReceiveLongPollGetsExtendedTimeout() {
+        for path in [
+            "v1/chat/session",
+            "v1/chat/contacts",
+            "v1/chat/identities/ha-gabi",
+            "v1/chat/messages",
+            "v1/chat/messages?recipient_device_id=ios-mika&wait=0&limit=64",
+            "v1/chat/messages?recipient_device_id=ios-mika&wait=24&limit=64",
+            "v1/chat/tickets",
+            "v2/family/challenge"
+        ] {
+            XCTAssertEqual(
+                ChatRelayPollingPolicy.timeout(for: path, method: "GET"),
+                ChatRelayPollingPolicy.ordinaryRequestTimeout,
+                "Unrelated request must keep its short timeout: \(path)"
+            )
+        }
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-mika&wait=25&limit=64",
+                method: "POST"
+            ),
+            ChatRelayPollingPolicy.ordinaryRequestTimeout,
+            "Sending E2EE messages must not silently inherit 42-second long-poll timeouts"
+        )
+    }
+
     func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
         let delegate = ChatRelayNoRedirects()
         let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))

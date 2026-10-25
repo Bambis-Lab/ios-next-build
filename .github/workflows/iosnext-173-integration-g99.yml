@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/iosnext-173-integration-00-07
+      - fix/iosnext-173-relay-longpoll-timeout
       - fix/iosnext-173-chat-transport-security
       - diagnostic/iosnext-173-factory-oauth-readonly
   workflow_dispatch:
@@ -77,6 +78,13 @@ jobs:
           assert "Owner tickets use the *independently approved* Admin backend" in inbox
           assert "testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken" in chattests
           assert "testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured" in chattests
+          assert "enum ChatRelayPollingPolicy" in relay
+          assert "serverWaitSeconds = 25" in relay
+          assert "longPollRequestTimeout: TimeInterval = 42" in relay
+          assert "sessionResourceTimeout: TimeInterval = 55" in relay
+          assert "request.timeoutInterval = ChatRelayPollingPolicy.timeout" in relay
+          assert "testQuietFamilyChatLongPollDoesNotTimeoutBeforeBackendResponse" in chattests
+          assert "testOnlyAuthenticatedMessageReceiveLongPollGetsExtendedTimeout" in chattests
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY
 
