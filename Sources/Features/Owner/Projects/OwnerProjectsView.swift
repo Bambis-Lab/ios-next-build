@@ -19,8 +19,14 @@ struct OwnerProjectsView: View {
                     Label("\(projectCount) \(projectCount == 1 ? "Projekt" : "Projekte")", systemImage: "folder.fill")
                         .foregroundStyle(.primary)
                     Spacer(minLength: 0)
-                    Label("\(model.ownerOpenTicketCount) \(model.ownerOpenTicketCount == 1 ? "Ticket" : "Tickets") offen", systemImage: "ticket.fill")
-                        .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
+                    if capabilities.supports(.tickets), model.ownerV2Error == nil {
+                        Label("\(model.ownerOpenTicketCount) \(model.ownerOpenTicketCount == 1 ? "Ticket" : "Tickets") offen", systemImage: "ticket.fill")
+                            .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
+                    } else {
+                        Label("Ticketstatus offen", systemImage: "ticket.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("owner-tickets-unverified")
+                    }
                 }
                 .font(.subheadline.weight(.semibold))
                 .padding(16)
