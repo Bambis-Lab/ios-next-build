@@ -25,6 +25,34 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         testCredentials.data = nil
     }
 
+    func testOAuthTransportRefusesOffOriginRedirectsIncluding307TokenPost() throws {
+        let delegate = FactoryNoRedirects()
+        let start = try XCTUnwrap(URL(string: issuer + "/token"))
+        let destination = try XCTUnwrap(URL(string: "https://unauthorized-host.invalid/steal"))
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: start)
+        defer {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+        let response = try XCTUnwrap(HTTPURLResponse(
+            url: start, statusCode: 307, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": destination.absoluteString]
+        ))
+        var forwarded: URLRequest?
+        var callbackInvoked = false
+        delegate.urlSession(
+            session, task: task,
+            willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: destination)
+        ) { candidate in
+            callbackInvoked = true
+            forwarded = candidate
+        }
+        XCTAssertTrue(callbackInvoked)
+        XCTAssertNil(forwarded, "OAuth credentials must never follow server redirects")
+    }
+
     func testFactoryConnectionMissingCredentialsIsNotAnError() {
         let model = FactoryConnectionModel(service: service())
         XCTAssertEqual(model.phase, .disconnected)
