@@ -19,12 +19,14 @@ jobs:
     steps:
       - name: Checkout isolated pinned release-build branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 5
       - name: Verify exact source tree and configure free sideload package
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_SOURCE_SHA"
-          test -z "$(git diff --name-only HEAD^ HEAD -- Sources Tests UITests project.yml Info.plist Scripts)"
+          git merge-base --is-ancestor "$EXPECTED_SOURCE_SHA" HEAD
+          test -z "$(git diff --name-only "$EXPECTED_SOURCE_SHA" HEAD -- Sources Tests UITests project.yml Info.plist Scripts)"
           test "$(xcrun --sdk iphoneos --show-sdk-version)" = "27.0"
           xcodebuild -version
           test -f Docs/Releases/1.7.1.md
