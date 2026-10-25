@@ -66,7 +66,9 @@ actor LiveOperationsClient {
         lastMCPSequence: Int64?,
         lastSentinelSequence: Int64?
     ) -> URL? {
-        let endpoint = configuration.baseURL.appending(path: "v1/live")
+        // /v1/live is the Commander feed; MCP/SentinelX use an independently
+        // authenticated, read-only Runner proxy with server-side token isolation.
+        let endpoint = configuration.baseURL.appending(path: "v1/operations/live")
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return nil }
         switch components.scheme?.lowercased() {
         case "https": components.scheme = "wss"
