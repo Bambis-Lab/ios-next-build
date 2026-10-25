@@ -130,6 +130,46 @@ final class ChatDraftSafetyTests: XCTestCase {
         }
     }
 
+    func testFamilyDeliveryRequiresExplicitSupportedAckContractBeforeAnyRead() throws {
+        let valid = Data(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":false}"#.utf8)
+        let supported = try JSONDecoder().decode(ChatDeliveryContract.self, from: valid)
+        XCTAssertTrue(supported.isSupported)
+        for payload in [
+            #"{"mode":"legacy","max_batch":64,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":0,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":257,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":10,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true}"#
+        ] {
+            let contract = try JSONDecoder().decode(ChatDeliveryContract.self, from: Data(payload.utf8))
+            XCTAssertFalse(contract.isSupported, "Incompatible Family Broker must never dequeue encrypted content")
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ChatDeliveryContract.self,
+            from: Data(#"{"mode":"ack_v1"}"#.utf8)
+        ))
+    }
+
+    func testAckV1BatchRequiresServerConfirmationAndLegacyRemainsOptional() throws {
+        let negotiated = try JSONDecoder().decode(
+            ChatRelayBatch.self,
+            from: Data(#"{"messages":[],"delivery_mode":"ack_v1"}"#.utf8)
+        )
+        XCTAssertEqual(negotiated.deliveryMode, "ack_v1")
+        XCTAssertTrue(negotiated.messages.isEmpty)
+        let legacy = try JSONDecoder().decode(
+            ChatRelayBatch.self, from: Data(#"{"messages":[]}"#.utf8)
+        )
+        XCTAssertNil(legacy.deliveryMode)
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-gabi&wait=25&limit=64&ack=1",
+                method: "GET"
+            ),
+            ChatRelayPollingPolicy.longPollRequestTimeout
+        )
+    }
+
     func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
         let delegate = ChatRelayNoRedirects()
         let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))
