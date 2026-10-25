@@ -132,6 +132,17 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         }
     }
 
+    func testOAuthNativeRedirectRejectionHasRedactedActionableDiagnostic() async throws {
+        FactoryMockProtocol.registrationBehavior(status: 400)
+        do {
+            _ = try await service().beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("The gateway must not be treated as registered when it rejects the native redirect")
+        } catch FactoryConnectionError.registrationRedirectURIRejected {
+            // Server reports the RFC-standard invalid_redirect_uris value.
+            // No registration response body or OAuth secret is shown.
+        }
+    }
+
     func testOAuthRegistrationMissingClientIDIsRejected() async throws {
         FactoryMockProtocol.registrationBehavior(returnClientID: false)
         do {
@@ -319,8 +330,9 @@ private final class FactoryMockProtocol: URLProtocol {
         }
         if path == "/register" {
             let state = mutex.withLock { (registerStatusCode, registerClientIDAvailable) }
-            let result: [String: Any] = state.1
-                ? ["client_id": "iosnext-test-public-client"] : [:]
+            let result: [String: Any] = state.0 == 400
+                ? ["error": "invalid_redirect_uris"]
+                : (state.1 ? ["client_id": "iosnext-test-public-client"] : [:])
             return (state.0, "application/json", try jsonData(result))
         }
         if path == "/token" {
