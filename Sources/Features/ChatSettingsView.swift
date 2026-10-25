@@ -57,11 +57,13 @@ struct ChatSettingsView: View {
                 }
 
                 if !appModel.familyBrokerConfigured {
-                    Section("Erweiterte Einstellungen") {
+                    Section {
                         Button("Manuelle Relay-Konfiguration", systemImage: "gearshape.2") {
                             showingTechnicalConfiguration = true
                         }
                         .accessibilityIdentifier("chat-settings-manual-relay")
+                    } header: {
+                        Text("Erweiterte Einstellungen")
                     } footer: {
                         Text("Nur für die persönliche Legacy-Installation. Manuelle Angaben ersetzen keine sichere Familienregistrierung.")
                     }
