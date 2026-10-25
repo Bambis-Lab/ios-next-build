@@ -71,6 +71,11 @@ jobs:
           assert "ChatContactDiscoveryPolicy.mayUseLegacyRecipient" in chatmodel
           assert "testChatRelayAlwaysRefusesTokenBearingHTTPRedirects" in chattests
           assert "testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails" in chattests
+          inbox = Path("Sources/Features/ChatInboxView.swift").read_text()
+          assert "ChatTicketVisibilityPolicy.ownerEntry" in inbox
+          assert "familyBrokerConfigured && verifiedProfile == .nico && chatRole != nil" in inbox
+          assert "testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken" in chattests
+          assert "testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured" in chattests
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY
 
