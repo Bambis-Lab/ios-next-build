@@ -115,6 +115,54 @@ final class FamilyIdentityTests: XCTestCase {
         ))
     }
 
+
+    func testLegacyPersonalNavigationRestoresOwnerModulesAfterHALogin() {
+        XCTAssertTrue(OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: false, registeredProfile: nil,
+            selectedProfile: .nico, hasHAIdentity: true
+        ))
+        XCTAssertFalse(OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: false, registeredProfile: nil,
+            selectedProfile: .nico, hasHAIdentity: false
+        ))
+        XCTAssertFalse(OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: false, registeredProfile: nil,
+            selectedProfile: .gabi, hasHAIdentity: true
+        ))
+    }
+
+    func testFamilyMemberNeverReceivesOwnerNavigationFromSelectedProfile() {
+        for member in [HomeProfile.mika, .juli, .gabi, .timo] {
+            XCTAssertFalse(OwnerServiceNavigationPolicy.showServices(
+                familyBrokerConfigured: true, registeredProfile: member,
+                selectedProfile: .nico, hasHAIdentity: true
+            ))
+            XCTAssertFalse(OwnerServiceNavigationPolicy.showRecovery(
+                familyBrokerConfigured: true, registeredProfile: member
+            ))
+        }
+    }
+
+    func testVerifiedNicoNavigationIsIndependentOfRunnerOrFactoryConnectivity() {
+        XCTAssertTrue(OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: true, registeredProfile: .nico,
+            selectedProfile: .gabi, hasHAIdentity: true
+        ))
+    }
+
+    func testUnverifiedFamilyIdentityOnlyOffersOwnerRecovery() {
+        XCTAssertFalse(OwnerServiceNavigationPolicy.showServices(
+            familyBrokerConfigured: true, registeredProfile: nil,
+            selectedProfile: .nico, hasHAIdentity: true
+        ))
+        XCTAssertTrue(OwnerServiceNavigationPolicy.showRecovery(
+            familyBrokerConfigured: true, registeredProfile: nil
+        ))
+        XCTAssertFalse(OwnerServiceNavigationPolicy.showRecovery(
+            familyBrokerConfigured: false, registeredProfile: nil
+        ))
+    }
+
     func testFamilyDeviceProofPersistsForSameAppInstallation() throws {
         let first = try FamilyDeviceBinding.identity()
         let again = try FamilyDeviceBinding.identity()
