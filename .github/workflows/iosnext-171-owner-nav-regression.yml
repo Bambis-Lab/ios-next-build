@@ -77,7 +77,7 @@ jobs:
             '-only-testing:IOSNextTests/FamilyIdentityTests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/owner-nav/OwnerNavigation.log
-          grep -Eq '\\*\\* TEST (EXECUTE )?SUCCEEDED \\*\\*' build/owner-nav/OwnerNavigation.log
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/owner-nav/OwnerNavigation.log
           echo "IOS171_OWNER_NAV_XCTEST=PASS"
       - name: Preserve regression evidence
         if: always()
