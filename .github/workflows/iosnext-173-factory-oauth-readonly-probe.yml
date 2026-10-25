@@ -1,0 +1,38 @@
+name: iOS Next 1.7.3 Factory OAuth - Read-only Metadata Proof
+on:
+  push:
+    branches: [diagnostic/iosnext-173-factory-oauth-readonly]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iosnext-173-factory-metadata-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  metadata:
+    runs-on: [self-hosted, Linux, X64, general]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout fixed iOS 1.7.3 candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Observe public OAuth metadata via HTTPS without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/oauth173
+          python3 Scripts/probe_factory_oauth_metadata.py | tee build/oauth173/metadata.log
+          if ! grep -q '^GATEWAY_METADATA=PUBLIC_CONTRACT_VERIFIED$' build/oauth173/metadata.log; then
+            echo "::error::Factory public OAuth metadata not verified from this runner. No client registration, token or iPhone session was attempted."
+            exit 1
+          fi
+          grep -q '^GATEWAY_USER_OAUTH_SESSION=NOT_TESTED$' build/oauth173/metadata.log
+          grep -q '^GATEWAY_AUTHENTICATED_MCP=NOT_TESTED$' build/oauth173/metadata.log
+          echo "IOS173_FACTORY_PUBLIC_METADATA=PASS; DCR_POST=NOT_TESTED; IPHONE_OAUTH=NOT_TESTED"
+      - name: Retain sanitized observation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOS173-Factory-Public-OAuth-Metadata
+          path: build/oauth173/metadata.log
+          if-no-files-found: warn
+          retention-days: 14
