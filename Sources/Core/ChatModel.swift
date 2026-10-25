@@ -737,12 +737,41 @@ final class ChatModel {
         }
     }
 
+    /// The backend dequeues each ciphertext batch on read. Rejecting one
+    /// malformed/replayed envelope must not discard later valid ciphertexts
+    /// from that *same* already-dequeued batch. Transport failures and task
+    /// cancellation remain fatal; decryption/identity failures stay fail-closed.
+    static func processReceivedBatch(
+        _ envelopes: [ChatEnvelope],
+        accepting: (ChatEnvelope) async throws -> Void
+    ) async throws -> Int {
+        var rejected = 0
+        for envelope in envelopes {
+            try Task.checkCancellation()
+            do {
+                try await accepting(envelope)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                rejected += 1
+            }
+        }
+        return rejected
+    }
+
     private func receiveLoop() async {
         var retryNanoseconds: UInt64 = 500_000_000
         while !Task.isCancelled, let configuration {
             do {
                 let envelopes = try await relay.receive(configuration: configuration)
-                for envelope in envelopes { try await accept(envelope, configuration: configuration) }
+                let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
+                    try await self.accept(envelope, configuration: configuration)
+                }
+                if invalidCount > 0 {
+                    // Do not report or persist attacker-controlled ciphertext,
+                    // decrypted content or detailed crypto errors in UI/logs.
+                    lastError = "\(invalidCount) ungültige oder nicht verifizierte Chat-Nachrichten verworfen."
+                }
                 state = .online
                 retryNanoseconds = 500_000_000
             } catch is CancellationError {
