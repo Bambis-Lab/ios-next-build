@@ -52,6 +52,51 @@ final class ChatDraftSafetyTests: XCTestCase {
         )
     }
 
+    private func batchEnvelope(_ id: String) -> ChatEnvelope {
+        ChatEnvelope(
+            id: id, groupID: "group-1",
+            senderUserID: "ha-mika", senderDeviceID: "ios-mika",
+            recipientUserID: "ha-nico", recipientDeviceID: "ios-nico",
+            ephemeralPublicKey: "", ciphertext: "", signature: "",
+            messageType: .text, contentType: "text/plain",
+            chunkIndex: 0, chunkCount: 1, createdAt: "2026-10-25T11:00:00Z"
+        )
+    }
+
+    func testBadEncryptedEnvelopeDoesNotDropLaterValidMessagesFromDequeuedBatch() async throws {
+        // The backend relay deletes ciphertext on batch delivery. Processing
+        // must continue after a rejected signature, never decrypt it or
+        // permanently lose the subsequent valid envelopes in that batch.
+        let items = [
+            batchEnvelope("invalid-signature"),
+            batchEnvelope("valid-1"),
+            batchEnvelope("valid-2"),
+        ]
+        var accepted: [String] = []
+        let rejected = try await ChatModel.processReceivedBatch(items) { envelope in
+            if envelope.id == "invalid-signature" { throw ChatError.invalidSignature }
+            accepted.append(envelope.id)
+        }
+        XCTAssertEqual(rejected, 1)
+        XCTAssertEqual(accepted, ["valid-1", "valid-2"])
+    }
+
+    func testBatchCancellationPropagatesInsteadOfBeingSwallowedAsInvalidMessage() async {
+        let items = [batchEnvelope("valid"), batchEnvelope("cancel"), batchEnvelope("must-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "cancel" { throw CancellationError() }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Cancellation must abort the batch and not report online")
+        } catch is CancellationError {
+            XCTAssertEqual(accepted, ["valid"])
+        } catch {
+            XCTFail("Unexpected error type: \(type(of: error))")
+        }
+    }
+
     func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
         let delegate = ChatRelayNoRedirects()
         let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))
