@@ -138,6 +138,23 @@ jobs:
           done
           echo "FAM_UI_ACCEPTANCE=PASS mandatory=2"
 
+      - name: Verify new chat inbox and private composer on iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+          xcrun simctl bootstatus "$SIM_ID" -b > build/fam/FAM-Chat-bootstatus.log 2>&1
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/fam/FAM-ChatInbox.xcresult \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam/FAM-ChatInbox.log
+          grep -Fq "Test Case '-[IOSNextUITests.IOSNextUITests testChatComposerInteraction]' passed" build/fam/FAM-ChatInbox.log
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/fam/FAM-ChatInbox.log
+          echo "CHAT_INBOX_UI_ACCEPTANCE=PASS mandatory=1"
+
       - name: Capture evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
