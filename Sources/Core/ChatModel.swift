@@ -752,8 +752,17 @@ final class ChatModel {
                 try await accepting(envelope)
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let failure as ChatError {
+                // Invalid ciphertext is a per-message failure. HTTP/auth
+                // failures are *transport* failures and must not be masked.
+                switch failure {
+                case .invalidEnvelope, .invalidSignature, .identityChanged, .contentTooLarge:
+                    rejected += 1
+                default:
+                    throw failure
+                }
             } catch {
-                rejected += 1
+                throw error
             }
         }
         return rejected
@@ -813,7 +822,17 @@ final class ChatModel {
             }
         }
         try ChatDeviceKeys.pin(sender)
-        let plaintext = try keys.decrypt(envelope, sender: sender)
+        let plaintext: Data
+        do {
+            plaintext = try keys.decrypt(envelope, sender: sender)
+        } catch let cryptoFailure as ChatError {
+            throw cryptoFailure
+        } catch {
+            // CryptoKit invalid sealed-box/public-key errors must not leak
+            // implementation details and must never be mistaken for HTTP
+            // relay availability failures.
+            throw ChatError.invalidEnvelope
+        }
         seenEnvelopeIDs[envelope.id] = now
         partialMessages = partialMessages.filter { now.timeIntervalSince($0.value.lastUpdated) < 120 }
         let bufferedBytes = partialMessages.values.reduce(0) { total, partial in
