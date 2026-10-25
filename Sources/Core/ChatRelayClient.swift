@@ -13,6 +13,29 @@ final class ChatRelayNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked S
     }
 }
 
+/// Backend long-poll contract: GET /v1/chat/messages?wait=25 may legitimately
+/// return only after 25 seconds when no messages exist. The original client
+/// used a 12-second idle timeout / 20-second resource timeout, turning an
+/// otherwise healthy quiet chat into recurring false "Offline" states.
+enum ChatRelayPollingPolicy {
+    static let serverWaitSeconds = 25
+    static let ordinaryRequestTimeout: TimeInterval = 12
+    static let longPollRequestTimeout: TimeInterval = 42
+    static let sessionResourceTimeout: TimeInterval = 55
+
+    static func timeout(for path: String, method: String) -> TimeInterval {
+        if method == "GET",
+           path.hasPrefix("v1/chat/messages?"),
+           let url = URLComponents(string: path),
+           url.queryItems?.contains(where: {
+               $0.name == "wait" && $0.value == String(serverWaitSeconds)
+           }) == true {
+            return longPollRequestTimeout
+        }
+        return ordinaryRequestTimeout
+    }
+}
+
 actor ChatRelayClient {
     private let session: URLSession
     private let encoder: JSONEncoder
@@ -27,8 +50,8 @@ actor ChatRelayClient {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = 12
-        configuration.timeoutIntervalForResource = 20
+        configuration.timeoutIntervalForRequest = ChatRelayPollingPolicy.ordinaryRequestTimeout
+        configuration.timeoutIntervalForResource = ChatRelayPollingPolicy.sessionResourceTimeout
         session = URLSession(
             configuration: configuration,
             delegate: ChatRelayNoRedirects(),
@@ -199,7 +222,7 @@ actor ChatRelayClient {
     func receive(configuration: ChatConfiguration) async throws -> [ChatEnvelope] {
         let device = configuration.deviceID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? configuration.deviceID
         let batch: ChatRelayBatch = try await request(
-            path: "v1/chat/messages?recipient_device_id=\(device)&wait=25&limit=64",
+            path: "v1/chat/messages?recipient_device_id=\(device)&wait=\(ChatRelayPollingPolicy.serverWaitSeconds)&limit=64",
             method: "GET",
             body: Optional<String>.none,
             configuration: configuration
@@ -235,6 +258,7 @@ actor ChatRelayClient {
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = ChatRelayPollingPolicy.timeout(for: path, method: method)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
