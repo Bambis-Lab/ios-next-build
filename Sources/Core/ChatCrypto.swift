@@ -9,7 +9,71 @@ struct ChatDeviceKeys: Sendable {
     let agreement: Curve25519.KeyAgreement.PrivateKey
     let signing: Curve25519.Signing.PrivateKey
 
-    static func loadOrCreate() throws -> ChatDeviceKeys {
+    static func mayMigrateLegacyKeys(
+        previouslyBoundHAUserID: String?,
+        verifiedHAUserID: String,
+        hasOldChatConfiguration: Bool,
+        alreadyUsingFamilyCredential: Bool
+    ) -> Bool {
+        !verifiedHAUserID.isEmpty &&
+            previouslyBoundHAUserID == verifiedHAUserID &&
+            hasOldChatConfiguration && !alreadyUsingFamilyCredential
+    }
+
+    /// Only called after the old chat configuration is positively bound to the
+    /// same *verified* HA account. Copy, never delete, the original identity.
+    /// A partial or already-created family keypair must never be overwritten.
+    @discardableResult
+    static func migrateLegacyKeysForVerifiedAccount(_ haUserID: String) throws -> Bool {
+        guard !haUserID.isEmpty else { return false }
+        let destination = accountSuffix(for: haUserID)
+        let newAgreement = agreementAccount + destination
+        let newSigning = signingAccount + destination
+        let existingAgreement = try KeychainStore.data(account: newAgreement)
+        let existingSigning = try KeychainStore.data(account: newSigning)
+        if existingAgreement != nil && existingSigning != nil { return false }
+        guard existingAgreement == nil && existingSigning == nil else {
+            throw ChatError.identityChanged
+        }
+        guard let oldAgreement = try KeychainStore.data(account: agreementAccount),
+              let oldSigning = try KeychainStore.data(account: signingAccount) else {
+            // New device or lost original keys: do not falsely claim recovery.
+            return false
+        }
+        _ = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: oldAgreement)
+        _ = try Curve25519.Signing.PrivateKey(rawRepresentation: oldSigning)
+        try KeychainStore.save(
+            oldAgreement, account: newAgreement,
+            accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        )
+        do {
+            try KeychainStore.save(
+                oldSigning, account: newSigning,
+                accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            )
+        } catch {
+            KeychainStore.delete(account: newAgreement)
+            throw error
+        }
+        return true
+    }
+
+    private static func accountSuffix(for haUserID: String) -> String {
+        let digest = SHA256.hash(data: Data(haUserID.utf8))
+        return ".family." + digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A verified HA family account must never inherit another user's E2EE keys.
+    /// Nil preserves the legacy key namespace without silently changing old chats.
+    static func loadOrCreate(forUserID userID: String? = nil) throws -> ChatDeviceKeys {
+        let suffix: String
+        if let userID {
+            suffix = accountSuffix(for: userID)
+        } else {
+            suffix = ""
+        }
+        let agreementAccount = Self.agreementAccount + suffix
+        let signingAccount = Self.signingAccount + suffix
         let agreement: Curve25519.KeyAgreement.PrivateKey
         if let raw = try KeychainStore.data(account: agreementAccount) {
             agreement = try .init(rawRepresentation: raw)
@@ -68,7 +132,8 @@ struct ChatDeviceKeys: Sendable {
         chunkCount: Int,
         sender: ChatIdentity,
         recipient: ChatIdentity,
-        createdAt: String
+        createdAt: String,
+        conversationID: String? = nil
     ) throws -> ChatEnvelope {
         guard let recipientKeyData = Data(base64Encoded: recipient.agreementPublicKey) else {
             throw ChatError.invalidEnvelope
@@ -100,6 +165,7 @@ struct ChatDeviceKeys: Sendable {
             chunkCount: chunkCount,
             createdAt: createdAt
         )
+        envelope.conversationID = conversationID
         envelope.signature = try signing.signature(for: envelope.signingData()).base64EncodedString()
         return envelope
     }

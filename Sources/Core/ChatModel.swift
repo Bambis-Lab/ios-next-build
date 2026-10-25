@@ -15,6 +15,7 @@ final class ChatModel {
 
     private struct PartialMessage {
         let senderUserID: String
+        let conversationID: String?
         let kind: ChatMessageKind
         let contentType: String
         let createdAt: Date
@@ -35,6 +36,19 @@ final class ChatModel {
     var messages: [ChatMessage] = []
     var draft = ""
     var recipientUserID = ""
+    var showingFamilyGroup = false
+    var familyGroup: ChatFamilyGroup?
+    private var draftsByPeer: [String: String] = [:]
+
+    var visibleMessages: [ChatMessage] {
+        if showingFamilyGroup {
+            return messages.filter { $0.conversationID == "family" }
+        }
+        guard !recipientUserID.isEmpty else { return [] }
+        return messages.filter {
+            $0.conversationID == nil && $0.peerUserID == recipientUserID
+        }
+    }
     var contacts: [ChatContact] = []
     var lastError: String?
     var ownSafetyNumber = ""
@@ -42,9 +56,13 @@ final class ChatModel {
     var isSending = false
     var accessRole: ChatAccessRole?
     var lastCreatedTicketID: String?
+    var memberTickets: [SupportTicket] = []
+    var memberTicketDetails: [String: SupportTicket] = [:]
 
     private let relay = ChatRelayClient()
     private var configuration: ChatConfiguration?
+    private var isFamilyCredentialActive = false
+    private var familyRenewalTask: Task<Void, Never>?
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
@@ -65,7 +83,7 @@ final class ChatModel {
     }
 
     var canSend: Bool {
-        state == .online && !recipientUserID.isEmpty
+        state == .online && (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
     }
 
     func start(using appModel: AppModel) async {
@@ -102,6 +120,63 @@ final class ChatModel {
     }
 
     private func performStart(using appModel: AppModel, epoch: UInt64) async {
+        if appModel.familyBrokerConfigured {
+            // Do not fall back to an insecure legacy chat-bootstrap route while
+            // the registered family device identity is still being verified.
+            guard appModel.registeredFamilyProfile != nil else {
+                state = .offline("Familienregistrierung wird überprüft.")
+                return
+            }
+            await appModel.refreshFamilyChatGrantIfNeeded()
+            guard epoch == startupEpoch, !Task.isCancelled,
+                  let family = appModel.familyChatContext() else {
+                state = .offline("Familien-Chat-Berechtigung konnte nicht bestätigt werden.")
+                return
+            }
+            let previouslyBoundHAUser = UserDefaults.standard.string(forKey: haUserKey)
+            if let previouslyBoundHAUser, previouslyBoundHAUser != family.haUserID {
+                forgetConfiguration(preservingStartup: true)
+            }
+            let existing = configuration
+            if existing?.token != family.grant.accessToken ||
+               existing?.userID != family.haUserID ||
+               existing?.baseURL != family.endpoint ||
+               existing?.deviceID != family.deviceID ||
+               !isFamilyCredentialActive {
+                let recipient = previouslyBoundHAUser == family.haUserID && !recipientUserID.isEmpty
+                    ? recipientUserID : family.haUserID
+                do {
+                    if ChatDeviceKeys.mayMigrateLegacyKeys(
+                        previouslyBoundHAUserID: previouslyBoundHAUser,
+                        verifiedHAUserID: family.haUserID,
+                        hasOldChatConfiguration: existing != nil,
+                        alreadyUsingFamilyCredential: isFamilyCredentialActive
+                    ) {
+                        // Never import old keys after an HA account switch.
+                        // Preserve old key material for rollback / original chats.
+                        try ChatDeviceKeys.migrateLegacyKeysForVerifiedAccount(family.haUserID)
+                    }
+                    try configure(
+                        endpoint: family.endpoint.absoluteString,
+                        token: family.grant.accessToken,
+                        userID: family.haUserID,
+                        recipientUserID: recipient,
+                        deviceID: family.deviceID,
+                        preservingStartup: true
+                    )
+                    UserDefaults.standard.set(family.haUserID, forKey: haUserKey)
+                    isFamilyCredentialActive = true
+                } catch {
+                    state = .offline("Familien-Chat-Konfiguration fehlgeschlagen.")
+                    return
+                }
+            }
+            await performRelayStart(epoch: epoch)
+            if case .online = state {
+                scheduleFamilyRenewal(using: appModel, grant: family.grant)
+            }
+            return
+        }
         if let context = appModel.chatBootstrapContext() {
             let boundHAUser = UserDefaults.standard.string(forKey: haUserKey)
             if let boundHAUser, boundHAUser != context.homeAssistantUserID {
@@ -146,35 +221,59 @@ final class ChatModel {
         await performRelayStart(epoch: epoch)
     }
 
-    func configure(endpoint: String, token: String, userID: String, recipientUserID: String) throws {
+    func configure(
+        endpoint: String, token: String, userID: String, recipientUserID: String,
+        deviceID explicitDeviceID: String? = nil,
+        preservingStartup: Bool = false
+    ) throws {
         guard let url = URL(string: endpoint), isAllowedEndpoint(url),
               Self.validIdentifier(userID), Self.validIdentifier(recipientUserID), token.count >= 32 else {
             throw ChatError.invalidConfiguration
         }
-        let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
+        let deviceID = explicitDeviceID ??
+            UserDefaults.standard.string(forKey: deviceKey) ??
+            "ios-\(UUID().uuidString.lowercased())"
         let replacesIdentity = configuration.map {
             $0.userID != userID || $0.baseURL != url || $0.deviceID != deviceID
         } ?? false
-        stop()
+        if preservingStartup {
+            receiveTask?.cancel()
+            receiveTask = nil
+        } else {
+            stop()
+        }
         configurationGeneration &+= 1
         if replacesIdentity {
             draft = ""
+            showingFamilyGroup = false
+            familyGroup = nil
+            draftsByPeer.removeAll(keepingCapacity: false)
             messages.removeAll(keepingCapacity: false)
+            memberTickets.removeAll(keepingCapacity: false)
+            memberTicketDetails.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
             ChatMediaThumbnailCache.shared.clear()
         }
+        // Persist the credential first. A failed Keychain write must not leave
+        // new account metadata paired with an unrelated previous account token.
+        try KeychainStore.save(token, account: tokenAccount)
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
         UserDefaults.standard.set(url.absoluteString, forKey: endpointKey)
         UserDefaults.standard.set(userID, forKey: userKey)
         UserDefaults.standard.set(recipientUserID, forKey: recipientKey)
-        try KeychainStore.save(token, account: tokenAccount)
         self.recipientUserID = recipientUserID
         configuration = ChatConfiguration(baseURL: url, token: token, userID: userID, deviceID: deviceID)
         state = .connecting
     }
 
     func start() async {
+        // Pre-HA standalone chat cannot reuse a stale legacy credential when
+        // authenticated family enrollment is mandatory.
+        guard FamilyBootstrapClient.configuredURL() == nil || isFamilyCredentialActive else {
+            state = .offline("Zuerst mit deinem Home-Assistant-Familienkonto anmelden.")
+            return
+        }
         if let existingStartupTask = startupTask {
             await existingStartupTask.value
             return
@@ -200,7 +299,9 @@ final class ChatModel {
         guard epoch == startupEpoch, !Task.isCancelled,
               receiveTask == nil, let configuration else { return }
         do {
-            let keys = try ChatDeviceKeys.loadOrCreate()
+            let keys = try ChatDeviceKeys.loadOrCreate(
+                forUserID: isFamilyCredentialActive ? configuration.userID : nil
+            )
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             self.keys = keys
             ownSafetyNumber = keys.safetyNumber
@@ -236,6 +337,18 @@ final class ChatModel {
             }
             try await updateRecipientSafetyNumbers()
             guard epoch == startupEpoch, !Task.isCancelled else { return }
+            if isFamilyCredentialActive {
+                // The group does not exist until the family broker confirms its
+                // five verified HA identities and active device enrollment.
+                familyGroup = try? await relay.familyGroup(configuration: configuration)
+            } else {
+                familyGroup = nil
+            }
+            guard epoch == startupEpoch, !Task.isCancelled else { return }
+            if showingFamilyGroup && familyGroup == nil {
+                showingFamilyGroup = false
+                draft = draftsByPeer[recipientUserID] ?? ""
+            }
             state = .online
             receiveTask = Task { [weak self] in await self?.receiveLoop() }
         } catch {
@@ -251,6 +364,8 @@ final class ChatModel {
         startupToken = nil
         receiveTask?.cancel()
         receiveTask = nil
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
         // Decrypted previews must not outlive an app/chat lifecycle stop.
         ChatMediaThumbnailCache.shared.clear()
         if configuration != nil { state = .offline("Empfang pausiert") }
@@ -259,6 +374,9 @@ final class ChatModel {
     func forgetConfiguration(preservingStartup: Bool = false) {
         configurationGeneration &+= 1
         draft = ""
+        showingFamilyGroup = false
+        familyGroup = nil
+        draftsByPeer.removeAll(keepingCapacity: false)
         if preservingStartup {
             receiveTask?.cancel()
             receiveTask = nil
@@ -266,10 +384,19 @@ final class ChatModel {
             stop()
         }
         messages.removeAll(keepingCapacity: false)
+        memberTickets.removeAll(keepingCapacity: false)
+        memberTicketDetails.removeAll(keepingCapacity: false)
         ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
         configuration = nil
+        isFamilyCredentialActive = false
+        familyRenewalTask?.cancel()
+        familyRenewalTask = nil
+        keys = nil
+        ownSafetyNumber = ""
+        recipientSafetyNumbers = []
+        lastError = nil
         contacts = []
         recipientUserID = ""
         accessRole = nil
@@ -283,10 +410,23 @@ final class ChatModel {
     }
 
     func selectContact(_ contact: ChatContact) {
+        guard showingFamilyGroup || recipientUserID != contact.userID else { return }
+        let previousConversation = showingFamilyGroup ? "family" : recipientUserID
+        if !previousConversation.isEmpty { draftsByPeer[previousConversation] = draft }
+        showingFamilyGroup = false
         recipientUserID = contact.userID
+        draft = draftsByPeer[contact.userID] ?? ""
         UserDefaults.standard.set(contact.userID, forKey: recipientKey)
         recipientSafetyNumbers = []
         Task { try? await updateRecipientSafetyNumbers() }
+    }
+
+    func selectFamilyGroup() {
+        guard familyGroup != nil, !showingFamilyGroup else { return }
+        if !recipientUserID.isEmpty { draftsByPeer[recipientUserID] = draft }
+        showingFamilyGroup = true
+        draft = draftsByPeer["family"] ?? ""
+        recipientSafetyNumbers = []
     }
 
     nonisolated static func legacyIdentityMatchesHomeAssistant(
@@ -314,7 +454,9 @@ final class ChatModel {
               isAllowedEndpoint(endpoint) else {
             throw ChatError.invalidConfiguration
         }
-        stop()
+        // Do not cancel the startup Task that owns this automatic bootstrap.
+        receiveTask?.cancel()
+        receiveTask = nil
         state = .connecting
         let deviceID = UserDefaults.standard.string(forKey: deviceKey) ?? "ios-\(UUID().uuidString.lowercased())"
         UserDefaults.standard.set(deviceID, forKey: deviceKey)
@@ -347,14 +489,33 @@ final class ChatModel {
         )
     }
 
+    private func scheduleFamilyRenewal(using appModel: AppModel, grant: FamilyChatGrant) {
+        familyRenewalTask?.cancel()
+        let remaining = grant.expiresAt - Int(Date().timeIntervalSince1970)
+        let delay = max(20, remaining - 120)
+        familyRenewalTask = Task { [weak self, weak appModel] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, let appModel else { return }
+            self.familyRenewalTask = nil
+            await appModel.refreshFamilyChatGrantIfNeeded(minimumValidity: 180)
+            guard !Task.isCancelled, appModel.familyChatContext() != nil else { return }
+            self.receiveTask?.cancel()
+            self.receiveTask = nil
+            await self.start(using: appModel)
+        }
+    }
+
     func sendDraft() async {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         let originalDraft = draft
+        let selectedPeer = recipientUserID
+        let selectedGroup = showingFamilyGroup
         let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
         // A failed preflight/relay request must not erase text the user typed.
         // Never erase edits made while the send was in flight.
-        if accepted && draft == originalDraft { draft = "" }
+        if accepted && recipientUserID == selectedPeer &&
+            showingFamilyGroup == selectedGroup && draft == originalDraft { draft = "" }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -378,7 +539,8 @@ final class ChatModel {
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys, !recipientUserID.isEmpty else {
+        guard let configuration, let keys,
+              showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
         }
@@ -389,10 +551,20 @@ final class ChatModel {
         isSending = true
         defer { isSending = false }
         let sendGeneration = configurationGeneration
+        let selectedPeer = recipientUserID
+        let selectedGroup = showingFamilyGroup
+        if selectedGroup {
+            guard let familyGroup, familyGroup.isReady,
+                  familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
+                lastError = "Alle fünf Familienmitglieder müssen sichere Chatgeräte registriert haben."
+                return false
+            }
+        }
         let groupID = UUID().uuidString.lowercased()
-        let localMessage = ChatMessage(
+        var localMessage = ChatMessage(
             id: groupID,
             senderUserID: configuration.userID,
+            recipientUserID: selectedGroup ? "family" : selectedPeer,
             kind: kind,
             contentType: contentType,
             data: data,
@@ -400,16 +572,26 @@ final class ChatModel {
             direction: .outgoing,
             delivery: .sending
         )
+        localMessage.conversationID = selectedGroup ? "family" : nil
         appendMessage(localMessage)
         do {
-            let recipients = try await relay.identities(for: recipientUserID, configuration: configuration)
+            let targetUsers: [String] = selectedGroup
+                ? (familyGroup?.members.map(\.userID).filter { $0 != configuration.userID } ?? [])
+                : [selectedPeer]
+            guard !targetUsers.isEmpty else { throw ChatError.noRecipientDevice }
+            var recipients: [ChatIdentity] = []
+            for userID in targetUsers {
+                let devices = try await relay.identities(for: userID, configuration: configuration)
+                guard !devices.isEmpty else { throw ChatError.noRecipientDevice }
+                recipients.append(contentsOf: devices)
+            }
             guard sendGeneration == configurationGeneration else { return false }
-            guard !recipients.isEmpty else { throw ChatError.noRecipientDevice }
-            recipientSafetyNumbers = try recipients.map { identity in
+            let safetyNumbers = try recipients.map { identity in
                 try ChatDeviceKeys.pin(identity)
                 guard let number = ChatDeviceKeys.safetyNumber(for: identity) else { throw ChatError.invalidEnvelope }
                 return number
             }
+            recipientSafetyNumbers = selectedGroup ? [] : safetyNumbers
             let chunks = Self.chunks(of: data)
             let sender = keys.publicIdentity(userID: configuration.userID, deviceID: configuration.deviceID)
             let createdAt = ISO8601DateFormatter().string(from: localMessage.createdAt)
@@ -424,7 +606,8 @@ final class ChatModel {
                         chunkCount: chunks.count,
                         sender: sender,
                         recipient: recipient,
-                        createdAt: createdAt
+                        createdAt: createdAt,
+                        conversationID: selectedGroup ? "family" : nil
                     )
                     _ = try await relay.send(envelope, configuration: configuration)
                     guard sendGeneration == configurationGeneration else { return false }
@@ -436,6 +619,53 @@ final class ChatModel {
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .failed)
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    func loadMemberTickets() async {
+        guard let configuration, accessRole == .member else { return }
+        let generation = configurationGeneration
+        do {
+            let items = try await relay.memberTickets(configuration: configuration)
+            guard generation == configurationGeneration else { return }
+            memberTickets = items
+        } catch {
+            guard generation == configurationGeneration else { return }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func loadMemberTicket(_ id: String) async {
+        guard let configuration, accessRole == .member else { return }
+        let generation = configurationGeneration
+        do {
+            let item = try await relay.memberTicket(id, configuration: configuration)
+            guard generation == configurationGeneration else { return }
+            memberTicketDetails[id] = item
+        } catch {
+            guard generation == configurationGeneration else { return }
+            lastError = error.localizedDescription
+        }
+    }
+
+    func replyMemberTicket(_ id: String, message: String) async -> Bool {
+        guard let configuration, accessRole == .member else { return false }
+        let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty, body.count <= 4000 else {
+            lastError = "Die Antwort muss zwischen 1 und 4.000 Zeichen enthalten."
+            return false
+        }
+        let generation = configurationGeneration
+        do {
+            let ticket = try await relay.replyMemberTicket(id, text: body, configuration: configuration)
+            guard generation == configurationGeneration else { return false }
+            memberTicketDetails[id] = ticket
+            await loadMemberTickets()
+            return true
+        } catch {
+            guard generation == configurationGeneration else { return false }
             lastError = error.localizedDescription
             return false
         }
@@ -456,6 +686,8 @@ final class ChatModel {
                 configuration: configuration
             )
             lastCreatedTicketID = ticket.id
+            memberTicketDetails[ticket.id] = ticket
+            await loadMemberTickets()
             return ticket.id
         } catch {
             lastError = error.localizedDescription
@@ -527,6 +759,14 @@ final class ChatModel {
         guard let sender = identities.first(where: { $0.deviceID == envelope.senderDeviceID }) else {
             throw ChatError.invalidEnvelope
         }
+        if let conversationID = envelope.conversationID {
+            guard conversationID == "family",
+                  let familyGroup, familyGroup.isReady,
+                  familyGroup.members.contains(where: { $0.userID == envelope.senderUserID }),
+                  familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
+                throw ChatError.invalidEnvelope
+            }
+        }
         try ChatDeviceKeys.pin(sender)
         let plaintext = try keys.decrypt(envelope, sender: sender)
         seenEnvelopeIDs[envelope.id] = now
@@ -541,6 +781,7 @@ final class ChatModel {
         let assemblyID = "\(envelope.senderUserID)|\(envelope.senderDeviceID)|\(envelope.groupID)"
         var partial = partialMessages[assemblyID] ?? PartialMessage(
             senderUserID: envelope.senderUserID,
+            conversationID: envelope.conversationID,
             kind: envelope.messageType,
             contentType: envelope.contentType,
             createdAt: envelopeDate,
@@ -549,6 +790,7 @@ final class ChatModel {
             lastUpdated: now
         )
         guard partial.senderUserID == envelope.senderUserID,
+              partial.conversationID == envelope.conversationID,
               partial.kind == envelope.messageType,
               partial.contentType == envelope.contentType,
               partial.chunkCount == envelope.chunkCount else { throw ChatError.invalidEnvelope }
@@ -563,16 +805,19 @@ final class ChatModel {
         }
         partialMessages.removeValue(forKey: assemblyID)
         guard complete.count <= (Self.maximumBytes[partial.kind] ?? 0) else { throw ChatError.contentTooLarge }
-        appendMessage(ChatMessage(
+        var receivedMessage = ChatMessage(
             id: envelope.groupID,
             senderUserID: partial.senderUserID,
+            recipientUserID: configuration.userID,
             kind: partial.kind,
             contentType: partial.contentType,
             data: complete,
             createdAt: partial.createdAt,
             direction: .incoming,
             delivery: .received
-        ))
+        )
+        receivedMessage.conversationID = partial.conversationID
+        appendMessage(receivedMessage)
     }
 
     private func updateDelivery(id: String, to delivery: ChatMessage.Delivery) {
@@ -590,6 +835,9 @@ final class ChatModel {
     }
 
     private func restoreConfiguration() {
+        // Family deployments must never restore a stale legacy chat bearer
+        // before a verified HA user and registered device are established.
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard let endpoint = UserDefaults.standard.string(forKey: endpointKey),
               let url = URL(string: endpoint), isAllowedEndpoint(url),
               let userID = UserDefaults.standard.string(forKey: userKey),

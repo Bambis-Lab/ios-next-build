@@ -83,6 +83,15 @@ actor ChatRelayClient {
         return contact
     }
 
+    func familyGroup(configuration: ChatConfiguration) async throws -> ChatFamilyGroup {
+        try await request(
+            path: "v1/chat/groups/family",
+            method: "GET",
+            body: Optional<String>.none,
+            configuration: configuration
+        )
+    }
+
     func contacts(configuration: ChatConfiguration) async throws -> [ChatContact] {
         try await request(
             path: "v1/chat/contacts",
@@ -115,6 +124,36 @@ actor ChatRelayClient {
             path: "v1/chat/session",
             method: "GET",
             body: Optional<String>.none,
+            configuration: configuration
+        )
+    }
+
+    func memberTickets(configuration: ChatConfiguration) async throws -> [SupportTicket] {
+        try await request(
+            path: "v1/chat/tickets",
+            method: "GET",
+            body: Optional<String>.none,
+            configuration: configuration
+        )
+    }
+
+    func memberTicket(_ ticketID: String, configuration: ChatConfiguration) async throws -> SupportTicket {
+        let safeID = ticketID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ticketID
+        return try await request(
+            path: "v1/chat/tickets/\(safeID)",
+            method: "GET",
+            body: Optional<String>.none,
+            configuration: configuration
+        )
+    }
+
+    func replyMemberTicket(_ ticketID: String, text: String,
+                           configuration: ChatConfiguration) async throws -> SupportTicket {
+        let safeID = ticketID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ticketID
+        return try await request(
+            path: "v1/chat/tickets/\(safeID)/messages",
+            method: "POST",
+            body: SupportTicketMessageRequest(message: text),
             configuration: configuration
         )
     }

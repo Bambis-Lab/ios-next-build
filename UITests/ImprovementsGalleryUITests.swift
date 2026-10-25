@@ -50,8 +50,10 @@ final class ImprovementsGalleryUITests: XCTestCase {
         capture("01-independent-services-hub", app: app)
 
         service("chat", app: app)
+        XCTAssertTrue(app.navigationBars["Chats"].waitForExistence(timeout: 8))
+        capture("02-chat-inbox-standalone", app: app)
+        action("Chat einrichten", app: app)
         XCTAssertTrue(app.buttons["Chatoptionen"].waitForExistence(timeout: 8))
-        capture("02-chat-relay-standalone", app: app)
         action("Verschlüsselten Chat einrichten", app: app)
         XCTAssertTrue(app.navigationBars["Chat einrichten"].waitForExistence(timeout: 8))
         capture("03-chat-relay-configuration", app: app)

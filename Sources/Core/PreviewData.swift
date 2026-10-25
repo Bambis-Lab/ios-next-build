@@ -24,6 +24,9 @@ private struct LiveHAFixture: Decodable {
 extension AppModel {
     static var preview: AppModel {
         let model = AppModel()
+        #if DEBUG
+        model.seedVerifiedFamilyPreview()
+        #endif
         model.connectionState = .connected
         guard let url = Bundle.main.url(forResource: "live_ha_fixture", withExtension: "json"),
               let data = try? Data(contentsOf: url),
@@ -78,12 +81,30 @@ extension ChatModel {
         let model = ChatModel()
         model.state = .online
         model.recipientUserID = "Mika"
+        // Acceptance-only synthetic identities for the inbox and composer.
+        // Never used to infer live HA enrollment or authenticated delivery.
+        model.contacts = [
+            ChatContact(userID: "Mika", displayName: "Mika"),
+            ChatContact(userID: "Juli", displayName: "Juli"),
+            ChatContact(userID: "Gabi", displayName: "Gabi"),
+            ChatContact(userID: "Timo", displayName: "Timo")
+        ]
+        let previewNames = ["nico", "gabi", "timo", "mika", "juli"]
+        model.familyGroup = ChatFamilyGroup(
+            id: "family",
+            title: "Familie",
+            members: previewNames.map {
+                ChatFamilyGroup.Member(userID: $0, profile: $0, chatRegistered: true)
+            },
+            maxParticipants: 5
+        )
         model.ownSafetyNumber = "4821 7750 1904 3382"
         model.recipientSafetyNumbers = ["9550 2711 6842 1290"]
         model.messages = [
             ChatMessage(
                 id: "preview-incoming",
                 senderUserID: "Mika",
+                recipientUserID: "Timo",
                 kind: .text,
                 contentType: "text/plain; charset=utf-8",
                 data: Data("Bin gleich da 👋".utf8),
@@ -94,6 +115,7 @@ extension ChatModel {
             ChatMessage(
                 id: "preview-outgoing",
                 senderUserID: "Timo",
+                recipientUserID: "Mika",
                 kind: .text,
                 contentType: "text/plain; charset=utf-8",
                 data: Data("Perfekt, bis gleich.".utf8),

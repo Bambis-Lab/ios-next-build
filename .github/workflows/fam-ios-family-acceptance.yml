@@ -1,0 +1,318 @@
+name: FAM iOS Next Family Identity and iPhone Simulator
+on:
+  push:
+    branches:
+      - feature/iosnext-171-family-bootstrap
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fam-ios-family-bootstrap
+  cancel-in-progress: true
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Source contracts / no fabricated backend endpoint
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          app = Path("Sources/Core/AppModel.swift").read_text()
+          client = Path("Sources/Core/FamilyBootstrapClient.swift").read_text()
+          system = Path("Sources/Features/SystemView.swift").read_text()
+          project = Path("project.yml").read_text()
+          assert "selectedProfile: HomeProfile = .gabi" in app
+          assert "registeredFamilyProfile" in app
+          assert "ha_user_id" in client
+          assert "separate_device_approval_required" in client
+          assert 'url.scheme == "https"' in client
+          assert "if appModel.registeredFamilyProfile == .nico" in system
+          assert "PRODUCT_BUNDLE_IDENTIFIER: de.nicofroeba16.iosnext" in project
+          assert "MARKETING_VERSION: 1.6.4" in project, "source lock changed prematurely"
+          assert Path("Tests/FamilyIdentityTests.swift").exists()
+          assert Path("UITests/FamilyOnboardingUITests.swift").exists()
+          print("FAM_IOS_SOURCE=PASS")
+          PY
+          python3 Scripts/Acceptance/validate_fam_g99_manifest.py
+          PYTHONPATH=Scripts/Acceptance python3 -m unittest Scripts/Acceptance/test_check_fam_g99_ui_run.py -v
+  iphone-simulator:
+    # The self-hosted Xcode runner may reuse the same iOS simulator between
+    # jobs. Serialize all three macOS test jobs to prevent CoreSimulator races.
+    needs: [source, full-unit-regression]
+    runs-on: xcode-27
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prepare Xcode 27 iPhone 18 Pro Max
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version | grep -E "^27\\.[0-9]+"
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/fam
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a, "iPhone 18 Pro Max iOS 27 missing"; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          printf 'sha=%s\nsimulator=%s\nbuild=%s\n' "$GITHUB_SHA" "$SIM_ID" "$(xcodebuild -version | head -1)" > build/fam/environment.txt
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" >> build/fam/environment.txt 2>&1
+      - name: Build signed family XCTest bundle once
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" -parallel-testing-enabled NO \
+            -derivedDataPath build/fam/DerivedData \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam/FAM-BuildForTesting.log
+          XCTESTRUN_PATH="$(find build/fam/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+      - name: Verify all family Swift / Keychain identity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/fam/FAM-Unit.xcresult \
+            '-only-testing:IOSNextTests/FamilyIdentityTests' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam/FAM-Unit.log
+          grep -q "Test Suite 'FamilyIdentityTests' passed" build/fam/FAM-Unit.log
+          # Xcode 27 emits TEST EXECUTE SUCCEEDED for test-without-building,
+          # while xcodebuild test may emit TEST SUCCEEDED. Both mean a
+          # terminally successful XCTest run, not just a successful build.
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/fam/FAM-Unit.log
+      - name: Execute Mika and Juli UI XCTest independently with bounded infra recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="build/fam/DerivedData/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP"
+          xcrun simctl install "$SIM_ID" "$APP"
+          xcrun simctl launch --terminate-running-process "$SIM_ID" \
+            de.nicofroeba16.iosnext --fam-acceptance-mika 2>&1 | tee build/fam/FAM-Prewarm.log
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+          run_case() {
+            local name="$1" attempt="$2"
+            xcodebuild test-without-building -collect-test-diagnostics never \
+              -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+              -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+              -resultBundlePath "build/fam/FAM-$name-$attempt.xcresult" \
+              "-only-testing:IOSNextUITests/FamilyOnboardingUITests/$name" \
+              CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+              2>&1 | tee "build/fam/FAM-$name-$attempt.log"
+          }
+          assert_case_executed() {
+            local name="$1" attempt="$2"
+            # xcodebuild may report success without actually matching an XCTest
+            # selector. Require the named case to have executed and passed.
+            grep -Fq "Test Case '-[IOSNextUITests.FamilyOnboardingUITests $name]' passed" \
+              "build/fam/FAM-$name-$attempt.log"
+          }
+          for name in testMikaFamilyPreview testJuliFamilyPreview; do
+            if run_case "$name" first && assert_case_executed "$name" first; then
+              echo "FAM_UI_CASE=PASS name=$name retry=0" | tee -a build/fam/FAM-UI-summary.log
+            else
+              log="build/fam/FAM-$name-first.log"
+              if ! grep -Eq 'Early unexpected exit|test runner crashed while preparing|Failed to establish.*automation session|Failed to launch|does not have a process ID' "$log" ||
+                 grep -Eq 'Test Case .*failed|Assertion Failure|XCTAssert.*failed' "$log"; then
+                echo "FAM_UI_CASE=FAIL name=$name cause=test_or_unclassified no_retry" | tee -a build/fam/FAM-UI-summary.log
+                exit 65
+              fi
+              echo "FAM_UI_CASE=INFRA_RETRY name=$name count=1" | tee -a build/fam/FAM-UI-summary.log
+              xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+              xcrun simctl bootstatus "$SIM_ID" -b >> build/fam/FAM-UI-recovery.log 2>&1
+              if run_case "$name" retry1 && assert_case_executed "$name" retry1; then
+                echo "FAM_UI_CASE=PASS name=$name retry=1" | tee -a build/fam/FAM-UI-summary.log
+              else
+                echo "FAM_UI_CASE=FAIL name=$name retries_exhausted" | tee -a build/fam/FAM-UI-summary.log
+                exit 65
+              fi
+            fi
+          done
+          echo "FAM_UI_ACCEPTANCE=PASS mandatory=2"
+
+      - name: Verify new chat inbox and private composer on iPhone
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+          xcrun simctl bootstatus "$SIM_ID" -b > build/fam/FAM-Chat-bootstatus.log 2>&1
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/fam/FAM-ChatInbox.xcresult \
+            '-only-testing:IOSNextUITests/IOSNextUITests/testChatComposerInteraction' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam/FAM-ChatInbox.log
+          grep -Fq "Test Case '-[IOSNextUITests.IOSNextUITests testChatComposerInteraction]' passed" build/fam/FAM-ChatInbox.log
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/fam/FAM-ChatInbox.log
+          echo "CHAT_INBOX_UI_ACCEPTANCE=PASS mandatory=1"
+
+      - name: Capture evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: FAM11-isolated-iPhone18ProMax-family-UI
+          path: |
+            build/fam/FAM-*.log
+            build/fam/FAM-*.xcresult
+            build/fam/environment.txt
+          retention-days: 14
+
+  full-unit-regression:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Boot isolated simulator and generate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/fam-full-unit
+          SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; a=[x["udid"] for k,v in d.items() if "iOS-27" in k for x in v if x["name"]=="iPhone 18 Pro Max" and x.get("isAvailable",True)]; assert a; print(a[0])')"
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=210 python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" > build/fam-full-unit/boot.log 2>&1
+      - name: Run complete iOS unit test target with local fake HA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/fam-full-unit/fake-ha.log 2>&1 &
+          FAKE_HA_PID=$!
+          trap 'kill "$FAKE_HA_PID" 2>/dev/null || true' EXIT
+          # TCP accept alone does not prove that the correct local fixture
+          # responds to WebSocket authentication. Fail closed before XCTest.
+          python3 Scripts/Acceptance/preflight_fake_ha.py --host 127.0.0.1 --port 18765
+          kill -0 "$FAKE_HA_PID"
+          echo "FAM_FAKE_HA_PROCESS_ALIVE=PASS"
+          xcodebuild test -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/fam-full-unit/DerivedData \
+            -resultBundlePath build/fam-full-unit/FullUnit.xcresult \
+            '-only-testing:IOSNextTests' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/fam-full-unit/FullUnit.log
+      - name: Preserve full unit gate artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: FAM11-FINAL-full-iOS-unit
+          path: |
+            build/fam-full-unit/FullUnit.xcresult
+            build/fam-full-unit/FullUnit.log
+            build/fam-full-unit/boot.log
+            build/fam-full-unit/fake-ha.log
+          retention-days: 14
+  full-g99-iphone:
+    needs: [source, full-unit-regression, iphone-simulator]
+    runs-on: xcode-27
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Execute mandatory G99 iPhone UI and accessibility tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Scripts/Acceptance/fam_full_iphone_ui.sh
+      - name: Preserve full UI evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: FAM11-FINAL-G99-iPhone18ProMax
+          path: |
+            build/g99/UI-base.log
+            build/g99/UI-base.xcresult
+            build/g99/UI-base-retry1.log
+            build/g99/UI-base-retry1.xcresult
+            build/g99/post-startup-bootstatus.log
+            build/g99/UI-recovery-bootstatus.log
+            build/g99/UI-recovery-prewarm.log
+            build/g99/a11y-dynamic-type.log
+            build/g99/a11y-dynamic-type.xcresult
+            build/g99/a11y-increase-contrast.log
+            build/g99/a11y-increase-contrast.xcresult
+            build/g99/BuildForTesting.log
+            build/g99/boot.log
+            build/g99/environment.txt
+            build/g99/attachments/
+          retention-days: 14
+          if-no-files-found: warn
+
+  unsigned-rc-171:
+    needs: [source, iphone-simulator, full-unit-regression, full-g99-iphone]
+    if: ${{ vars.FAM11_STAGING_E2E_PASS == 'true' && vars.IOSNEXT_FAMILY_BROKER_URL != '' && vars.FAM11_STAGING_IOS_SHA == github.sha && vars.FAM11_STAGING_BACKEND_SHA != '' && vars.FAM11_STAGING_EVIDENCE_SHA256 != '' }}
+    runs-on: xcode-27
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Make isolated Release Candidate build, without publishing
+        shell: bash
+        env:
+          FAMILY_BROKER_URL: ${{ vars.IOSNEXT_FAMILY_BROKER_URL }}
+          STAGED_IOS_SHA: ${{ vars.FAM11_STAGING_IOS_SHA }}
+          STAGED_BACKEND_SHA: ${{ vars.FAM11_STAGING_BACKEND_SHA }}
+          STAGING_EVIDENCE_SHA256: ${{ vars.FAM11_STAGING_EVIDENCE_SHA256 }}
+        run: |
+          set -euo pipefail
+          case "$FAMILY_BROKER_URL" in
+            https://*) ;;
+            *) echo 'Family broker must use vetted HTTPS endpoint' >&2; exit 1 ;;
+          esac
+          # A manually set boolean alone is not a staging E2E attestation.
+          test "$STAGED_IOS_SHA" = "$GITHUB_SHA"
+          [[ "$STAGED_BACKEND_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$STAGING_EVIDENCE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          mkdir -p build
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("project.yml")
+          source=p.read_text()
+          assert source.count("MARKETING_VERSION: 1.6.4") == 1
+          assert source.count("CURRENT_PROJECT_VERSION: 27") == 1
+          p.write_text(source.replace("MARKETING_VERSION: 1.6.4", "MARKETING_VERSION: 1.7.1")
+                      .replace("CURRENT_PROJECT_VERSION: 27", "CURRENT_PROJECT_VERSION: 29"))
+          PY
+          export CM_COMMIT="$GITHUB_SHA" EXPECTED_VERSION=1.7.1 EXPECTED_BUILD=29
+          bash Scripts/prepare_free_sideload_project.sh
+          xcodebuild build -project IOSNext.xcodeproj -scheme IOSNext -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build/rc171/DerivedData \
+            MARKETING_VERSION=1.7.1 CURRENT_PROJECT_VERSION=29 \
+            IOSNEXT_FAMILY_BROKER_URL="$FAMILY_BROKER_URL" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/rc171-build.log
+          APP="build/rc171/DerivedData/Build/Products/Release-iphoneos/IOSNext.app"
+          test -d "$APP" && file "$APP/IOSNext" | grep -q arm64
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -qx 'de.nicofroeba16.iosnext'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist" | grep -qx '1.7.1'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist" | grep -qx '29'
+          /usr/libexec/PlistBuddy -c 'Print :IOSNextFamilyBrokerURL' "$APP/Info.plist" | grep -qxF "$FAMILY_BROKER_URL"
+          mkdir -p build/rc171-out/Payload
+          cp -R "$APP" build/rc171-out/Payload/IOSNext.app
+          (cd build/rc171-out && /usr/bin/zip -qry IOSNext-1.7.1-build29-UNSIGNED-RC.ipa Payload)
+          unzip -t build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa >/dev/null
+          shasum -a 256 build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa > build/rc171-out/SHA256SUMS.txt
+          printf 'source_sha=%s\nbackend_sha=%s\nstaging_evidence_sha256=%s\nstatus=UNSIGNED_RC_NOT_PUBLISHED\n' "$GITHUB_SHA" "$STAGED_BACKEND_SHA" "$STAGING_EVIDENCE_SHA256" > build/rc171-out/provenance.txt
+      - name: Upload unsigned RC to CI artifact storage only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-1.7.1-build29-UNSIGNED-RC-NOT-PUBLISHED
+          path: |
+            build/rc171-out/IOSNext-1.7.1-build29-UNSIGNED-RC.ipa
+            build/rc171-out/SHA256SUMS.txt
+            build/rc171-out/provenance.txt
+            build/rc171-build.log
+          retention-days: 14
+          if-no-files-found: error

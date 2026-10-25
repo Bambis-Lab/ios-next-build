@@ -116,9 +116,20 @@ struct AppShellView: View {
     @ViewBuilder
     private func content(for tab: AppTab) -> some View {
         switch tab {
-        case .home: HomeView(appModel: appModel)
+        case .home:
+            if !appModel.familyBrokerConfigured || appModel.registeredFamilyProfile != nil {
+                HomeView(appModel: appModel)
+            } else {
+                VStack(spacing: 8) {
+                    Label("Familienprofil noch nicht bestätigt", systemImage: "person.crop.circle.badge.questionmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 10)
+                    RoomsView(appModel: appModel)
+                }
+            }
         case .rooms: RoomsView(appModel: appModel)
-        case .chat: ChatView(appModel: appModel, chatModel: chatModel)
+        case .chat: ChatInboxView(appModel: appModel, chatModel: chatModel)
         case .media: MediaView(appModel: appModel)
         case .system: SystemView(appModel: appModel)
         }

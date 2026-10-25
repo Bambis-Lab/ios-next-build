@@ -18,6 +18,11 @@ final class IOSNextUITests: XCTestCase {
             _ = setAccessibilityPreference(path: original.path, toggle: original.toggle, enabled: original.enabled, recordRestore: false)
             accessibilityRestore = nil
         }
+        // A failed XCUIApplication.launch() must not strand its process.
+        // Ownership is set before launch(), including its error path.
+        if let application = app, application.state != .notRunning {
+            application.terminate()
+        }
         app = nil
         XCUIDevice.shared.orientation = .portrait
     }
@@ -26,6 +31,7 @@ final class IOSNextUITests: XCTestCase {
     private func launch(_ screen: String, extraArguments: [String] = []) -> XCUIApplication {
         let application = XCUIApplication()
         application.launchArguments = ["--product-ui-test-screen=\(screen)"] + extraArguments
+        app = application
         NSLog("G99-01 launch begin screen=\(screen) arguments=\(application.launchArguments) orientation=\(XCUIDevice.shared.orientation.rawValue)")
         application.launch()
         NSLog("G99-01 launch end screen=\(screen) appState=\(application.state.rawValue)")
@@ -434,6 +440,13 @@ final class IOSNextUITests: XCTestCase {
 
     func testChatComposerInteraction() {
         let application = launch("chat")
+        XCTAssertTrue(application.navigationBars["Chats"].waitForExistence(timeout: 5),
+                      "New chats inbox must be the root of the Chat tab")
+        XCTAssertTrue(application.buttons["chat-inbox-family"].waitForExistence(timeout: 5),
+                      "Synthetic five-person family group row missing")
+        let mika = application.buttons["chat-inbox-person-Mika"].firstMatch
+        XCTAssertTrue(mika.waitForExistence(timeout: 5), "Verified preview contact not visible")
+        mika.tap()
         let field = application.textFields["chat-composer-field"].firstMatch
         tapWhenVisible(field, in: application, label: "Chat composer")
         application.typeText("Hallo aus XCUITest")
@@ -617,6 +630,19 @@ final class IOSNextUITests: XCTestCase {
         NSLog("G99 system Settings verified \(toggle)=\(enabled)")
         settings.terminate()
         return true
+    }
+
+    func testUnverifiedFamilyHomeDoesNotExposePersonalizedShortcuts() {
+        // An explicitly unverified family fixture must not inherit Nico's Home.
+        let application = launch("home", extraArguments: ["--product-ui-test-unverified"])
+        XCTAssertTrue(
+            application.staticTexts["Familienprofil noch nicht bestätigt"].waitForExistence(timeout: 6),
+            "Unverified family account must see neutral Rooms instead of personalized Home"
+        )
+        let personalized = application.descendants(matching: .any)
+            .matching(identifier: "home-shortcut-timo").firstMatch
+        XCTAssertFalse(personalized.exists, "Unverified family account must not inherit Nico shortcuts")
+        attachScreenshot("family-unverified-rooms-home", app: application)
     }
 
     func testAccessibilityCoreScreenRenders() {
@@ -896,6 +922,10 @@ extension IOSNextUITests {
 
     private func phase2RunChatInteraction() {
         let application = phase2Product("chat")
+        XCTAssertTrue(application.navigationBars["Chats"].waitForExistence(timeout: 5),
+                      "PHASE2_CLASS=wrong_surface new chats inbox missing")
+        let mika = application.buttons["chat-inbox-person-Mika"].firstMatch
+        tapWhenVisible(mika, in: application, label: "Mika private conversation")
         let field = application.textFields["chat-composer-field"].firstMatch
         tapWhenVisible(field, in: application, label: "Chat composer")
         application.typeText("Phase2 Visual")

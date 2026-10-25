@@ -13,6 +13,7 @@ struct ChatView: View {
     @State private var isPresentingConfiguration = false
     @State private var isPresentingSecurity = false
     @State private var isPresentingSupportTicket = false
+    @State private var isPresentingMemberTickets = false
     @State private var voicePressIsActive = false
     @Environment(\.scenePhase) private var scenePhase
 
@@ -35,7 +36,7 @@ struct ChatView: View {
                     }
             }
         }
-        .navigationTitle(chatModel.recipientUserID.isEmpty ? "Chat" : chatModel.recipientUserID)
+        .navigationTitle(chatModel.showingFamilyGroup ? "Familie" : (chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName ?? "Chat"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -47,6 +48,9 @@ struct ChatView: View {
                         isPresentingConfiguration = true
                     }
                     if chatModel.accessRole == .member {
+                        Button("Meine Admin-Tickets", systemImage: "tray.full.fill") {
+                            isPresentingMemberTickets = true
+                        }
                         Button("Ticket an Owner", systemImage: "ticket.fill") {
                             isPresentingSupportTicket = true
                         }
@@ -71,6 +75,9 @@ struct ChatView: View {
         }
         .sheet(isPresented: $isPresentingSupportTicket) {
             SupportTicketComposerView(chatModel: chatModel)
+        }
+        .sheet(isPresented: $isPresentingMemberTickets) {
+            MemberTicketInboxView(chatModel: chatModel)
         }
         .fullScreenCover(isPresented: $isPresentingCamera) {
             InMemoryCameraPicker { image in
@@ -149,17 +156,24 @@ struct ChatView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                if chatModel.contacts.isEmpty {
+                if chatModel.contacts.isEmpty && chatModel.familyGroup == nil {
                     Label("Noch keine Chat-Kontakte registriert", systemImage: "person.crop.circle.badge.questionmark")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
                     Menu {
+                        if chatModel.familyGroup != nil {
+                            Button {
+                                chatModel.selectFamilyGroup()
+                            } label: {
+                                Label("Familie · Gruppenchat", systemImage: chatModel.showingFamilyGroup ? "checkmark" : "person.3.fill")
+                            }
+                        }
                         ForEach(chatModel.contacts) { contact in
                             Button {
                                 chatModel.selectContact(contact)
                             } label: {
-                                if chatModel.recipientUserID == contact.userID {
+                                if !chatModel.showingFamilyGroup && chatModel.recipientUserID == contact.userID {
                                     Label(contact.displayName, systemImage: "checkmark")
                                 } else {
                                     Text(contact.displayName)
@@ -168,12 +182,18 @@ struct ChatView: View {
                         }
                     } label: {
                         Label(
-                            chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName
-                                ?? "Chat-Kontakt auswählen",
+                            chatModel.showingFamilyGroup ? "Familie" :
+                                (chatModel.contacts.first(where: { $0.userID == chatModel.recipientUserID })?.displayName
+                                    ?? "Chat-Kontakt auswählen"),
                             systemImage: "person.2.fill"
                         )
                         .font(.caption.weight(.semibold))
                     }
+                }
+                if chatModel.showingFamilyGroup && chatModel.familyGroup?.isReady != true {
+                    Label("Familiengruppe: Chatgeräte noch nicht vollständig registriert", systemImage: "person.crop.circle.badge.exclamationmark")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
                 }
             }
             .padding(.vertical, 8)
@@ -195,7 +215,7 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    if chatModel.messages.isEmpty {
+                    if chatModel.visibleMessages.isEmpty {
                         ContentUnavailableView(
                             "Noch keine Nachrichten",
                             systemImage: "message.badge.shield.fill",
@@ -203,7 +223,7 @@ struct ChatView: View {
                         )
                         .padding(.top, 60)
                     }
-                    ForEach(chatModel.messages) { message in
+                    ForEach(chatModel.visibleMessages) { message in
                         ChatBubble(message: message)
                             .id(message.id)
                     }
@@ -212,8 +232,8 @@ struct ChatView: View {
                 .padding(.vertical, 8)
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: chatModel.messages.count) { _, _ in
-                guard let id = chatModel.messages.last?.id else { return }
+            .onChange(of: chatModel.visibleMessages.map(\.id)) { _, _ in
+                guard let id = chatModel.visibleMessages.last?.id else { return }
                 withAnimation(.smooth) { proxy.scrollTo(id, anchor: .bottom) }
             }
         }
