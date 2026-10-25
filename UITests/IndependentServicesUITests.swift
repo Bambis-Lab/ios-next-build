@@ -38,14 +38,16 @@ final class IndependentServicesUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat-inbox-settings"].waitForExistence(timeout: 5),
                       "Chats inbox has no setup entry")
         app.buttons["chat-inbox-settings"].tap()
-        XCTAssertTrue(app.buttons["Chatoptionen"].waitForExistence(timeout: 8),
-                      "Chat Relay setup must remain accessible without HA")
-        // Chat options is pushed onto the standalone inbox NavigationStack.
-        // Return to the inbox first; only the inbox owns the modal close button.
-        let backToChats = app.buttons["Chats"]
-        XCTAssertTrue(backToChats.waitForExistence(timeout: 8),
-                      "Chat options is missing its inbox back navigation")
-        backToChats.tap()
+        XCTAssertTrue(app.navigationBars["Chat-Einstellungen"].waitForExistence(timeout: 8),
+                      "Gear must open dedicated Chat settings, not a conversation")
+        XCTAssertFalse(app.textFields["chat-composer-field"].exists,
+                       "Settings accidentally displayed the message composer")
+        XCTAssertFalse(app.buttons["Chatoptionen"].exists,
+                       "Settings accidentally navigated into ChatView")
+        let done = app.buttons["Fertig"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8),
+                      "Chat settings must be dismissible")
+        done.tap()
         let closeChat = app.buttons["Schließen"]
         XCTAssertTrue(closeChat.waitForExistence(timeout: 8),
                       "Standalone chat inbox is missing its close button")
