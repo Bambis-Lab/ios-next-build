@@ -1,0 +1,40 @@
+name: iOS Next 1.7.3 Factory OAuth - Read-only Metadata Proof
+on:
+  push:
+    branches: [diagnostic/iosnext-173-factory-oauth-readonly]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iosnext-173-factory-metadata-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout fixed iOS 1.7.3 candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify offline probe rejects off-origin endpoints and redirects
+        shell: bash
+        run: python3 -m unittest discover -s Scripts/Acceptance -p 'test_factory_oauth_metadata.py' -v
+      - name: Observe public OAuth metadata and DCR HEAD without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/oauth173
+          python3 Scripts/probe_factory_oauth_metadata.py | tee build/oauth173/metadata.log
+          grep -q '^GATEWAY_METADATA=PUBLIC_CONTRACT_VERIFIED$' build/oauth173/metadata.log
+          grep -q '^GATEWAY_DCR_POST=NOT_TESTED$' build/oauth173/metadata.log
+          grep -Eq '^GATEWAY_DCR_HEAD_STATUS=([0-9]{3}|UNREACHABLE)$' build/oauth173/metadata.log
+          grep -q '^GATEWAY_USER_OAUTH_SESSION=NOT_TESTED$' build/oauth173/metadata.log
+          grep -q '^GATEWAY_AUTHENTICATED_MCP=NOT_TESTED$' build/oauth173/metadata.log
+          echo "IOS173_FACTORY_PUBLIC_METADATA=PASS; DCR_POST=NOT_TESTED; IPHONE_OAUTH=NOT_TESTED"
+      - name: Retain sanitized observation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOS173-Factory-Public-OAuth-Metadata
+          path: build/oauth173/metadata.log
+          if-no-files-found: warn
+          retention-days: 14

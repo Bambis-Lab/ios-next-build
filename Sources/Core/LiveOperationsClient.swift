@@ -13,6 +13,7 @@ enum LiveOperationsError: LocalizedError {
     case disconnected
     case timedOut
     case invalidMessage
+    case incompatibleRunnerStream
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +23,7 @@ enum LiveOperationsError: LocalizedError {
         case .disconnected: "Die Master-Runtime-Verbindung wurde getrennt."
         case .timedOut: "Die Master Runtime antwortet nicht."
         case .invalidMessage: "Die Master Runtime hat ungültige Daten gesendet."
+        case .incompatibleRunnerStream: "Dieser Runner-Endpunkt liefert Commander-Live-Ereignisse statt MCP-/SentinelX-Operationen. Die beiden Streams benötigen getrennte Backend-Verträge; bestehende Runner-Daten bleiben unabhängig verfügbar."
         }
     }
 }
@@ -64,7 +66,9 @@ actor LiveOperationsClient {
         lastMCPSequence: Int64?,
         lastSentinelSequence: Int64?
     ) -> URL? {
-        let endpoint = configuration.baseURL.appending(path: "v1/live")
+        // /v1/live is the Commander feed; MCP/SentinelX use an independently
+        // authenticated, read-only Runner proxy with server-side token isolation.
+        let endpoint = configuration.baseURL.appending(path: "v1/operations/live")
         guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return nil }
         switch components.scheme?.lowercased() {
         case "https": components.scheme = "wss"
@@ -76,6 +80,23 @@ actor LiveOperationsClient {
         if let lastSentinelSequence { items.append(URLQueryItem(name: "last_sentinelx_seq", value: String(lastSentinelSequence))) }
         components.queryItems = items.isEmpty ? nil : items
         return components.url
+    }
+
+
+    /// Never fabricate MCP operations from a Commander snapshot. Distinguish
+    /// incompatible backend feeds from corrupt JSON for targeted diagnosis.
+    nonisolated static func decodeEnvelope(_ data: Data) throws -> LiveOperationsEnvelope {
+        let decoder = LiveOperationsCoding.decoder()
+        do {
+            return try decoder.decode(LiveOperationsEnvelope.self, from: data)
+        } catch DecodingError.keyNotFound(let key, _) where key.stringValue == "source" {
+            if (try? decoder.decode(RunnerLiveEnvelope.self, from: data)) != nil {
+                throw LiveOperationsError.incompatibleRunnerStream
+            }
+            throw LiveOperationsError.invalidMessage
+        } catch is DecodingError {
+            throw LiveOperationsError.invalidMessage
+        }
     }
 
     func stream(
@@ -149,7 +170,7 @@ actor LiveOperationsClient {
                 case let .string(value): data = Data(value.utf8)
                 @unknown default: throw LiveOperationsError.invalidMessage
                 }
-                continuation.yield(try decoder.decode(LiveOperationsEnvelope.self, from: data))
+                continuation.yield(try Self.decodeEnvelope(data))
             }
             continuation.finish()
         } catch is CancellationError {

@@ -3,6 +3,14 @@ import LocalAuthentication
 import Observation
 import UIKit
 
+/// A verified Family Broker must never be substituted with a locally
+/// remembered or self-asserted contact when its discovery route fails.
+enum ChatContactDiscoveryPolicy {
+    static func mayUseLegacyRecipient(statusCode: Int, familyCredentialActive: Bool) -> Bool {
+        statusCode == 404 && !familyCredentialActive
+    }
+}
+
 @MainActor
 @Observable
 final class ChatModel {
@@ -313,6 +321,11 @@ final class ChatModel {
             let session = try await relay.session(configuration: configuration)
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             guard session.userID == configuration.userID else { throw ChatError.invalidResponse }
+            if isFamilyCredentialActive {
+                // Must negotiate *before* reading messages. Old brokers delete
+                // ciphertext on GET and cannot guarantee safe replay.
+                try await relay.requireAcknowledgedDelivery(configuration: configuration)
+            }
             accessRole = session.role
             do {
                 let loadedContacts = try await relay.contacts(configuration: configuration)
@@ -320,7 +333,15 @@ final class ChatModel {
                 contacts = loadedContacts
                     .filter { $0.userID != configuration.userID }
                     .sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
-            } catch ChatError.rejected(404) {
+            } catch ChatError.rejected(let status) {
+                // Legacy installations may have a preconfigured private peer.
+                // A *verified* family session must never create a plausible
+                // contact from a saved user ID when broker discovery failed.
+                guard ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+                    statusCode: status, familyCredentialActive: isFamilyCredentialActive
+                ) else {
+                    throw ChatError.rejected(status)
+                }
                 guard epoch == startupEpoch, !Task.isCancelled else { return }
                 contacts = recipientUserID.isEmpty
                     ? []
@@ -721,12 +742,62 @@ final class ChatModel {
         }
     }
 
+    /// The backend dequeues each ciphertext batch on read. Rejecting one
+    /// malformed/replayed envelope must not discard later valid ciphertexts
+    /// from that *same* already-dequeued batch. Transport failures and task
+    /// cancellation remain fatal; decryption/identity failures stay fail-closed.
+    static func processReceivedBatch(
+        _ envelopes: [ChatEnvelope],
+        accepting: (ChatEnvelope) async throws -> Void
+    ) async throws -> Int {
+        var rejected = 0
+        for envelope in envelopes {
+            try Task.checkCancellation()
+            do {
+                try await accepting(envelope)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let failure as ChatError {
+                // Invalid ciphertext is a per-message failure. HTTP/auth
+                // failures are *transport* failures and must not be masked.
+                switch failure {
+                case .invalidEnvelope, .invalidSignature, .identityChanged, .contentTooLarge:
+                    rejected += 1
+                default:
+                    throw failure
+                }
+            } catch {
+                throw error
+            }
+        }
+        return rejected
+    }
+
     private func receiveLoop() async {
         var retryNanoseconds: UInt64 = 500_000_000
         while !Task.isCancelled, let configuration {
             do {
-                let envelopes = try await relay.receive(configuration: configuration)
-                for envelope in envelopes { try await accept(envelope, configuration: configuration) }
+                let ackMode = isFamilyCredentialActive
+                let envelopes = try await relay.receive(
+                    configuration: configuration, requiresAcknowledgement: ackMode
+                )
+                let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
+                    try await self.accept(envelope, configuration: configuration)
+                }
+                if ackMode && !envelopes.isEmpty {
+                    // ACK only after the entire dequeued batch is handled,
+                    // including explicitly rejected/untrusted ciphertext.
+                    // Transport/auth errors before this point do not ACK,
+                    // allowing backend replay while its volatile TTL remains.
+                    try await relay.acknowledge(
+                        envelopes.map(\.id), configuration: configuration
+                    )
+                }
+                if invalidCount > 0 {
+                    // Do not report or persist attacker-controlled ciphertext,
+                    // decrypted content or detailed crypto errors in UI/logs.
+                    lastError = "\(invalidCount) ungültige oder nicht verifizierte Chat-Nachrichten verworfen."
+                }
                 state = .online
                 retryNanoseconds = 500_000_000
             } catch is CancellationError {
@@ -768,7 +839,17 @@ final class ChatModel {
             }
         }
         try ChatDeviceKeys.pin(sender)
-        let plaintext = try keys.decrypt(envelope, sender: sender)
+        let plaintext: Data
+        do {
+            plaintext = try keys.decrypt(envelope, sender: sender)
+        } catch let cryptoFailure as ChatError {
+            throw cryptoFailure
+        } catch {
+            // CryptoKit invalid sealed-box/public-key errors must not leak
+            // implementation details and must never be mistaken for HTTP
+            // relay availability failures.
+            throw ChatError.invalidEnvelope
+        }
         seenEnvelopeIDs[envelope.id] = now
         partialMessages = partialMessages.filter { now.timeIntervalSince($0.value.lastUpdated) < 120 }
         let bufferedBytes = partialMessages.values.reduce(0) { total, partial in

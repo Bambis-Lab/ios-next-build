@@ -21,6 +21,7 @@ struct FactoryCredentialStore {
 
 enum FactoryConnectionError: LocalizedError {
     case invalidEndpoint, metadataUnavailable, pkceUnavailable, registrationUnavailable
+    case registrationEndpointMissing, registrationRejected(Int), registrationMissingClientID
     case oauthCancelled, invalidCallback, expiredState, missingCredentials
     case unauthorized, unexpectedResponse, rpcError(String), toolNotAvailable(String)
     case invalidProtocol, noReadableTools, noSuccessfulReads
@@ -31,6 +32,9 @@ enum FactoryConnectionError: LocalizedError {
         case .metadataUnavailable: "Factory-OAuth-Metadaten konnten nicht sicher geladen werden."
         case .pkceUnavailable: "Der OAuth-Server bietet kein nachgewiesenes PKCE S256 an."
         case .registrationUnavailable: "Der OAuth-Server lässt sich nicht als iOS-Client registrieren. Client-ID manuell hinterlegen."
+        case .registrationEndpointMissing: "Factory OAuth bietet keinen sicheren Registrierungsendpunkt. Eine bereits registrierte öffentliche iOS-Client-ID ist erforderlich."
+        case let .registrationRejected(code): "Factory OAuth hat die iOS-Client-Registrierung abgelehnt (HTTP \(code)). Registrierung und Redirect-URI serverseitig prüfen."
+        case .registrationMissingClientID: "Factory OAuth meldet eine erfolgreiche Registrierung, liefert aber keine gültige Client-ID."
         case .oauthCancelled: "Die Factory-Anmeldung wurde abgebrochen."
         case .invalidCallback: "Die OAuth-Antwort ist ungültig oder gehört nicht zu dieser Anmeldung."
         case .expiredState: "Die Factory-Sitzung ist abgelaufen. Erneut anmelden."
@@ -43,6 +47,18 @@ enum FactoryConnectionError: LocalizedError {
         case let .rpcError(message): "Factory-Anfrage abgelehnt: \(message)"
         case let .toolNotAvailable(tool): "Diese lesende Factory-Funktion wird nicht angeboten: \(tool)"
         }
+    }
+}
+
+/// All OAuth metadata, registration, token and MCP HTTP requests use a
+/// no-redirect transport. A 30x must never forward a bearer token,
+/// authorization code, refresh token or registration payload to a new host.
+final class FactoryNoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }
 
@@ -97,7 +113,11 @@ final class FactoryMCPService {
     private var endpoint: URL?
 
     init(
-        session: URLSession = .shared,
+        session: URLSession = URLSession(
+            configuration: .ephemeral,
+            delegate: FactoryNoRedirects(),
+            delegateQueue: nil
+        ),
         credentials: FactoryCredentialStore? = nil
     ) {
         self.session = session
@@ -175,7 +195,7 @@ final class FactoryMCPService {
             client = registeredClientID.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
             guard let registerURL = try? secureURL(discovery["registration_endpoint"] as? String ?? "") else {
-                throw FactoryConnectionError.registrationUnavailable
+                throw FactoryConnectionError.registrationEndpointMissing
             }
             var request = URLRequest(url: registerURL)
             request.httpMethod = "POST"
@@ -189,10 +209,14 @@ final class FactoryMCPService {
                 "token_endpoint_auth_method": "none"
             ])
             let (data, response) = try await self.data(for: request)
-            guard [200, 201].contains(response.statusCode),
-                  let registered = try json(data)["client_id"] as? String,
+            guard [200, 201].contains(response.statusCode) else {
+                // Only the HTTP status is exposed to the UI; do not log response
+                // bodies, which could contain tokens, URLs or private details.
+                throw FactoryConnectionError.registrationRejected(response.statusCode)
+            }
+            guard let registered = try json(data)["client_id"] as? String,
                   !registered.isEmpty else {
-                throw FactoryConnectionError.registrationUnavailable
+                throw FactoryConnectionError.registrationMissingClientID
             }
             client = registered
         }

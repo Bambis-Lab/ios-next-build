@@ -1,8 +1,261 @@
+import Foundation
 import XCTest
 @testable import IOSNext
 
 @MainActor
 final class ChatDraftSafetyTests: XCTestCase {
+    func testQuietFamilyChatLongPollDoesNotTimeoutBeforeBackendResponse() {
+        XCTAssertEqual(ChatRelayPollingPolicy.serverWaitSeconds, 25)
+        XCTAssertGreaterThan(
+            ChatRelayPollingPolicy.longPollRequestTimeout,
+            Double(ChatRelayPollingPolicy.serverWaitSeconds) + 10,
+            "A healthy empty 25-second backend wait must not turn Chat offline"
+        )
+        XCTAssertGreaterThan(
+            ChatRelayPollingPolicy.sessionResourceTimeout,
+            ChatRelayPollingPolicy.longPollRequestTimeout,
+            "The URLSession resource timeout may not preempt an authenticated long-poll request"
+        )
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-mika&wait=25&limit=64",
+                method: "GET"
+            ),
+            ChatRelayPollingPolicy.longPollRequestTimeout
+        )
+    }
+
+    func testOnlyAuthenticatedMessageReceiveLongPollGetsExtendedTimeout() {
+        for path in [
+            "v1/chat/session",
+            "v1/chat/contacts",
+            "v1/chat/identities/ha-gabi",
+            "v1/chat/messages",
+            "v1/chat/messages?recipient_device_id=ios-mika&wait=0&limit=64",
+            "v1/chat/messages?recipient_device_id=ios-mika&wait=24&limit=64",
+            "v1/chat/tickets",
+            "v2/family/challenge"
+        ] {
+            XCTAssertEqual(
+                ChatRelayPollingPolicy.timeout(for: path, method: "GET"),
+                ChatRelayPollingPolicy.ordinaryRequestTimeout,
+                "Unrelated request must keep its short timeout: \(path)"
+            )
+        }
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-mika&wait=25&limit=64",
+                method: "POST"
+            ),
+            ChatRelayPollingPolicy.ordinaryRequestTimeout,
+            "Sending E2EE messages must not silently inherit 42-second long-poll timeouts"
+        )
+    }
+
+    private func batchEnvelope(_ id: String) -> ChatEnvelope {
+        ChatEnvelope(
+            id: id, groupID: "group-1",
+            senderUserID: "ha-mika", senderDeviceID: "ios-mika",
+            recipientUserID: "ha-nico", recipientDeviceID: "ios-nico",
+            ephemeralPublicKey: "", ciphertext: "", signature: "",
+            messageType: .text, contentType: "text/plain",
+            chunkIndex: 0, chunkCount: 1, createdAt: "2026-10-25T11:00:00Z"
+        )
+    }
+
+    func testBadEncryptedEnvelopeDoesNotDropLaterValidMessagesFromDequeuedBatch() async throws {
+        // The backend relay deletes ciphertext on batch delivery. Processing
+        // must continue after a rejected signature, never decrypt it or
+        // permanently lose the subsequent valid envelopes in that batch.
+        let items = [
+            batchEnvelope("invalid-signature"),
+            batchEnvelope("valid-1"),
+            batchEnvelope("valid-2"),
+        ]
+        var accepted: [String] = []
+        let rejected = try await ChatModel.processReceivedBatch(items) { envelope in
+            if envelope.id == "invalid-signature" { throw ChatError.invalidSignature }
+            accepted.append(envelope.id)
+        }
+        XCTAssertEqual(rejected, 1)
+        XCTAssertEqual(accepted, ["valid-1", "valid-2"])
+    }
+
+    func testRelayAuthorizationFailureIsNotMisclassifiedAsCorruptCiphertext() async {
+        let items = [batchEnvelope("unauthorized"), batchEnvelope("would-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "unauthorized" { throw ChatError.rejected(401) }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Relay 401 must fail the receive loop, not falsely report online")
+        } catch ChatError.rejected(401) {
+            XCTAssertTrue(accepted.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(type(of: error))")
+        }
+    }
+
+    func testNetworkTimeoutIsNotMisclassifiedAsCorruptCiphertext() async {
+        let items = [batchEnvelope("timed-out"), batchEnvelope("would-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "timed-out" { throw URLError(.timedOut) }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Network timeout must remain a transport failure")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .timedOut)
+            XCTAssertTrue(accepted.isEmpty)
+        } catch {
+            XCTFail("Unexpected error: \(type(of: error))")
+        }
+    }
+
+    func testBatchCancellationPropagatesInsteadOfBeingSwallowedAsInvalidMessage() async {
+        let items = [batchEnvelope("valid"), batchEnvelope("cancel"), batchEnvelope("must-not-process")]
+        var accepted: [String] = []
+        do {
+            _ = try await ChatModel.processReceivedBatch(items) { envelope in
+                if envelope.id == "cancel" { throw CancellationError() }
+                accepted.append(envelope.id)
+            }
+            XCTFail("Cancellation must abort the batch and not report online")
+        } catch is CancellationError {
+            XCTAssertEqual(accepted, ["valid"])
+        } catch {
+            XCTFail("Unexpected error type: \(type(of: error))")
+        }
+    }
+
+    func testFamilyDeliveryRequiresExplicitSupportedAckContractBeforeAnyRead() throws {
+        let valid = Data(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":false}"#.utf8)
+        let supported = try JSONDecoder().decode(ChatDeliveryContract.self, from: valid)
+        XCTAssertTrue(supported.isSupported)
+        for payload in [
+            #"{"mode":"legacy","max_batch":64,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":0,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":257,"ttl_seconds":120,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":10,"persistent":false}"#,
+            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true}"#
+        ] {
+            let contract = try JSONDecoder().decode(ChatDeliveryContract.self, from: Data(payload.utf8))
+            XCTAssertFalse(contract.isSupported, "Incompatible Family Broker must never dequeue encrypted content")
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ChatDeliveryContract.self,
+            from: Data(#"{"mode":"ack_v1"}"#.utf8)
+        ))
+    }
+
+    func testAckV1BatchRequiresServerConfirmationAndLegacyRemainsOptional() throws {
+        let negotiated = try JSONDecoder().decode(
+            ChatRelayBatch.self,
+            from: Data(#"{"messages":[],"delivery_mode":"ack_v1"}"#.utf8)
+        )
+        XCTAssertEqual(negotiated.deliveryMode, "ack_v1")
+        XCTAssertTrue(negotiated.messages.isEmpty)
+        let legacy = try JSONDecoder().decode(
+            ChatRelayBatch.self, from: Data(#"{"messages":[]}"#.utf8)
+        )
+        XCTAssertNil(legacy.deliveryMode)
+        XCTAssertEqual(
+            ChatRelayPollingPolicy.timeout(
+                for: "v1/chat/messages?recipient_device_id=ios-gabi&wait=25&limit=64&ack=1",
+                method: "GET"
+            ),
+            ChatRelayPollingPolicy.longPollRequestTimeout
+        )
+    }
+
+    func testChatRelayAlwaysRefusesTokenBearingHTTPRedirects() throws {
+        let delegate = ChatRelayNoRedirects()
+        let source = try XCTUnwrap(URL(string: "https://family.example.invalid/v1/chat/contacts"))
+        let untrusted = try XCTUnwrap(URL(string: "https://untrusted.example.invalid/collect"))
+        let session = URLSession(configuration: .ephemeral)
+        let task = session.dataTask(with: source)
+        defer {
+            task.cancel()
+            session.invalidateAndCancel()
+        }
+        for status in [301, 302, 307, 308] {
+            let response = try XCTUnwrap(HTTPURLResponse(
+                url: source, statusCode: status, httpVersion: "HTTP/1.1",
+                headerFields: ["Location": untrusted.absoluteString]
+            ))
+            var redirectWasConsidered = false
+            var forwarded: URLRequest?
+            delegate.urlSession(
+                session, task: task,
+                willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: untrusted)
+            ) { candidate in
+                redirectWasConsidered = true
+                forwarded = candidate
+            }
+            XCTAssertTrue(redirectWasConsidered)
+            XCTAssertNil(forwarded, "Chat or HA bearer may not follow HTTP redirect \(status)")
+        }
+    }
+
+    func testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails() {
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: true
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 401, familyCredentialActive: false
+        ))
+        XCTAssertFalse(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 503, familyCredentialActive: false
+        ))
+        XCTAssertTrue(ChatContactDiscoveryPolicy.mayUseLegacyRecipient(
+            statusCode: 404, familyCredentialActive: false
+        ))
+    }
+
+    func testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken() {
+        // The Owner inbox is independent from the Chat relay; the tap still
+        // enters AdminAreaView which requires a separate approved P-256 Owner
+        // device session before showing or mutating Owner tickets.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: false, verifiedProfile: .nico
+        ))
+        // No Chat token is required for the *navigation link*: Owner rights
+        // remain exclusively in the independently authorized backend.
+        XCTAssertTrue(ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico
+        ))
+    }
+
+    func testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured() {
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .gabi, chatRole: .member
+        ))
+        XCTAssertTrue(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .timo, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: nil, chatRole: .member
+        ))
+        XCTAssertFalse(ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: true, verifiedProfile: .nico, chatRole: .owner
+        ))
+    }
+
     func testDraftIsPreservedWhenNoContactSelected() async {
         let chat = ChatModel()
         chat.recipientUserID = ""

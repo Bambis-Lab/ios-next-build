@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// A verified family Owner receives only a *member-scoped* Chat token until
+/// the separate P-256 Owner device approval succeeds. Chat role must never
+/// gate visibility of the Owner-ticket entry or imply Owner authority.
+enum ChatTicketVisibilityPolicy {
+    static func ownerEntry(
+        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?
+    ) -> Bool {
+        // Owner tickets use the *independently approved* Admin backend.
+        // Visibility must not depend on the Chat relay/session being online.
+        familyBrokerConfigured && verifiedProfile == .nico
+    }
+
+    static func memberEntry(
+        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?,
+        chatRole: ChatAccessRole?
+    ) -> Bool {
+        guard chatRole == .member else { return false }
+        if familyBrokerConfigured {
+            return verifiedProfile != nil && verifiedProfile != .nico
+        }
+        return verifiedProfile != .nico
+    }
+}
+
 /// Inbox owns navigation only. Encryption, verified HA identities, draft
 /// isolation and delivery remain solely in ChatModel / the authenticated relay.
 struct ChatInboxView: View {
@@ -8,6 +32,7 @@ struct ChatInboxView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var searchText = ""
     @State private var destination: ChatInboxDestination?
+    @State private var showingChatSettings = false
     @State private var showingMemberTickets = false
     @State private var showingNewTicket = false
     @State private var showingOwnerTickets = false
@@ -15,12 +40,10 @@ struct ChatInboxView: View {
     private enum ChatInboxDestination: Hashable, Identifiable {
         case family
         case person(String)
-        case setup
         var id: String {
             switch self {
             case .family: "family"
             case .person(let userID): "person:\(userID)"
-            case .setup: "setup"
             }
         }
     }
@@ -33,13 +56,18 @@ struct ChatInboxView: View {
     }
 
     private var showOwnerTickets: Bool {
-        chatModel.accessRole == .owner &&
-        appModel.registeredFamilyProfile == .nico
+        ChatTicketVisibilityPolicy.ownerEntry(
+            familyBrokerConfigured: appModel.familyBrokerConfigured,
+            verifiedProfile: appModel.registeredFamilyProfile
+        )
     }
 
     private var showMemberTickets: Bool {
-        chatModel.accessRole == .member &&
-        appModel.registeredFamilyProfile != .nico
+        ChatTicketVisibilityPolicy.memberEntry(
+            familyBrokerConfigured: appModel.familyBrokerConfigured,
+            verifiedProfile: appModel.registeredFamilyProfile,
+            chatRole: chatModel.accessRole
+        )
     }
 
     var body: some View {
@@ -61,12 +89,23 @@ struct ChatInboxView: View {
                         .accessibilityIdentifier("chat-inbox-family")
                         .buttonStyle(.plain)
                     }
-                } else if appModel.familyBrokerConfigured &&
-                            appModel.registeredFamilyProfile != nil {
+                } else {
                     Section("Familie") {
-                        Label("Familiengruppe noch nicht verfügbar", systemImage: "person.3.sequence")
+                        Label(
+                            !appModel.familyBrokerConfigured
+                                ? "Familienchat noch nicht eingerichtet"
+                                : appModel.registeredFamilyProfile == nil
+                                    ? "Familienidentität wird geprüft"
+                                    : "Familiengruppe noch nicht verfügbar",
+                            systemImage: "person.3.sequence"
+                        )
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("chat-inbox-family-pending")
+                        Text(!appModel.familyBrokerConfigured
+                            ? "Ein verifizierter Familien-Broker ist für die fünf echten Kontakte und den Gruppenchat erforderlich."
+                            : "Kontakte erscheinen erst nach bestätigter Home-Assistant- und Geräteregistrierung.")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                            .accessibilityIdentifier("chat-inbox-family-pending")
                     }
                 }
 
@@ -152,13 +191,19 @@ struct ChatInboxView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Chat einrichten", systemImage: "gearshape") {
-                    destination = .setup
+                    showingChatSettings = true
                 }
                 .accessibilityIdentifier("chat-inbox-settings")
             }
         }
-        .navigationDestination(item: $destination) { _ in
-            ChatView(appModel: appModel, chatModel: chatModel)
+        .navigationDestination(item: $destination) { selected in
+            switch selected {
+            case .family, .person:
+                ChatView(appModel: appModel, chatModel: chatModel)
+            }
+        }
+        .sheet(isPresented: $showingChatSettings) {
+            ChatSettingsView(appModel: appModel, chatModel: chatModel)
         }
         .sheet(isPresented: $showingMemberTickets) {
             MemberTicketInboxView(chatModel: chatModel)
@@ -191,7 +236,7 @@ struct ChatInboxView: View {
         }
         .onDisappear {
             // Conversation detail owns its own lifecycle while pushed.
-            if destination == nil {
+            if destination == nil && !showingChatSettings {
                 IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared()
             }
         }
