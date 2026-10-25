@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   metadata:
-    runs-on: [self-hosted, Linux, X64, general]
+    runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - name: Checkout fixed iOS 1.7.3 candidate source
