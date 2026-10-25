@@ -90,6 +90,12 @@ struct ChatRelayReceipt: Codable, Sendable {
 
 struct ChatRelayBatch: Codable, Sendable {
     let messages: [ChatEnvelope]
+    let deliveryMode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case messages
+        case deliveryMode = "delivery_mode"
+    }
 }
 
 
