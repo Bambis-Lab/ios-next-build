@@ -22,6 +22,14 @@ final class LiveOperationsTests: XCTestCase {
         }
     }
 
+    func testBadServerWebSocketResponseIsLocalizedWithoutExposingResponseBody() {
+        let failedUpgrade = NSError(domain: NSURLErrorDomain, code: NSURLErrorBadServerResponse)
+        let message = LiveOperationsError.diagnosticMessage(for: failedUpgrade)
+        XCTAssertTrue(message.contains("/v1/operations/live"))
+        XCTAssertTrue(message.contains("Authentifizierung"))
+        XCTAssertFalse(message.contains("There was a bad response"))
+    }
+
     func testLiveURLMapsHTTPSAndCarriesBothSequences() throws {
         let configuration = LiveOperationsConfiguration(
             baseURL: URL(string: "https://live.example/base/")!,
