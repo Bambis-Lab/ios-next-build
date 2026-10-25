@@ -5,10 +5,11 @@ import SwiftUI
 /// gate visibility of the Owner-ticket entry or imply Owner authority.
 enum ChatTicketVisibilityPolicy {
     static func ownerEntry(
-        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?,
-        chatRole: ChatAccessRole?
+        familyBrokerConfigured: Bool, verifiedProfile: HomeProfile?
     ) -> Bool {
-        familyBrokerConfigured && verifiedProfile == .nico && chatRole != nil
+        // Owner tickets use the *independently approved* Admin backend.
+        // Visibility must not depend on the Chat relay/session being online.
+        familyBrokerConfigured && verifiedProfile == .nico
     }
 
     static func memberEntry(
@@ -57,8 +58,7 @@ struct ChatInboxView: View {
     private var showOwnerTickets: Bool {
         ChatTicketVisibilityPolicy.ownerEntry(
             familyBrokerConfigured: appModel.familyBrokerConfigured,
-            verifiedProfile: appModel.registeredFamilyProfile,
-            chatRole: chatModel.accessRole
+            verifiedProfile: appModel.registeredFamilyProfile
         )
     }
 
