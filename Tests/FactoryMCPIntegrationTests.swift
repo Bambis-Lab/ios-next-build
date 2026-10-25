@@ -77,6 +77,43 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         XCTAssertTrue(FactoryMockProtocol.calledMethods.contains("tools/list"))
     }
 
+    func testOAuthMissingDynamicRegistrationCanUseIndependentPublicClientID() async throws {
+        FactoryMockProtocol.registrationBehavior(endpointVisible: false)
+        let client = service()
+        do {
+            _ = try await client.beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("No registration endpoint must fail without a pre-registered client")
+        } catch FactoryConnectionError.registrationEndpointMissing {
+            // Explicit fail-closed diagnosis; no untrusted client ID invented.
+        }
+        let manual = try await client.beginAuthorization(
+            endpoint: resource, registeredClientID: "registered-public-iosnext-client"
+        )
+        XCTAssertEqual(manual.clientID, "registered-public-iosnext-client")
+        XCTAssertEqual(URLComponents(url: manual.authorizationURL, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "code_challenge_method" })?.value, "S256")
+    }
+
+    func testOAuthRegistrationHTTPRejectionIsRedactedAndPrecise() async throws {
+        FactoryMockProtocol.registrationBehavior(status: 403)
+        do {
+            _ = try await service().beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("Registration HTTP 403 must not silently create an OAuth client")
+        } catch FactoryConnectionError.registrationRejected(let status) {
+            XCTAssertEqual(status, 403)
+        }
+    }
+
+    func testOAuthRegistrationMissingClientIDIsRejected() async throws {
+        FactoryMockProtocol.registrationBehavior(returnClientID: false)
+        do {
+            _ = try await service().beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("Successful HTTP response with no client_id must fail closed")
+        } catch FactoryConnectionError.registrationMissingClientID {
+            // No fabricated ID.
+        }
+    }
+
     func testWrongOAuthStateCannotCreateSession() async throws {
         let client = service()
         defer { client.clear() }
@@ -146,6 +183,10 @@ private final class FactoryMockProtocol: URLProtocol {
     private static var expirySeconds = 3600
     private static var eventStream = false
     private static var noTools = false
+    private static var registerStatusCode = 201
+    private static var registerClientIDAvailable = true
+    private static var registrationEndpointVisible = true
+
 
     static var calledTools: [String] { mutex.withLock { tools } }
     static var calledMethods: [String] { mutex.withLock { methods } }
@@ -161,6 +202,19 @@ private final class FactoryMockProtocol: URLProtocol {
             expirySeconds = 3600
             eventStream = false
             noTools = false
+            registerStatusCode = 201
+            registerClientIDAvailable = true
+            registrationEndpointVisible = true
+        }
+    }
+
+    static func registrationBehavior(
+        status: Int = 201, returnClientID: Bool = true, endpointVisible: Bool = true
+    ) {
+        mutex.withLock {
+            registerStatusCode = status
+            registerClientIDAvailable = returnClientID
+            registrationEndpointVisible = endpointVisible
         }
     }
 
@@ -230,12 +284,16 @@ private final class FactoryMockProtocol: URLProtocol {
                 "issuer": "https://factory-iosnext-test.invalid",
                 "authorization_endpoint": "https://factory-iosnext-test.invalid/authorize",
                 "token_endpoint": "https://factory-iosnext-test.invalid/token",
-                "registration_endpoint": "https://factory-iosnext-test.invalid/register",
+                "registration_endpoint": registrationEndpointVisible
+                    ? "https://factory-iosnext-test.invalid/register" : "",
                 "code_challenge_methods_supported": ["S256"]
             ]))
         }
         if path == "/register" {
-            return (201, "application/json", try jsonData(["client_id": "iosnext-test-public-client"]))
+            let state = mutex.withLock { (registerStatusCode, registerClientIDAvailable) }
+            let result: [String: Any] = state.1
+                ? ["client_id": "iosnext-test-public-client"] : [:]
+            return (state.0, "application/json", try jsonData(result))
         }
         if path == "/token" {
             let form = String(decoding: requestBody(request), as: UTF8.self)
