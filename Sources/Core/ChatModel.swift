@@ -321,6 +321,11 @@ final class ChatModel {
             let session = try await relay.session(configuration: configuration)
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             guard session.userID == configuration.userID else { throw ChatError.invalidResponse }
+            if isFamilyCredentialActive {
+                // Must negotiate *before* reading messages. Old brokers delete
+                // ciphertext on GET and cannot guarantee safe replay.
+                try await relay.requireAcknowledgedDelivery(configuration: configuration)
+            }
             accessRole = session.role
             do {
                 let loadedContacts = try await relay.contacts(configuration: configuration)
@@ -772,9 +777,21 @@ final class ChatModel {
         var retryNanoseconds: UInt64 = 500_000_000
         while !Task.isCancelled, let configuration {
             do {
-                let envelopes = try await relay.receive(configuration: configuration)
+                let ackMode = isFamilyCredentialActive
+                let envelopes = try await relay.receive(
+                    configuration: configuration, requiresAcknowledgement: ackMode
+                )
                 let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
                     try await self.accept(envelope, configuration: configuration)
+                }
+                if ackMode && !envelopes.isEmpty {
+                    // ACK only after the entire dequeued batch is handled,
+                    // including explicitly rejected/untrusted ciphertext.
+                    // Transport/auth errors before this point do not ACK,
+                    // allowing backend replay while its volatile TTL remains.
+                    try await relay.acknowledge(
+                        envelopes.map(\.id), configuration: configuration
+                    )
                 }
                 if invalidCount > 0 {
                     // Do not report or persist attacker-controlled ciphertext,

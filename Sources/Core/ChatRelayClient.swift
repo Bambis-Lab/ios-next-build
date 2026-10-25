@@ -36,6 +36,42 @@ enum ChatRelayPollingPolicy {
     }
 }
 
+/// The separately approved family broker advertises opt-in volatile ack_v1.
+/// The client must verify this *before* reading ciphertext to avoid the old
+/// server deleting data on GET when it does not support acknowledgements.
+struct ChatDeliveryContract: Decodable, Sendable {
+    let mode: String
+    let maxBatch: Int
+    let ttlSeconds: Int
+    let persistent: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case maxBatch = "max_batch"
+        case ttlSeconds = "ttl_seconds"
+        case persistent
+    }
+
+    var isSupported: Bool {
+        mode == "ack_v1" && maxBatch >= 1 && maxBatch <= 256 &&
+        ttlSeconds >= 30 && !persistent
+    }
+}
+
+private struct ChatAcknowledgementRequest: Encodable {
+    let recipientDeviceID: String
+    let messageIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case recipientDeviceID = "recipient_device_id"
+        case messageIDs = "message_ids"
+    }
+}
+
+private struct ChatAcknowledgementResponse: Decodable {
+    let acked: Int
+}
+
 actor ChatRelayClient {
     private let session: URLSession
     private let encoder: JSONEncoder
@@ -219,15 +255,51 @@ actor ChatRelayClient {
         )
     }
 
-    func receive(configuration: ChatConfiguration) async throws -> [ChatEnvelope] {
-        let device = configuration.deviceID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? configuration.deviceID
-        let batch: ChatRelayBatch = try await request(
-            path: "v1/chat/messages?recipient_device_id=\(device)&wait=\(ChatRelayPollingPolicy.serverWaitSeconds)&limit=64",
+    func requireAcknowledgedDelivery(configuration: ChatConfiguration) async throws {
+        let contract: ChatDeliveryContract = try await request(
+            path: "v1/chat/delivery-contract",
             method: "GET",
             body: Optional<String>.none,
             configuration: configuration
         )
+        guard contract.isSupported else { throw ChatError.invalidResponse }
+    }
+
+    func receive(
+        configuration: ChatConfiguration, requiresAcknowledgement: Bool = false
+    ) async throws -> [ChatEnvelope] {
+        let device = configuration.deviceID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+            ?? configuration.deviceID
+        let suffix = requiresAcknowledgement ? "&ack=1" : ""
+        let batch: ChatRelayBatch = try await request(
+            path: "v1/chat/messages?recipient_device_id=\(device)&wait=\(ChatRelayPollingPolicy.serverWaitSeconds)&limit=64\(suffix)",
+            method: "GET",
+            body: Optional<String>.none,
+            configuration: configuration
+        )
+        guard !requiresAcknowledgement || batch.deliveryMode == "ack_v1" else {
+            throw ChatError.invalidResponse
+        }
         return batch.messages
+    }
+
+    func acknowledge(_ ids: [String], configuration: ChatConfiguration) async throws {
+        guard !ids.isEmpty, ids.count <= 64, Set(ids).count == ids.count else {
+            throw ChatError.invalidResponse
+        }
+        let reply: ChatAcknowledgementResponse = try await request(
+            path: "v1/chat/messages/ack",
+            method: "POST",
+            body: ChatAcknowledgementRequest(
+                recipientDeviceID: configuration.deviceID, messageIDs: ids
+            ),
+            configuration: configuration
+        )
+        // Zero ACKs means the same IDs were already confirmed (lost response),
+        // or expired; this is allowed for an idempotent endpoint.
+        guard reply.acked >= 0 && reply.acked <= ids.count else {
+            throw ChatError.invalidResponse
+        }
     }
 
     private func request<Response: Decodable, Body: Encodable>(

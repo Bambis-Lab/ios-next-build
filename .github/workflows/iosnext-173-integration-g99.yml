@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/iosnext-173-integration-00-07
+      - feature/iosnext-173-family-chat-ack-client
       - fix/iosnext-173-chat-batch-isolation
       - fix/iosnext-173-relay-longpoll-timeout
       - fix/iosnext-173-chat-transport-security
@@ -93,6 +94,14 @@ jobs:
           assert "testBatchCancellationPropagatesInsteadOfBeingSwallowedAsInvalidMessage" in chattests
           assert "testRelayAuthorizationFailureIsNotMisclassifiedAsCorruptCiphertext" in chattests
           assert "testNetworkTimeoutIsNotMisclassifiedAsCorruptCiphertext" in chattests
+          assert "requireAcknowledgedDelivery(configuration: configuration)" in chatmodel
+          assert "requiresAcknowledgement: ackMode" in chatmodel
+          assert "try await relay.acknowledge(" in chatmodel
+          assert "v1/chat/delivery-contract" in relay
+          assert "v1/chat/messages/ack" in relay
+          assert 'batch.deliveryMode == "ack_v1"' in relay
+          assert "testFamilyDeliveryRequiresExplicitSupportedAckContractBeforeAnyRead" in chattests
+          assert "testAckV1BatchRequiresServerConfirmationAndLegacyRemainsOptional" in chattests
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY
 
