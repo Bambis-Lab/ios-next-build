@@ -3,6 +3,9 @@
 These tests never contact Factory or attempt OAuth registration.
 """
 import importlib.util
+import socket
+import ssl
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 import unittest
 
@@ -28,6 +31,19 @@ class FactoryOAuthMetadataProbeTests(unittest.TestCase):
             "",
         ):
             self.assertFalse(probe.safe_endpoint(url), url)
+
+    def test_network_failure_categories_never_include_raw_network_or_secret_text(self):
+        failures = [
+            (URLError(socket.gaierror(-3, "sensitive host text")), "DNS_FAILED"),
+            (URLError(TimeoutError("sensitive token value")), "TIMEOUT"),
+            (URLError(ConnectionRefusedError("private host")), "CONNECTION_REFUSED"),
+            (URLError(ssl.SSLError("sensitive cert contents")), "TLS_FAILED"),
+            (URLError("proxy URL includes token=secret"), "NETWORK_ERROR"),
+            (HTTPError(probe.BASE, 403, "sensitive body", {}, None), "HTTP_403"),
+        ]
+        for error, expected in failures:
+            with self.subTest(expected=expected):
+                self.assertEqual(probe.error_kind(error), expected)
 
     def test_all_http_redirects_are_declined(self):
         handler = probe.RejectRedirects()
