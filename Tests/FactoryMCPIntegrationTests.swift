@@ -143,6 +143,29 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         }
     }
 
+    func testOAuthClientMetadataRejectionHasOnlyStandardizedErrorCode() async throws {
+        FactoryMockProtocol.registrationBehavior(status: 400, errorCode: "invalid_client_metadata")
+        do {
+            _ = try await service().beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("Bad client metadata must never create a Factory OAuth client")
+        } catch FactoryConnectionError.registrationClientMetadataRejected {
+            XCTAssertTrue(FactoryConnectionError.registrationClientMetadataRejected
+                .localizedDescription.contains("invalid_client_metadata"))
+        }
+    }
+
+    func testOAuthUnknownRegistrationErrorIsNotSurfaced() async throws {
+        FactoryMockProtocol.registrationBehavior(status: 400, errorCode: "attacker-controlled-secret")
+        do {
+            _ = try await service().beginAuthorization(endpoint: resource, registeredClientID: nil)
+            XCTFail("Unknown registration errors must fail closed")
+        } catch FactoryConnectionError.registrationRejected(let status) {
+            XCTAssertEqual(status, 400)
+            XCTAssertFalse(FactoryConnectionError.registrationRejected(status)
+                .localizedDescription.contains("attacker-controlled-secret"))
+        }
+    }
+
     func testOAuthRegistrationMissingClientIDIsRejected() async throws {
         FactoryMockProtocol.registrationBehavior(returnClientID: false)
         do {
@@ -223,6 +246,7 @@ private final class FactoryMockProtocol: URLProtocol {
     private static var eventStream = false
     private static var noTools = false
     private static var registerStatusCode = 201
+    private static var registerErrorCode = "invalid_redirect_uris"
     private static var registerClientIDAvailable = true
     private static var registrationEndpointVisible = true
 
@@ -242,16 +266,19 @@ private final class FactoryMockProtocol: URLProtocol {
             eventStream = false
             noTools = false
             registerStatusCode = 201
+            registerErrorCode = "invalid_redirect_uris"
             registerClientIDAvailable = true
             registrationEndpointVisible = true
         }
     }
 
     static func registrationBehavior(
-        status: Int = 201, returnClientID: Bool = true, endpointVisible: Bool = true
+        status: Int = 201, returnClientID: Bool = true, endpointVisible: Bool = true,
+        errorCode: String = "invalid_redirect_uris"
     ) {
         mutex.withLock {
             registerStatusCode = status
+            registerErrorCode = errorCode
             registerClientIDAvailable = returnClientID
             registrationEndpointVisible = endpointVisible
         }
@@ -329,9 +356,9 @@ private final class FactoryMockProtocol: URLProtocol {
             ]))
         }
         if path == "/register" {
-            let state = mutex.withLock { (registerStatusCode, registerClientIDAvailable) }
+            let state = mutex.withLock { (registerStatusCode, registerClientIDAvailable, registerErrorCode) }
             let result: [String: Any] = state.0 == 400
-                ? ["error": "invalid_redirect_uris"]
+                ? ["error": state.2]
                 : (state.1 ? ["client_id": "iosnext-test-public-client"] : [:])
             return (state.0, "application/json", try jsonData(result))
         }
