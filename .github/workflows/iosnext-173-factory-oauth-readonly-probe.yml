@@ -1,7 +1,7 @@
 name: iOS Next 1.7.3 Factory OAuth - Read-only Metadata Proof
 on:
   push:
-    branches: [diagnostic/iosnext-173-factory-oauth-readonly]
+    branches: [diagnostic/iosnext-173-factory-oauth-readonly, fix/iosnext-173-screenshot-oauth-20261025]
   workflow_dispatch:
 permissions:
   contents: read
