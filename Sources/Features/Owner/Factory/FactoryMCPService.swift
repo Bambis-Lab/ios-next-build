@@ -21,7 +21,7 @@ struct FactoryCredentialStore {
 
 enum FactoryConnectionError: LocalizedError {
     case invalidEndpoint, metadataUnavailable, pkceUnavailable, registrationUnavailable
-    case registrationEndpointMissing, registrationRejected(Int), registrationRedirectURIRejected, registrationMissingClientID
+    case registrationEndpointMissing, registrationRejected(Int), registrationRedirectURIRejected, registrationClientMetadataRejected, registrationMissingClientID
     case oauthCancelled, invalidCallback, expiredState, missingCredentials
     case unauthorized, unexpectedResponse, rpcError(String), toolNotAvailable(String)
     case invalidProtocol, noReadableTools, noSuccessfulReads
@@ -35,6 +35,7 @@ enum FactoryConnectionError: LocalizedError {
         case .registrationEndpointMissing: "Factory OAuth bietet keinen sicheren Registrierungsendpunkt. Eine bereits registrierte öffentliche iOS-Client-ID ist erforderlich."
         case let .registrationRejected(code): "Factory OAuth hat die iOS-Client-Registrierung abgelehnt (HTTP \(code)). Registrierung serverseitig prüfen."
         case .registrationRedirectURIRejected: "Factory OAuth hat die native iOS-Redirect-URI iosnext://factory-oauth abgelehnt (HTTP 400). Serverseitige Freigabe oder laufende Gateway-Version prüfen."
+        case .registrationClientMetadataRejected: "Factory OAuth hat die öffentlichen iOS-Client-Metadaten abgelehnt (HTTP 400, invalid_client_metadata). Registrierungsvertrag und laufende Gateway-Version prüfen."
         case .registrationMissingClientID: "Factory OAuth meldet eine erfolgreiche Registrierung, liefert aber keine gültige Client-ID."
         case .oauthCancelled: "Die Factory-Anmeldung wurde abgebrochen."
         case .invalidCallback: "Die OAuth-Antwort ist ungültig oder gehört nicht zu dieser Anmeldung."
@@ -216,8 +217,17 @@ final class FactoryMCPService {
                 // error_description, client ID, registration URL or credentials.
                 if response.statusCode == 400,
                    let payload = try? json(data),
-                   payload["error"] as? String == "invalid_redirect_uris" {
-                    throw FactoryConnectionError.registrationRedirectURIRejected
+                   let code = payload["error"] as? String {
+                    // Classify only these two fixed RFC 7591 values. Never
+                    // propagate arbitrary server strings or error_description.
+                    switch code {
+                    case "invalid_redirect_uris":
+                        throw FactoryConnectionError.registrationRedirectURIRejected
+                    case "invalid_client_metadata":
+                        throw FactoryConnectionError.registrationClientMetadataRejected
+                    default:
+                        break
+                    }
                 }
                 throw FactoryConnectionError.registrationRejected(response.statusCode)
             }
