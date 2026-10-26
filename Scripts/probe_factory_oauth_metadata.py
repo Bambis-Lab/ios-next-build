@@ -5,6 +5,8 @@ This never requests tokens, launches an authorization session, writes to a
 backend or treats reachability as proof that an iPhone user has logged in.
 """
 import json
+import socket
+import ssl
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -33,6 +35,32 @@ def safe_endpoint(value):
         return False
 
 
+def error_kind(error):
+    """A fixed-category, non-sensitive network failure classification."""
+    if isinstance(error, HTTPError):
+        return f"HTTP_{error.code}"
+    reason = error.reason if isinstance(error, URLError) else error
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return "TLS_VERIFY_FAILED"
+    if isinstance(reason, ssl.SSLError):
+        return "TLS_FAILED"
+    if isinstance(reason, socket.gaierror):
+        return "DNS_FAILED"
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "TIMEOUT"
+    if isinstance(reason, ConnectionRefusedError):
+        return "CONNECTION_REFUSED"
+    return "NETWORK_ERROR"
+
+
+def dns_status():
+    """Only report resolution success, never the resolved network addresses."""
+    try:
+        return "RESOLVED" if socket.getaddrinfo(urlsplit(BASE).hostname, 443) else "NO_RECORDS"
+    except (OSError, ValueError, TypeError):
+        return "FAILED"
+
+
 def fetch(url):
     req = Request(url, headers={"Accept": "application/json"})
     with OPENER.open(req, timeout=7) as reply:
@@ -43,6 +71,7 @@ def fetch(url):
 
 
 def main():
+    print(f"GATEWAY_DNS={dns_status()}")
     protected = None
     for path in ["/.well-known/oauth-protected-resource/mcp",
                  "/.well-known/oauth-protected-resource"]:
@@ -52,7 +81,7 @@ def main():
                 protected = value
                 break
         except (HTTPError, URLError, TimeoutError, ValueError, OSError) as ex:
-            print(f"GATEWAY_PROBE_PATH={path} result={type(ex).__name__}")
+            print(f"GATEWAY_PROBE_PATH={path} result={error_kind(ex)}")
     if protected is None:
         print("GATEWAY_METADATA=NOT_VERIFIED runner_network_or_metadata_unavailable")
         return
@@ -64,7 +93,7 @@ def main():
     try:
         auth = fetch(BASE + "/.well-known/oauth-authorization-server")
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as ex:
-        print(f"GATEWAY_METADATA=NOT_VERIFIED auth_metadata_{type(ex).__name__}")
+        print(f"GATEWAY_METADATA=NOT_VERIFIED auth_metadata_{error_kind(ex)}")
         return
     if auth.get("issuer") != BASE:
         print("GATEWAY_METADATA=INCOMPATIBLE issuer_mismatch")
