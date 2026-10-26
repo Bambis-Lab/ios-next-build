@@ -91,4 +91,29 @@ final class ProjectRegistryTests: XCTestCase {
             )
         )
     }
+    func testCIReviewRequiresRepositoryAndValidEvidence() {
+        func snapshot(repository: String?, status: String?) -> ProjectPresentationSnapshot {
+            let ci = status.map {
+                AdminCIStatusV2(status: $0, conclusion: nil, headSHA: nil,
+                                workflow: nil, updatedAt: nil, error: nil)
+            }
+            let project = AdminProjectStatusV2(
+                id: repository == nil ? "general" : "ios-app",
+                title: repository == nil ? "General / Triage" : "iOS App",
+                repository: repository,
+                dispatchCount: 0, activeJobs: 0,
+                latestDispatchState: nil, ci: ci
+            )
+            return ProjectPresentationSnapshot(project: project, jobs: [])
+        }
+
+        XCTAssertFalse(snapshot(repository: nil, status: nil).requiresCISnapshotReview)
+        XCTAssertFalse(snapshot(repository: nil, status: "repository_missing").requiresCISnapshotReview)
+        XCTAssertTrue(snapshot(repository: "Bambis-Lab/ios-next", status: nil).requiresCISnapshotReview)
+        XCTAssertTrue(snapshot(repository: "Bambis-Lab/ios-next", status: "adapter_not_configured").requiresCISnapshotReview)
+        XCTAssertTrue(snapshot(repository: "Bambis-Lab/ios-next", status: "unavailable").requiresCISnapshotReview)
+        XCTAssertFalse(snapshot(repository: "Bambis-Lab/ios-next", status: "no_runs").requiresCISnapshotReview)
+        XCTAssertFalse(snapshot(repository: "Bambis-Lab/ios-next", status: "success").requiresCISnapshotReview)
+    }
+
 }

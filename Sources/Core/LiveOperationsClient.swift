@@ -15,6 +15,17 @@ enum LiveOperationsError: LocalizedError {
     case invalidMessage
     case incompatibleRunnerStream
 
+    /// Translate a failed WebSocket upgrade into an actionable localized status,
+    /// without guessing the HTTP status or exposing response content/tokens.
+    static func diagnosticMessage(for error: Error) -> String {
+        let networkError = error as NSError
+        if networkError.domain == NSURLErrorDomain,
+           networkError.code == NSURLErrorBadServerResponse {
+            return "Master Runtime Live: Ungültige WebSocket-Serverantwort. Den geschützten /v1/operations/live-Endpunkt und seine Authentifizierung prüfen."
+        }
+        return error.localizedDescription
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalidConfiguration: "Die Master-Runtime-Verbindung ist ungültig."
@@ -339,7 +350,7 @@ final class LiveOperationsModel {
             } catch is CancellationError {
                 return
             } catch {
-                lastError = error.localizedDescription
+                lastError = LiveOperationsError.diagnosticMessage(for: error)
                 connectionState = reconnectAttempt >= 2 ? .degraded : .reconnecting
                 let delay = backoff[min(reconnectAttempt, backoff.count - 1)]
                 reconnectAttempt = min(reconnectAttempt + 1, backoff.count - 1)

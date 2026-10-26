@@ -15,7 +15,7 @@ struct OwnerCommunicationView: View {
         OwnerPage {
             VStack(alignment: .leading, spacing: IOSNextLayout.pageSpacing) {
                 IOSNextSectionHeader(
-                    title: "Kommunikation",
+                    title: "Chat- und Relay-Status",
                     subtitle: "Client-, Relay- und Gerätegesundheit ohne Nachrichteninhalte",
                     symbol: "bubble.left.and.bubble.right.fill"
                 )
@@ -37,7 +37,7 @@ struct OwnerCommunicationView: View {
                     OwnerStatusRow(title: "Chat Rate Limit", detail: "Serverseitiges Limit pro Minute", symbol: "speedometer", value: "\(chat.chatRateLimitPerMinute)/min")
                     OwnerStatusRow(title: "Ephemeral TTL", detail: "Maximale In-Memory-Lebensdauer", symbol: "timer", value: "\(chat.ephemeralTTLSeconds)s")
                 } else if capabilities.supports(.chatRelay), let status = model.backendStatus {
-                    OwnerStatusRow(title: "Relay-Verbindung", detail: "Fallback aus dem erreichbaren Owner Backend", symbol: "network", value: status.healthy ? "Online" : "Gestört", tint: status.healthy ? .green : .orange)
+                    OwnerStatusRow(title: "Owner-Backend-Verbindung", detail: "Nur Backend-Erreichbarkeit; der Chat-Relay-Status ist ohne v2-Snapshot nicht nachgewiesen.", symbol: "network", value: status.healthy ? "Backend erreichbar" : "Gestört", tint: status.healthy ? .green : .orange)
                     OwnerStatusRow(title: "WebSocket-Sessions", detail: "Aktive Backend-Sitzungen", symbol: "dot.radiowaves.left.and.right", value: "\(status.activeWebSocketSessions)")
                     OwnerStatusRow(title: "Queue-Chunks", detail: "Noch kein v2-Chat-Snapshot; Fallback-Metrik", symbol: "square.stack.3d.up.fill", value: optionalCount(status.chatQueuedChunks))
                     OwnerStatusRow(title: "Queue-Speicher", detail: "Noch kein v2-Chat-Snapshot; Fallback-Metrik", symbol: "memorychip.fill", value: status.chatQueuedBytes.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .memory) } ?? "Nicht geladen")

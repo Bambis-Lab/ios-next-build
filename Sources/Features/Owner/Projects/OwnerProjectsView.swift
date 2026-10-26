@@ -8,8 +8,12 @@ struct OwnerProjectsView: View {
         model.projectsV2.presentationSnapshots(jobs: model.jobsV2)
     }
 
+    private var repositoryBackedProjects: Int {
+        snapshots.filter { $0.repository != nil }.count
+    }
+
     private var missingCISnapshots: Int {
-        snapshots.filter { !$0.hasCISnapshot }.count
+        snapshots.filter { $0.requiresCISnapshotReview }.count
     }
 
     var body: some View {
@@ -19,8 +23,14 @@ struct OwnerProjectsView: View {
                     Label("\(projectCount) \(projectCount == 1 ? "Projekt" : "Projekte")", systemImage: "folder.fill")
                         .foregroundStyle(.primary)
                     Spacer(minLength: 0)
-                    Label("\(model.ownerOpenTicketCount) \(model.ownerOpenTicketCount == 1 ? "Ticket" : "Tickets") offen", systemImage: "ticket.fill")
-                        .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
+                    if capabilities.supports(.tickets), model.ownerV2Error == nil {
+                        Label("\(model.ownerOpenTicketCount) \(model.ownerOpenTicketCount == 1 ? "Ticket" : "Tickets") offen", systemImage: "ticket.fill")
+                            .foregroundStyle(model.ownerOpenTicketCount > 0 ? .orange : .secondary)
+                    } else {
+                        Label("Ticketstatus offen", systemImage: "ticket.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("owner-tickets-unverified")
+                    }
                 }
                 .font(.subheadline.weight(.semibold))
                 .padding(16)
@@ -37,7 +47,7 @@ struct OwnerProjectsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("CI-Daten unvollständig")
                                 .font(.caption.weight(.semibold))
-                            Text("Bei \(missingCISnapshots) von \(snapshots.count) \(snapshots.count == 1 ? "Projekt" : "Projekten") fehlen CI-Snapshots.")
+                            Text("Bei \(missingCISnapshots) von \(repositoryBackedProjects) Repository-Projekten fehlen verifizierbare CI-Ergebnisse oder die CI-Anbindung ist nicht verfügbar.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Text("Backend-CI-Adapter, GitHub-App-Zugriff und Repository-Zuordnung prüfen. Das Fehlen eines Snapshots bedeutet weder CI-Erfolg noch keine Läufe.")
@@ -142,7 +152,7 @@ struct OwnerProjectsView: View {
                 Text(snapshot.repository ?? "Repository nicht angegeben")
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
-                Label(projectValue(snapshot), systemImage: snapshot.hasCISnapshot ? "checkmark.circle" : "info.circle")
+                Label(projectValue(snapshot), systemImage: snapshot.repository == nil || snapshot.requiresCISnapshotReview ? "info.circle" : "checkmark.circle")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(projectTint(snapshot))
             }
@@ -168,6 +178,7 @@ struct OwnerProjectsView: View {
 
     private func projectValue(_ snapshot: ProjectPresentationSnapshot) -> String {
         if snapshot.activeJobs > 0 { return "\(snapshot.activeJobs) aktiv" }
+        guard snapshot.repository != nil else { return "Kein Repository" }
         guard snapshot.hasCISnapshot else { return "CI-Daten fehlen" }
         switch snapshot.ciStatus {
         case "repository_missing": return "Kein Repository"
