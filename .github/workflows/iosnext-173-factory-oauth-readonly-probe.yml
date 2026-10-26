@@ -38,3 +38,32 @@ jobs:
           path: build/oauth173/metadata.log
           if-no-files-found: warn
           retention-days: 14
+
+  private-path:
+    # Independent comparison from an already provisioned self-hosted runner.
+    # This job requests only public unauthenticated discovery via GET and
+    # the advertised registration endpoint via HEAD; never DCR POST.
+    runs-on: [self-hosted, Linux, X64, general]
+    timeout-minutes: 8
+    steps:
+      - name: Checkout identical isolated diagnostic source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Prove safe probe behavior offline
+        run: python3 -m unittest discover -s Scripts/Acceptance -p 'test_factory_oauth_metadata.py' -v
+      - name: Observe OAuth discovery from private runner path only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/oauth173-private
+          python3 Scripts/probe_factory_oauth_metadata.py | tee build/oauth173-private/metadata.log
+          grep -q '^GATEWAY_METADATA=PUBLIC_CONTRACT_VERIFIED$' build/oauth173-private/metadata.log
+          grep -q '^GATEWAY_DCR_POST=NOT_TESTED$' build/oauth173-private/metadata.log
+          echo 'IOS173_FACTORY_PRIVATE_PATH_METADATA=PASS; DCR_POST=NOT_TESTED'
+      - name: Retain redacted private-path outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOS173-Factory-Runner-Path-OAuth-Metadata
+          path: build/oauth173-private/metadata.log
+          if-no-files-found: warn
+          retention-days: 14
