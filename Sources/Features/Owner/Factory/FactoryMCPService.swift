@@ -292,7 +292,8 @@ final class FactoryMCPService {
         self.clientID = original.clientID
         self.endpoint = original.endpoint
         self.mcpSessionID = nil
-        try storeTokens()
+        do { try storeTokens() }
+        catch { clear(); throw error }
     }
 
     private func tokenRequest(at url: URL, fields: [String: String]) async throws -> [String: Any] {
@@ -425,6 +426,7 @@ final class FactoryMCPService {
         if !notification { value["id"] = requestID }
         request.httpBody = try JSONSerialization.data(withJSONObject: value)
         let (body, reply) = try await data(for: request)
+        try Task.checkCancellation()
         guard generation == credentialGeneration else { throw CancellationError() }
         guard reply.statusCode != 401 else { throw FactoryConnectionError.unauthorized }
         guard (200..<300).contains(reply.statusCode) else {
@@ -466,6 +468,8 @@ final class FactoryMCPService {
     }
 
     private func openSession(forceRefresh: Bool = false) async throws -> Set<String> {
+        let generation = credentialGeneration
+        try Task.checkCancellation()
         // Inventory may be reused only while the authenticated MCP session
         // that produced it still exists. A cached list cannot resurrect a session.
         if !forceRefresh,
@@ -476,16 +480,21 @@ final class FactoryMCPService {
             return cachedToolNames
         }
         if let sessionOpeningTask {
-            return try await sessionOpeningTask.value
+            let result = try await sessionOpeningTask.value
+            try Task.checkCancellation()
+            guard generation == credentialGeneration else { throw CancellationError() }
+            return result
         }
         let task = Task { @MainActor [weak self] in
             guard let self else { throw FactoryConnectionError.missingCredentials }
+            guard generation == self.credentialGeneration else { throw CancellationError() }
             self.mcpSessionID = nil
             let hello = try await self.rpc(method: "initialize", params: [
                 "protocolVersion": self.protocolVersion,
                 "capabilities": [:],
                 "clientInfo": ["name": "iOS Next Factory", "version": "1.6.2"]
             ])
+            guard generation == self.credentialGeneration else { throw CancellationError() }
             guard hello["protocolVersion"] as? String == self.protocolVersion else {
                 throw FactoryConnectionError.invalidProtocol
             }
@@ -494,9 +503,12 @@ final class FactoryMCPService {
             var cursors = Set<String>()
             var cursor: String?
             for _ in 0..<self.maxPaginationPages {
+                try Task.checkCancellation()
+                guard generation == self.credentialGeneration else { throw CancellationError() }
                 var p: [String: Any] = [:]
                 if let cursor { p["cursor"] = cursor }
                 let result = try await self.rpc(method: "tools/list", params: p)
+                guard generation == self.credentialGeneration else { throw CancellationError() }
                 for tool in (result["tools"] as? [[String: Any]]) ?? [] {
                     if let name = tool["name"] as? String { names.insert(name) }
                 }
@@ -513,12 +525,17 @@ final class FactoryMCPService {
             throw FactoryConnectionError.invalidProtocol
         }
         sessionOpeningTask = task
-        defer { sessionOpeningTask = nil }
+        defer { if generation == credentialGeneration { sessionOpeningTask = nil } }
         do {
-            return try await task.value
+            let result = try await task.value
+            try Task.checkCancellation()
+            guard generation == credentialGeneration else { throw CancellationError() }
+            return result
         } catch {
-            cachedToolNames = nil
-            toolDiscoveryExpiresAt = nil
+            if generation == credentialGeneration {
+                cachedToolNames = nil
+                toolDiscoveryExpiresAt = nil
+            }
             throw error
         }
     }
@@ -556,15 +573,21 @@ final class FactoryMCPService {
         guard FactoryWorkspaceToolCatalog.workspaceRead.contains(name) else {
             throw FactoryConnectionError.toolNotAvailable(name)
         }
+        let generation = credentialGeneration
         let available = try await openSession()
+        guard generation == credentialGeneration else { throw CancellationError() }
         guard available.contains(name) else {
             throw FactoryConnectionError.toolNotAvailable(name)
         }
-        return try await call(name, arguments: arguments)
+        let result = try await call(name, arguments: arguments)
+        guard generation == credentialGeneration else { throw CancellationError() }
+        return result
     }
 
     func snapshot() async throws -> FactorySnapshot {
+        let generation = credentialGeneration
         let available = try await openSession()
+        guard generation == credentialGeneration else { throw CancellationError() }
         guard !available.intersection(Set(allowedTools)).isEmpty else {
             throw FactoryConnectionError.noReadableTools
         }
@@ -573,8 +596,11 @@ final class FactoryMCPService {
         var reports: [String: String] = [:]
         var successCount = 0
         for name in allowedTools where available.contains(name) {
+            try Task.checkCancellation()
+            guard generation == credentialGeneration else { throw CancellationError() }
             do {
                 let body = try await call(name)
+                guard generation == credentialGeneration else { throw CancellationError() }
                 // Keep raw diagnostics transient in memory; the UI never dumps
                 // untrusted response bodies or possible sensitive payloads.
                 reports[name] = body
@@ -586,11 +612,14 @@ final class FactoryMCPService {
                                   source: "Factory MCP", detail: detail,
                                   status: state, observedAt: now))
             } catch {
+                try Task.checkCancellation()
+                guard generation == credentialGeneration else { throw CancellationError() }
                 rows.append(.init(id: name, title: name.replacingOccurrences(of: "_", with: " ").localizedCapitalized,
                                   source: "Factory MCP", detail: "Teilquelle nicht verfügbar",
                                   status: "Eingeschränkt", observedAt: now))
             }
         }
+        guard generation == credentialGeneration else { throw CancellationError() }
         guard successCount > 0 else { throw FactoryConnectionError.noSuccessfulReads }
         return FactorySnapshot(observedAt: now, rows: rows, rawReports: reports,
                                toolNames: available.sorted())

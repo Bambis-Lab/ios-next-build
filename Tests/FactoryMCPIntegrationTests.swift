@@ -222,7 +222,35 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         XCTAssertEqual(saved["refresh"] as? String, "fixture-rotated")
     }
 
-    func testServerWithoutAllowedToolsFailsClosed() async throws {
+    func testLogoutDuringRefreshCannotRestoreCredentials() async throws {
+        FactoryMockProtocol.configure(expiresIn: 0)
+        let client = service()
+        let pending = try await client.beginAuthorization(endpoint: resource, registeredClientID: "test-manual-client")
+        let callback = try XCTUnwrap(URL(string: "iosnext://factory-oauth?code=mock-code&state=\(pending.state)"))
+        try await client.completeAuthorization(callback, original: pending)
+        let gate = DispatchSemaphore(value: 0)
+        FactoryMockProtocol.pauseRefresh(with: gate)
+        defer { gate.signal(); client.clear() }
+        let refresh = Task { @MainActor in try await client.activeToken() }
+        for _ in 0..<200 {
+            if FactoryMockProtocol.refreshCount > 0 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(FactoryMockProtocol.refreshCount, 1)
+        client.clear()
+        gate.signal()
+        do {
+            _ = try await refresh.value
+            XCTFail("A late refresh must not resurrect a logged-out session")
+        } catch {}
+        XCTAssertNil(testCredentials.data)
+        do {
+            _ = try await client.activeToken()
+            XCTFail("No active token may remain after logout")
+        } catch FactoryConnectionError.missingCredentials {}
+    }
+
+        func testServerWithoutAllowedToolsFailsClosed() async throws {
         FactoryMockProtocol.configure(noReadableTools: true)
         let client = service()
         defer { client.clear() }
@@ -261,6 +289,11 @@ private final class FactoryMockProtocol: URLProtocol {
     private static var methods: [String] = []
     private static var refreshObserved = false
     private static var refreshRequests = 0
+    private static var refreshGate: DispatchSemaphore?
+
+    static func pauseRefresh(with gate: DispatchSemaphore) {
+        mutex.withLock { refreshGate = gate }
+    }
     private static var refreshedTokenObserved = false
     private static var expirySeconds = 3600
     private static var eventStream = false
@@ -283,6 +316,7 @@ private final class FactoryMockProtocol: URLProtocol {
             methods = []
             refreshObserved = false
             refreshRequests = 0
+            refreshGate = nil
             refreshedTokenObserved = false
             expirySeconds = 3600
             eventStream = false
@@ -387,7 +421,14 @@ private final class FactoryMockProtocol: URLProtocol {
         if path == "/token" {
             let form = String(decoding: requestBody(request), as: UTF8.self)
             let refresh = form.contains("grant_type=refresh_token")
-            if refresh { mutex.withLock { refreshObserved = true; refreshRequests += 1 } }
+            if refresh {
+                let gate = mutex.withLock {
+                    refreshObserved = true
+                    refreshRequests += 1
+                    return refreshGate
+                }
+                if let gate { _ = gate.wait(timeout: .now() + 5) }
+            }
             let expires = mutex.withLock { expirySeconds }
             return (200, "application/json", try jsonData([
                 "access_token": refresh ? "fixture-refreshed" : "fixture-initial",
