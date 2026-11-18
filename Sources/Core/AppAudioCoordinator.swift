@@ -3,6 +3,7 @@ import Foundation
 enum AppAudioActivity: Hashable {
     case chatVoicePlayback
     case voiceRecording
+    case familyCall
 }
 
 /// Coordinates ownership, not audio samples. AVAudioPlayer/AVAudioEngine remain
