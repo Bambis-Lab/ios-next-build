@@ -94,9 +94,99 @@ final class ChatModel {
     private(set) var callError: String?
     private(set) var callBusy = false
     private var callGeneration: UInt64 = 0
+    private var audioAttempt = UUID()
+    private(set) var audioSession: FamilyAudioCallSession?
+    private(set) var audioCallID: String?
+    private(set) var audioPreparing = false
+    private(set) var audioError: String?
+
+    var canStartAudio: Bool { canSignalCalls && callListing?.audioTransport == true }
+
+    func stopAudio() {
+        audioAttempt = UUID()
+        audioSession?.stop()
+        audioSession = nil
+        audioCallID = nil
+        audioPreparing = false
+    }
+
+    private func reconcileAudio(_ listing: FamilyCallListing?) {
+        guard let id = audioCallID else { return }
+        guard listing?.audioTransport == true,
+              listing?.calls.contains(where: { $0.id == id && $0.state == .accepted }) == true else {
+            stopAudio()
+            return
+        }
+    }
+
+    /// Explicit foreground action only. A safety number entered from an
+    /// independent channel must match the exact currently registered device.
+    func startAudio(callID: String, confirmedSafetyNumber: String) async {
+        guard canStartAudio, !audioPreparing, audioSession == nil,
+              let configuration, let keys,
+              let call = callListing?.calls.first(where: { $0.id == callID && $0.state == .accepted }),
+              call.isParticipant(configuration) else { return }
+        let attempt = UUID()
+        audioAttempt = attempt
+        audioCallID = callID
+        audioPreparing = true
+        audioError = nil
+        defer {
+            if audioAttempt == attempt {
+                stopAudio()
+            }
+        }
+        do {
+            let context = try FamilyAudioContext(callID: call.id, caller: call.caller, callee: call.callee,
+                local: [configuration.userID, configuration.deviceID])
+            let identities = try await relay.identities(for: context.peer[0], configuration: configuration)
+            guard audioAttempt == attempt, canStartAudio, !Task.isCancelled,
+                  callListing?.calls.contains(where: { $0.id == callID && $0.state == .accepted }) == true,
+                  self.configuration == configuration else { return }
+            let matches = identities.filter { [$0.userID, $0.deviceID] == context.peer }
+            guard matches.count == 1, let peer = matches.first else { throw ChatError.noRecipientDevice }
+            let confirmed = confirmedSafetyNumber.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            _ = try FamilyAudioCallSession.validate(call: call, configuration: configuration,
+                peer: peer, confirmedSafetyNumber: confirmed)
+            // Existing chat pin must also agree. Never silently replace it.
+            try ChatDeviceKeys.pin(peer)
+            let base = ChatRelayClient.transportBaseURL(for: configuration.baseURL)
+            guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false),
+                  components.scheme == "https" else { throw FamilyAudioWireError.invalidEndpoint }
+            components.scheme = "wss"
+            components.path = "/v1/audio"
+            components.query = nil
+            components.fragment = nil
+            guard let endpoint = components.url else { throw FamilyAudioWireError.invalidEndpoint }
+            let session = try FamilyAudioCallSession(call: call, configuration: configuration,
+                endpoint: endpoint, keys: keys, verifiedPeer: peer, confirmedSafetyNumber: confirmed)
+            audioSession = session
+            audioPreparing = false
+            audioCallID = callID
+            var sentToken = configuration.token
+            try await session.run { [weak self] in
+                guard let self, self.audioAttempt == attempt, self.canStartAudio,
+                      let current = self.configuration,
+                      current.userID == configuration.userID, current.deviceID == configuration.deviceID,
+                      current.baseURL == configuration.baseURL else { throw CancellationError() }
+                guard current.token != sentToken else { return nil }
+                sentToken = current.token
+                return current.token
+            }
+            if audioAttempt == attempt, session.state == .failed {
+                audioError = "Audioverbindung wurde sicher beendet."
+            }
+        } catch {
+            if audioAttempt == attempt, !Task.isCancelled {
+                audioError = "Audio konnte nicht sicher gestartet oder fortgesetzt werden."
+            }
+        }
+    }
     var canSignalCalls: Bool { isFamilyCredentialActive && state == .online }
 
     private func resetCalls() {
+        stopAudio()
+        audioError = nil
         callGeneration &+= 1
         callListing = nil
         callError = nil
@@ -122,10 +212,12 @@ final class ChatModel {
             let listing = try await relay.callStates(configuration: configuration)
             guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
             callListing = listing
+            reconcileAudio(listing)
             callError = nil
         } catch {
             guard generation == callGeneration, !Task.isCancelled else { return }
             callListing = nil
+            reconcileAudio(nil)
             callError = "Anrufsignalisierung nicht verfügbar."
         }
     }
@@ -133,6 +225,7 @@ final class ChatModel {
     func signalCall(_ signal: FamilyCallSignal) async {
         guard canSignalCalls, let configuration, !callBusy else { return }
         let generation = callGeneration
+        if signal.action == .hangup && signal.callID == audioCallID { stopAudio() }
         callBusy = true
         defer { if generation == callGeneration { callBusy = false } }
         do {
@@ -141,10 +234,12 @@ final class ChatModel {
             let listing = try await relay.callStates(configuration: configuration)
             guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
             callListing = listing
+            reconcileAudio(listing)
             callError = nil
         } catch {
             guard generation == callGeneration, !Task.isCancelled else { return }
             callListing = nil
+            reconcileAudio(nil)
             callError = "Anrufaktion konnte nicht bestätigt werden."
         }
     }
@@ -609,8 +704,30 @@ final class ChatModel {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self, let appModel else { return }
             self.familyRenewalTask = nil
+            let generation = self.configurationGeneration
             await appModel.refreshFamilyChatGrantIfNeeded(minimumValidity: 180)
-            guard !Task.isCancelled, appModel.familyChatContext() != nil else { return }
+            guard !Task.isCancelled, generation == self.configurationGeneration,
+                  let family = appModel.familyChatContext() else { return }
+            // During an active foreground call the existing audio codec and
+            // call ownership must survive a token-only rotation.
+            if self.audioSession != nil, self.isFamilyCredentialActive,
+               let current = self.configuration, current.userID == family.haUserID,
+               current.deviceID == family.deviceID, current.baseURL == family.endpoint,
+               family.grant.expiresAt > grant.expiresAt,
+               family.grant.accessToken != current.token {
+                do {
+                    try KeychainStore.save(family.grant.accessToken, account: self.tokenAccount)
+                    self.receiveTask?.cancel()
+                    self.configurationGeneration &+= 1
+                    self.configuration = ChatConfiguration(baseURL: current.baseURL,
+                        token: family.grant.accessToken, userID: current.userID, deviceID: current.deviceID)
+                    self.receiveTask = Task { [weak self] in await self?.receiveLoop() }
+                    self.scheduleFamilyRenewal(using: appModel, grant: family.grant)
+                    return
+                } catch {
+                    self.stopAudio()
+                }
+            }
             self.receiveTask?.cancel()
             self.receiveTask = nil
             await self.start(using: appModel)
@@ -872,9 +989,13 @@ final class ChatModel {
                 let envelopes = try await relay.receive(
                     configuration: configuration, requiresAcknowledgement: ackMode
                 )
+                try Task.checkCancellation()
+                guard self.configuration == configuration else { return }
                 let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
                     try await self.accept(envelope, configuration: configuration)
                 }
+                try Task.checkCancellation()
+                guard self.configuration == configuration else { return }
                 if ackMode && !envelopes.isEmpty {
                     // ACK only after the entire dequeued batch is handled,
                     // including explicitly rejected/untrusted ciphertext.
@@ -895,6 +1016,7 @@ final class ChatModel {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
+                stopAudio()
                 state = .offline(error.localizedDescription)
                 try? await Task.sleep(nanoseconds: retryNanoseconds)
                 retryNanoseconds = min(retryNanoseconds * 2, 8_000_000_000)
@@ -918,6 +1040,8 @@ final class ChatModel {
               envelope.chunkIndex < envelope.chunkCount,
               let keys else { throw ChatError.invalidEnvelope }
         let identities = try await relay.identities(for: envelope.senderUserID, configuration: configuration)
+        try Task.checkCancellation()
+        guard self.configuration == configuration else { throw CancellationError() }
         guard let sender = identities.first(where: { $0.deviceID == envelope.senderDeviceID }) else {
             throw ChatError.invalidEnvelope
         }
