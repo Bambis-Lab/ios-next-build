@@ -109,6 +109,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          selected=""
+          for app in /Applications/Xcode*.app; do
+            test -d "$app" || continue
+            if DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version | grep -E '^Xcode 27([. ]|$)' >/dev/null; then
+              selected="$app/Contents/Developer"
+              break
+            fi
+          done
+          if test -n "$selected"; then
+            export DEVELOPER_DIR="$selected"
+            echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          fi
           xcodebuild -version
           xcodebuild -showsdks
           xcrun simctl list runtimes
@@ -203,5 +224,6 @@ jobs:
             build/ios173/resolve.log
             build/ios173/boot.log
             build/ios173/environment.txt
+            build/ios173/xcode-inventory.log
           retention-days: 14
           if-no-files-found: warn
