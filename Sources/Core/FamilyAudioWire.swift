@@ -169,6 +169,8 @@ final class FamilyAudioWire {
     private var packets: [FamilyAudioPacket] = []
     private let maxPackets = 50
 
+    var isConnected: Bool { ready && !closed }
+
     init(configuration: ChatConfiguration, endpoint: URL, context: FamilyAudioContext,
          syntheticLoopback: Bool = false) throws {
         guard context.local == [configuration.userID, configuration.deviceID] else {
