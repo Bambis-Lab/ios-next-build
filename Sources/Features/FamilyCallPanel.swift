@@ -4,9 +4,10 @@ import SwiftUI
 struct FamilyCallPanel: View {
     let chatModel: ChatModel
     var allowInvite = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if chatModel.canSignalCalls {
+        if chatModel.canSignalCalls && scenePhase == .active {
             VStack(alignment: .leading, spacing: 8) {
                 Label("Anrufsignalisierung · kein Audio", systemImage: "phone")
                     .font(.caption).foregroundStyle(.secondary)
@@ -51,7 +52,7 @@ struct FamilyCallPanel: View {
                 }
             }
             .padding(8)
-            .task { await chatModel.refreshCalls() }
+            .task { await chatModel.pollCallsWhileVisible() }
             .privacySensitive()
             .accessibilityIdentifier("family-call-signalling")
         }

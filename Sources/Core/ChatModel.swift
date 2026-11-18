@@ -103,6 +103,16 @@ final class ChatModel {
         callBusy = false
     }
 
+    // View-scoped polling only; cancellation never starts a new request.
+    func pollCallsWhileVisible() async {
+        let generation = callGeneration
+        while !Task.isCancelled && canSignalCalls && generation == callGeneration {
+            await refreshCalls()
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+        }
+    }
+
     func refreshCalls() async {
         guard canSignalCalls, let configuration, !callBusy else { return }
         let generation = callGeneration
@@ -150,6 +160,7 @@ final class ChatModel {
         let generation = callGeneration
         let peer = recipientUserID
         callBusy = true
+        defer { if generation == callGeneration { callBusy = false } }
         do {
             let devices = try await relay.identities(for: peer, configuration: configuration)
             guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
