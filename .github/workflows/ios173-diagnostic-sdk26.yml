@@ -28,7 +28,22 @@ jobs:
           s=p.read_text()
           assert s.count("IPHONEOS_DEPLOYMENT_TARGET: 27.0")==1
           p.write_text(s.replace("IPHONEOS_DEPLOYMENT_TARGET: 27.0","IPHONEOS_DEPLOYMENT_TARGET: 26.0"))
+          # Adapt only this disposable SDK26 project; production sources stay untouched.
+          p=Path("Sources/Core/InMemoryVoiceRecorder.swift")
+          s=p.read_text()
+          old="try input.installAudioTap(onBus: 0, bufferSize: 1_024, format: format)"
+          assert s.count(old)==1 and s.count("accumulator.append(AVAudioPCMBuffer(copying: buffer))")==1
+          p.write_text(s.replace(old,"input.installTap(onBus: 0, bufferSize: 1_024, format: format)").replace("accumulator.append(AVAudioPCMBuffer(copying: buffer))","accumulator.append(buffer)"))
+          p=Path("Sources/Core/JarvisEngine.swift")
+          s=p.read_text()
+          begin=s.index("        notificationTokens.append(center.addObserver(\n            forName: AVAudioSession.didBecomeInactiveNotification,")
+          end=s.index("        notificationTokens.append(center.addObserver(\n            forName: AVAudioSession.routeChangeNotification,",begin)
+          # These two iOS27-specific notifications are excluded, not emulated.
+          p.write_text(s[:begin]+s[end:])
+          print("SDK26 diagnostic substitutions: legacy recorder tap; two iOS27-only notifications excluded")
           PY
+          diff -u "$GITHUB_WORKSPACE/Sources/Core/InMemoryVoiceRecorder.swift" Sources/Core/InMemoryVoiceRecorder.swift > "$GITHUB_WORKSPACE/build/diagnostic26/recorder.diff" || test "$?" = 1
+          diff -u "$GITHUB_WORKSPACE/Sources/Core/JarvisEngine.swift" Sources/Core/JarvisEngine.swift > "$GITHUB_WORKSPACE/build/diagnostic26/jarvis.diff" || test "$?" = 1
           if ! command -v xcodegen >/dev/null; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
           xcodegen generate --spec project.yml --project .
       - name: Compile diagnostic app and unit tests
