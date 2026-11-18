@@ -113,6 +113,15 @@ final class FactoryMCPService {
     private var toolDiscoveryExpiresAt: Date?
     private var sessionOpeningTask: Task<Set<String>, Error>?
     private var endpoint: URL?
+    private var credentialGeneration = UUID()
+    private var refreshTask: Task<String, Error>?
+
+    private func invalidateCredentialWork() {
+        credentialGeneration = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
+        invalidateMCPSession()
+    }
 
     init(
         session: URLSession = URLSession(
@@ -264,6 +273,7 @@ final class FactoryMCPService {
               items.first(where: { $0.name == "state" })?.value == original.state,
               let code = items.first(where: { $0.name == "code" })?.value,
               !code.isEmpty else { throw FactoryConnectionError.invalidCallback }
+        let generation = credentialGeneration
         let token = try await tokenRequest(at: original.tokenEndpoint, fields: [
             "grant_type": "authorization_code", "client_id": original.clientID,
             "code": code, "redirect_uri": callbackURI,
@@ -273,6 +283,8 @@ final class FactoryMCPService {
               (token["token_type"] as? String)?.lowercased() == "bearer" else {
             throw FactoryConnectionError.unexpectedResponse
         }
+        guard generation == credentialGeneration else { throw CancellationError() }
+        invalidateCredentialWork()
         self.accessToken = access
         self.refreshToken = token["refresh_token"] as? String
         self.expiresAt = Date().addingTimeInterval(TimeInterval(token["expires_in"] as? Int ?? 3600))
@@ -326,8 +338,11 @@ final class FactoryMCPService {
               let access = record["access"] as? String, !access.isEmpty,
               let endpointString = record["endpoint"] as? String,
               let tokenString = record["token_endpoint"] as? String else { return false }
-        self.endpoint = try secureURL(endpointString)
-        self.tokenEndpoint = try secureURL(tokenString)
+        let restoredEndpoint = try secureURL(endpointString)
+        let restoredTokenEndpoint = try secureURL(tokenString)
+        invalidateCredentialWork()
+        self.endpoint = restoredEndpoint
+        self.tokenEndpoint = restoredTokenEndpoint
         self.accessToken = access
         self.refreshToken = record["refresh"] as? String
         self.clientID = record["client_id"] as? String
@@ -336,7 +351,7 @@ final class FactoryMCPService {
     }
 
     func clear() {
-        invalidateMCPSession()
+        invalidateCredentialWork()
         accessToken = nil
         refreshToken = nil
         tokenEndpoint = nil
@@ -347,17 +362,31 @@ final class FactoryMCPService {
         credentials.delete()
     }
 
-    private func activeToken() async throws -> String {
+    // Internal for deterministic credential-race regression tests.
+    func activeToken() async throws -> String {
+        let generation = credentialGeneration
         guard let accessToken else { throw FactoryConnectionError.missingCredentials }
-        if let expiresAt, expiresAt <= Date().addingTimeInterval(45) {
-            guard let refreshToken, !refreshToken.isEmpty,
-                  let tokenEndpoint, let clientID, let endpoint else {
-                throw FactoryConnectionError.expiredState
+        guard let expiresAt, expiresAt <= Date().addingTimeInterval(45) else { return accessToken }
+        if let refreshTask {
+            let value = try await refreshTask.value
+            guard generation == credentialGeneration else { throw CancellationError() }
+            return value
+        }
+        guard let refreshToken, !refreshToken.isEmpty,
+              let tokenEndpoint, let clientID, let endpoint else {
+            throw FactoryConnectionError.expiredState
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self, generation == self.credentialGeneration else { throw CancellationError() }
+            defer {
+                if generation == self.credentialGeneration { self.refreshTask = nil }
             }
-            let result = try await tokenRequest(at: tokenEndpoint, fields: [
+            let result = try await self.tokenRequest(at: tokenEndpoint, fields: [
                 "grant_type": "refresh_token", "client_id": clientID,
                 "refresh_token": refreshToken, "resource": endpoint.absoluteString
             ])
+            try Task.checkCancellation()
+            guard generation == self.credentialGeneration else { throw CancellationError() }
             guard let newAccess = result["access_token"] as? String, !newAccess.isEmpty,
                   (result["token_type"] as? String)?.lowercased() == "bearer" else {
                 throw FactoryConnectionError.unauthorized
@@ -365,18 +394,28 @@ final class FactoryMCPService {
             self.accessToken = newAccess
             self.refreshToken = result["refresh_token"] as? String ?? refreshToken
             self.expiresAt = Date().addingTimeInterval(TimeInterval(result["expires_in"] as? Int ?? 3600))
-            try storeTokens()
+            do { try self.storeTokens() }
+            catch {
+                self.clear()
+                throw error
+            }
             return newAccess
         }
-        return accessToken
+        refreshTask = task
+        let value = try await task.value
+        guard generation == credentialGeneration else { throw CancellationError() }
+        return value
     }
 
     private func rpc(method: String, params: [String: Any], notification: Bool = false) async throws -> [String: Any] {
         guard let endpoint else { throw FactoryConnectionError.missingCredentials }
+        let generation = credentialGeneration
+        let token = try await activeToken()
+        guard generation == credentialGeneration else { throw CancellationError() }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 10
-        request.setValue("Bearer \(try await activeToken())", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
@@ -386,6 +425,7 @@ final class FactoryMCPService {
         if !notification { value["id"] = requestID }
         request.httpBody = try JSONSerialization.data(withJSONObject: value)
         let (body, reply) = try await data(for: request)
+        guard generation == credentialGeneration else { throw CancellationError() }
         guard reply.statusCode != 401 else { throw FactoryConnectionError.unauthorized }
         guard (200..<300).contains(reply.statusCode) else {
             throw FactoryConnectionError.rpcError("HTTP \(reply.statusCode)")

@@ -203,6 +203,25 @@ final class FactoryMCPIntegrationTests: XCTestCase {
         XCTAssertTrue(FactoryMockProtocol.usedRefreshedToken)
     }
 
+    func testConcurrentRefreshUsesOneRequestAndPersistsRotatedCredential() async throws {
+        FactoryMockProtocol.configure(expiresIn: 0)
+        let client = service()
+        defer { client.clear() }
+        let pending = try await client.beginAuthorization(endpoint: resource, registeredClientID: "test-manual-client")
+        let callback = try XCTUnwrap(URL(string: "iosnext://factory-oauth?code=mock-code&state=\(pending.state)"))
+        try await client.completeAuthorization(callback, original: pending)
+        let a = Task { @MainActor in try await client.activeToken() }
+        let b = Task { @MainActor in try await client.activeToken() }
+        let first = try await a.value
+        let second = try await b.value
+        XCTAssertEqual(first, "fixture-refreshed")
+        XCTAssertEqual(second, first)
+        XCTAssertEqual(FactoryMockProtocol.refreshCount, 1)
+        let data = try XCTUnwrap(testCredentials.data)
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(saved["refresh"] as? String, "fixture-rotated")
+    }
+
     func testServerWithoutAllowedToolsFailsClosed() async throws {
         FactoryMockProtocol.configure(noReadableTools: true)
         let client = service()
@@ -241,6 +260,7 @@ private final class FactoryMockProtocol: URLProtocol {
     private static var tools: [String] = []
     private static var methods: [String] = []
     private static var refreshObserved = false
+    private static var refreshRequests = 0
     private static var refreshedTokenObserved = false
     private static var expirySeconds = 3600
     private static var eventStream = false
@@ -253,6 +273,7 @@ private final class FactoryMockProtocol: URLProtocol {
 
     static var calledTools: [String] { mutex.withLock { tools } }
     static var calledMethods: [String] { mutex.withLock { methods } }
+    static var refreshCount: Int { mutex.withLock { refreshRequests } }
     static var refreshed: Bool { mutex.withLock { refreshObserved } }
     static var usedRefreshedToken: Bool { mutex.withLock { refreshedTokenObserved } }
 
@@ -261,6 +282,7 @@ private final class FactoryMockProtocol: URLProtocol {
             tools = []
             methods = []
             refreshObserved = false
+            refreshRequests = 0
             refreshedTokenObserved = false
             expirySeconds = 3600
             eventStream = false
@@ -365,11 +387,11 @@ private final class FactoryMockProtocol: URLProtocol {
         if path == "/token" {
             let form = String(decoding: requestBody(request), as: UTF8.self)
             let refresh = form.contains("grant_type=refresh_token")
-            if refresh { mutex.withLock { refreshObserved = true } }
+            if refresh { mutex.withLock { refreshObserved = true; refreshRequests += 1 } }
             let expires = mutex.withLock { expirySeconds }
             return (200, "application/json", try jsonData([
                 "access_token": refresh ? "fixture-refreshed" : "fixture-initial",
-                "refresh_token": "fixture-refresh",
+                "refresh_token": refresh ? "fixture-rotated" : "fixture-refresh",
                 "token_type": "Bearer",
                 "expires_in": refresh ? 3600 : expires
             ]))
