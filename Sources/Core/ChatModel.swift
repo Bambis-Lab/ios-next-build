@@ -21,7 +21,7 @@ final class ChatModel {
         case offline(String)
     }
 
-    private struct PartialMessage {
+    private struct PartialMessage: Codable {
         let senderUserID: String
         let conversationID: String?
         let kind: ChatMessageKind
@@ -77,7 +77,43 @@ final class ChatModel {
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
+    private struct HistorySnapshot: Codable {
+        let version: Int
+        let messages: [ChatMessage]
+        let partials: [String: PartialMessage]
+        let seen: [String: Date]
+    }
+    private var historyArchive: ChatHistoryArchive?
     private var partialMessages: [String: PartialMessage] = [:]
+
+    private func loadFamilyHistory(configuration: ChatConfiguration) throws {
+        let archive = try ChatHistoryArchive(configuration: configuration)
+        if let snapshot = try archive.load(HistorySnapshot.self) {
+            guard snapshot.version == 1, snapshot.messages.count <= 200,
+                  snapshot.partials.count <= 256, snapshot.seen.count <= 20_000 else {
+                throw ChatHistoryError.invalidArchive
+            }
+            messages = snapshot.messages.map { message in
+                var record = message
+                if record.delivery == .sending { record.delivery = .failed }
+                return record
+            }
+            partialMessages = snapshot.partials
+            seenEnvelopeIDs = snapshot.seen
+        } else {
+            messages = []
+            partialMessages = [:]
+            seenEnvelopeIDs = [:]
+        }
+        historyArchive = archive
+    }
+
+    private func persistFamilyHistory() throws {
+        guard isFamilyCredentialActive else { return }
+        guard let historyArchive else { throw ChatHistoryError.missingKey }
+        try historyArchive.save(HistorySnapshot(version: 1, messages: messages,
+            partials: partialMessages, seen: seenEnvelopeIDs))
+    }
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
     private let userKey = "chatUserID"
@@ -435,6 +471,7 @@ final class ChatModel {
         }
         configurationGeneration &+= 1
         resetCalls()
+        historyArchive = nil
         if replacesIdentity {
             draft = ""
             showingFamilyGroup = false
@@ -510,6 +547,8 @@ final class ChatModel {
                 // ciphertext on GET and cannot guarantee safe replay.
                 try await relay.requireAcknowledgedDelivery(configuration: configuration)
             }
+            guard epoch == startupEpoch, !Task.isCancelled, self.configuration == configuration else { return }
+            if isFamilyCredentialActive { try loadFamilyHistory(configuration: configuration) }
             accessRole = session.role
             do {
                 let loadedContacts = try await relay.contacts(configuration: configuration)
@@ -564,6 +603,7 @@ final class ChatModel {
 
     func stop() {
         resetCalls()
+        historyArchive = nil
         startupEpoch &+= 1
         startupTask?.cancel()
         startupTask = nil
@@ -578,6 +618,7 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
+        historyArchive = nil
         configurationGeneration &+= 1
         resetCalls()
         draft = ""
@@ -768,7 +809,7 @@ final class ChatModel {
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys,
+        guard let configuration, let keys, state == .online,
               showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
@@ -802,7 +843,14 @@ final class ChatModel {
             delivery: .sending
         )
         localMessage.conversationID = selectedGroup ? "family" : nil
+        let previousMessages = messages
         appendMessage(localMessage)
+        do { try persistFamilyHistory() }
+        catch {
+            messages = previousMessages
+            lastError = error.localizedDescription
+            return false
+        }
         do {
             let targetUsers: [String] = selectedGroup
                 ? (familyGroup?.members.map(\.userID).filter { $0 != configuration.userID } ?? [])
@@ -844,10 +892,13 @@ final class ChatModel {
             }
             guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .queued)
+            do { try persistFamilyHistory() }
+            catch { lastError = "Nachricht übertragen, lokaler Versandstatus konnte nicht gespeichert werden." }
             return true
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
             updateDelivery(id: groupID, to: .failed)
+            try? persistFamilyHistory()
             lastError = error.localizedDescription
             return false
         }
@@ -997,6 +1048,9 @@ final class ChatModel {
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
                 if ackMode && !envelopes.isEmpty {
+                    // The atomic authenticated archive includes partial media,
+                    // complete messages and replay IDs before any ACK.
+                    try persistFamilyHistory()
                     // ACK only after the entire dequeued batch is handled,
                     // including explicitly rejected/untrusted ciphertext.
                     // Transport/auth errors before this point do not ACK,
@@ -1065,16 +1119,23 @@ final class ChatModel {
             // relay availability failures.
             throw ChatError.invalidEnvelope
         }
-        seenEnvelopeIDs[envelope.id] = now
-        partialMessages = partialMessages.filter { now.timeIntervalSince($0.value.lastUpdated) < 120 }
+        if !isFamilyCredentialActive {
+            partialMessages = partialMessages.filter { now.timeIntervalSince($0.value.lastUpdated) < 120 }
+        }
+        // Previously acknowledged partial chunks cannot be silently expired.
         let bufferedBytes = partialMessages.values.reduce(0) { total, partial in
             total + partial.chunks.values.reduce(0) { $0 + $1.count }
         }
-        guard bufferedBytes + envelope.ciphertext.utf8.count < 96 * 1024 * 1024 else {
-            partialMessages.removeAll(keepingCapacity: false)
+        guard bufferedBytes + plaintext.count < 96 * 1024 * 1024,
+              seenEnvelopeIDs.count < 20_000 else {
+            if isFamilyCredentialActive { throw ChatHistoryError.capacity }
             throw ChatError.contentTooLarge
         }
         let assemblyID = "\(envelope.senderUserID)|\(envelope.senderDeviceID)|\(envelope.groupID)"
+        if partialMessages[assemblyID] == nil, partialMessages.count >= 256 {
+            if isFamilyCredentialActive { throw ChatHistoryError.capacity }
+            throw ChatError.contentTooLarge
+        }
         var partial = partialMessages[assemblyID] ?? PartialMessage(
             senderUserID: envelope.senderUserID,
             conversationID: envelope.conversationID,
@@ -1090,10 +1151,14 @@ final class ChatModel {
               partial.kind == envelope.messageType,
               partial.contentType == envelope.contentType,
               partial.chunkCount == envelope.chunkCount else { throw ChatError.invalidEnvelope }
+        if let previous = partial.chunks[envelope.chunkIndex], previous != plaintext { throw ChatError.invalidEnvelope }
         partial.chunks[envelope.chunkIndex] = plaintext
         partial.lastUpdated = now
         partialMessages[assemblyID] = partial
-        guard partial.chunks.count == partial.chunkCount else { return }
+        guard partial.chunks.count == partial.chunkCount else {
+            seenEnvelopeIDs[envelope.id] = now
+            return
+        }
         var complete = Data()
         for index in 0..<partial.chunkCount {
             guard let chunk = partial.chunks[index] else { throw ChatError.invalidEnvelope }
@@ -1114,6 +1179,7 @@ final class ChatModel {
         )
         receivedMessage.conversationID = partial.conversationID
         appendMessage(receivedMessage)
+        seenEnvelopeIDs[envelope.id] = now
     }
 
     private func updateDelivery(id: String, to delivery: ChatMessage.Delivery) {
