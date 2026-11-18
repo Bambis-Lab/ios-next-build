@@ -45,6 +45,9 @@ jobs:
           diff -u "$GITHUB_WORKSPACE/Sources/Core/InMemoryVoiceRecorder.swift" Sources/Core/InMemoryVoiceRecorder.swift > "$GITHUB_WORKSPACE/build/diagnostic26/recorder.diff" || test "$?" = 1
           diff -u "$GITHUB_WORKSPACE/Sources/Core/JarvisEngine.swift" Sources/Core/JarvisEngine.swift > "$GITHUB_WORKSPACE/build/diagnostic26/jarvis.diff" || test "$?" = 1
           if ! command -v xcodegen >/dev/null; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          python3 -m venv "$RUNNER_TEMP/ios173-audio-venv"
+          "$RUNNER_TEMP/ios173-audio-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+          "$RUNNER_TEMP/ios173-audio-venv/bin/python" Scripts/Acceptance/audio_network_fixture.py generate Tests/FamilyAudioNetworkTests.swift
           xcodegen generate --spec project.yml --project .
       - name: Compile diagnostic app and unit tests
         id: compile
@@ -67,7 +70,15 @@ jobs:
           echo "$SIM_ID" > build/diagnostic26/simulator-id.txt
           python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/diagnostic26/fake-ha.log 2>&1 &
           fixture_pid=$!
-          trap 'kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true' EXIT
+          "$RUNNER_TEMP/ios173-audio-venv/bin/python" Scripts/Acceptance/audio_network_fixture.py serve > build/diagnostic26/audio-fixture.log 2>&1 &
+          audio_pid=$!
+          trap 'kill "$fixture_pid" "$audio_pid" 2>/dev/null || true; wait "$fixture_pid" "$audio_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 40); do
+            kill -0 "$audio_pid"
+            if grep -q SYNTHETIC_AUDIO_READY build/diagnostic26/audio-fixture.log; then break; fi
+            sleep 0.25
+          done
+          grep -q SYNTHETIC_AUDIO_READY build/diagnostic26/audio-fixture.log
           python3 Scripts/Acceptance/preflight_fake_ha.py --attempts 20 | tee build/diagnostic26/preflight.log
           kill -0 "$fixture_pid"
           cd "$RUNNER_TEMP/ios173-diag"

@@ -1,0 +1,83 @@
+import CryptoKit
+import Foundation
+import XCTest
+@testable import IOSNext
+
+// Generated ONLY in the disposable SDK26 diagnostic checkout by Python.
+// Keys, tokens, and frames are deliberately public synthetic fixtures.
+final class FamilyAudioNetworkTests: XCTestCase {
+    @MainActor
+    func testPythonGoldenVectorsAndTwoNativeWebSocketClients() async throws {
+        let a = ["ha-fixture-a","ios-a"], b = ["ha-fixture-b","ios-b"]
+        let cid = String(repeating: "a", count: 32)
+        let ca = try FamilyAudioContext(callID: cid, caller: a, callee: b, local: a)
+        let cb = try FamilyAudioContext(callID: cid, caller: a, callee: b, local: b)
+        let ka = ChatDeviceKeys(agreement: .init(), signing: try .init(rawRepresentation: Data(repeating: 11, count: 32)))
+        let kb = ChatDeviceKeys(agreement: .init(), signing: try .init(rawRepresentation: Data(repeating: 12, count: 32)))
+        let ha = FamilyAudioHandshake(context: ca, ephemeralForTesting: try .init(rawRepresentation: Data(repeating: 21, count: 32)))
+        let hb = FamilyAudioHandshake(context: cb, ephemeralForTesting: try .init(rawRepresentation: Data(repeating: 22, count: 32)))
+        let oa = try ha.offer(signingKey: ka.signing)
+        let ob = try hb.offer(signingKey: kb.signing)
+        XCTAssertEqual(oa.ephemeral, "@OFFER_A@")
+        XCTAssertEqual(oa.signature, "@SIGNATURE_A@")
+        XCTAssertEqual(ob.ephemeral, "@OFFER_B@")
+        XCTAssertEqual(ob.signature, "@SIGNATURE_B@")
+        let base = try XCTUnwrap(URL(string: "http://127.0.0.1:18766/"))
+        let endpoint = try XCTUnwrap(URL(string: "ws://127.0.0.1:18766/v1/audio"))
+        let left = try FamilyAudioWire(configuration: .init(baseURL: base, token: "fixture-a", userID: a[0], deviceID: a[1]),
+            endpoint: endpoint, context: ca, syntheticLoopback: true)
+        let right = try FamilyAudioWire(configuration: .init(baseURL: base, token: "fixture-b", userID: b[0], deviceID: b[1]),
+            endpoint: endpoint, context: cb, syntheticLoopback: true)
+        defer { left.close(); right.close() }
+        try await left.connect()
+        try await right.connect()
+        _ = try await left.send(.offer(oa))
+        _ = try await right.send(.offer(ob))
+        let pa = try await left.send(.peerOffer)
+        let pb = try await right.send(.peerOffer)
+        let lc = try ha.establish(peerOffer: XCTUnwrap(pa.offer), verifiedPeer: kb.publicIdentity(userID: b[0], deviceID: b[1]))
+        let rc = try hb.establish(peerOffer: XCTUnwrap(pb.offer), verifiedPeer: ka.publicIdentity(userID: a[0], deviceID: a[1]))
+        let frame = Data(repeating: 7, count: 640)
+        let firstA = try lc.seal(sequence: 0, frame: frame)
+        let firstB = try rc.seal(sequence: 0, frame: frame)
+        XCTAssertEqual(firstA.base64EncodedString(), "@PACKET_A@")
+        XCTAssertEqual(firstB.base64EncodedString(), "@PACKET_B@")
+        _ = try await left.send(.push(sequence: 0, ciphertext: firstA))
+        _ = try await right.send(.push(sequence: 0, ciphertext: firstB))
+        let receivedA = try await take(left)
+        let receivedB = try await take(right)
+        XCTAssertEqual(try lc.open(sequence: receivedA.sequence, packet: receivedA.validatedCiphertext()), frame)
+        XCTAssertEqual(try rc.open(sequence: receivedB.sequence, packet: receivedB.validatedCiphertext()), frame)
+        _ = try await left.send(.refresh("fixture-a-renewed"))
+        for sequence in UInt64(1)...10 {
+            let data = Data(repeating: UInt8(sequence), count: 640)
+            _ = try await left.send(.push(sequence: sequence, ciphertext: lc.seal(sequence: sequence, frame: data)))
+            _ = try await right.send(.push(sequence: sequence, ciphertext: rc.seal(sequence: sequence, frame: data)))
+            let la = try await take(left)
+            let rb = try await take(right)
+            XCTAssertEqual(la.sequence, sequence)
+            XCTAssertEqual(rb.sequence, sequence)
+            XCTAssertEqual(try lc.open(sequence: la.sequence, packet: la.validatedCiphertext()), data)
+            XCTAssertEqual(try rc.open(sequence: rb.sequence, packet: rb.validatedCiphertext()), data)
+        }
+        _ = try await right.send(.heartbeat)
+        do {
+            _ = try await left.send(.refresh("fixture-foreign"))
+            XCTFail("Foreign credential must be rejected")
+        } catch {}
+        XCTAssertFalse(left.isConnected)
+    }
+
+    @MainActor
+    private func take(_ wire: FamilyAudioWire) async throws -> FamilyAudioPacket {
+        for _ in 0..<200 {
+            let packets = wire.takePackets()
+            if !packets.isEmpty {
+                XCTAssertEqual(packets.count, 1)
+                return try XCTUnwrap(packets.first)
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw FamilyAudioWireError.transportClosed
+    }
+}
