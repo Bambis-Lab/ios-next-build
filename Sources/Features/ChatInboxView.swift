@@ -72,6 +72,9 @@ struct ChatInboxView: View {
 
     var body: some View {
         List {
+            if searchText.isEmpty && chatModel.canSignalCalls {
+                Section("Anrufe") { FamilyCallPanel(chatModel: chatModel) }
+            }
             if searchText.isEmpty {
                 if let group = chatModel.familyGroup {
                     Section("Familie") {

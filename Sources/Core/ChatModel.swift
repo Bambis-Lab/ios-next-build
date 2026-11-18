@@ -90,6 +90,83 @@ final class ChatModel {
         restoreConfiguration()
     }
 
+    private(set) var callListing: FamilyCallListing?
+    private(set) var callError: String?
+    private(set) var callBusy = false
+    private var callGeneration: UInt64 = 0
+    var canSignalCalls: Bool { isFamilyCredentialActive && state == .online }
+
+    private func resetCalls() {
+        callGeneration &+= 1
+        callListing = nil
+        callError = nil
+        callBusy = false
+    }
+
+    func refreshCalls() async {
+        guard canSignalCalls, let configuration, !callBusy else { return }
+        let generation = callGeneration
+        callBusy = true
+        defer { if generation == callGeneration { callBusy = false } }
+        do {
+            let listing = try await relay.callStates(configuration: configuration)
+            guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
+            callListing = listing
+            callError = nil
+        } catch {
+            guard generation == callGeneration, !Task.isCancelled else { return }
+            callListing = nil
+            callError = "Anrufsignalisierung nicht verfügbar."
+        }
+    }
+
+    func signalCall(_ signal: FamilyCallSignal) async {
+        guard canSignalCalls, let configuration, !callBusy else { return }
+        let generation = callGeneration
+        callBusy = true
+        defer { if generation == callGeneration { callBusy = false } }
+        do {
+            _ = try await relay.signalCall(signal, configuration: configuration)
+            guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
+            let listing = try await relay.callStates(configuration: configuration)
+            guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
+            callListing = listing
+            callError = nil
+        } catch {
+            guard generation == callGeneration, !Task.isCancelled else { return }
+            callListing = nil
+            callError = "Anrufaktion konnte nicht bestätigt werden."
+        }
+    }
+
+    func isOwnCaller(_ call: FamilyCallState) -> Bool {
+        guard let configuration else { return false }
+        return call.caller == [configuration.userID, configuration.deviceID]
+    }
+
+    func inviteSelectedContact() async {
+        guard canSignalCalls, !showingFamilyGroup, let configuration,
+              contacts.contains(where: { $0.userID == recipientUserID }), !callBusy else { return }
+        let generation = callGeneration
+        let peer = recipientUserID
+        callBusy = true
+        do {
+            let devices = try await relay.identities(for: peer, configuration: configuration)
+            guard generation == callGeneration, canSignalCalls, !Task.isCancelled else { return }
+            callBusy = false
+            guard peer == recipientUserID, !showingFamilyGroup,
+                  devices.count == 1, let target = devices.first, target.userID == peer else {
+                callError = "Ein eindeutig registriertes Empfängergerät ist erforderlich."
+                return
+            }
+            await signalCall(.invite(userID: peer, deviceID: target.deviceID))
+        } catch {
+            guard generation == callGeneration else { return }
+            callBusy = false
+            callError = "Empfängergerät konnte nicht bestätigt werden."
+        }
+    }
+
     var canSend: Bool {
         state == .online && (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
     }
@@ -251,6 +328,7 @@ final class ChatModel {
             stop()
         }
         configurationGeneration &+= 1
+        resetCalls()
         if replacesIdentity {
             draft = ""
             showingFamilyGroup = false
@@ -379,6 +457,7 @@ final class ChatModel {
     }
 
     func stop() {
+        resetCalls()
         startupEpoch &+= 1
         startupTask?.cancel()
         startupTask = nil
@@ -394,6 +473,7 @@ final class ChatModel {
 
     func forgetConfiguration(preservingStartup: Bool = false) {
         configurationGeneration &+= 1
+        resetCalls()
         draft = ""
         showingFamilyGroup = false
         familyGroup = nil

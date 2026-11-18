@@ -20,6 +20,7 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             connectionBanner
+            FamilyCallPanel(chatModel: chatModel, allowInvite: true)
             messageList
             composer
         }
@@ -144,7 +145,7 @@ struct ChatView: View {
                 .padding(10)
         case .online:
             VStack(spacing: 4) {
-                Label("Ende-zu-Ende verschlüsselt · flüchtiger Relay", systemImage: "lock.fill")
+                Label("Ende-zu-Ende verschlüsselt", systemImage: "lock.fill")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 if chatModel.accessRole == .owner {
@@ -197,7 +198,7 @@ struct ChatView: View {
                 }
             }
             .padding(.vertical, 8)
-            .accessibilityLabel("Ende-zu-Ende verschlüsselt. Nachrichten werden nicht gespeichert.")
+            .accessibilityLabel("Ende-zu-Ende verschlüsselt. Lokaler Verlauf ist sitzungsgebunden.")
         case let .offline(message):
             HStack {
                 Label("Offline", systemImage: "wifi.slash")
