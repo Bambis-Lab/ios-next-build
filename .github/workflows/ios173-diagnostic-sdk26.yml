@@ -47,11 +47,12 @@ jobs:
           if ! command -v xcodegen >/dev/null; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
           xcodegen generate --spec project.yml --project .
       - name: Compile diagnostic app and unit tests
+        id: compile
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/ios173-diag"
-          xcodebuild build-for-testing -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/ios173-dd" CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$GITHUB_WORKSPACE/build/diagnostic26/compiler.log"
+          xcodebuild build-for-testing -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/ios173-dd" CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" 2>&1 | tee "$GITHUB_WORKSPACE/build/diagnostic26/compiler.log"
       - name: Run diagnostic unit tests
         shell: bash
         run: |
@@ -63,8 +64,28 @@ jobs:
           print(next(x["udid"] for r in sorted(d,reverse=True) if ".iOS-26-" in r for x in d[r] if x.get("isAvailable") and x["name"].startswith("iPhone")))
           PY
           )"
+          echo "$SIM_ID" > build/diagnostic26/simulator-id.txt
+          python3 Scripts/fake_ha_websocket_server.py --host 127.0.0.1 --port 18765 > build/diagnostic26/fake-ha.log 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true' EXIT
+          python3 Scripts/Acceptance/preflight_fake_ha.py --attempts 20 | tee build/diagnostic26/preflight.log
+          kill -0 "$fixture_pid"
           cd "$RUNNER_TEMP/ios173-diag"
-          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath "$RUNNER_TEMP/ios173-dd" -parallel-testing-enabled NO -only-testing:IOSNextTests -resultBundlePath "$GITHUB_WORKSPACE/build/diagnostic26/UnitTests.xcresult" CODE_SIGNING_ALLOWED=NO 2>&1 | tee "$GITHUB_WORKSPACE/build/diagnostic26/tests.log"
+          xcodebuild test -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" -derivedDataPath "$RUNNER_TEMP/ios173-dd" -parallel-testing-enabled NO -only-testing:IOSNextTests -resultBundlePath "$GITHUB_WORKSPACE/build/diagnostic26/UnitTests.xcresult" CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" 2>&1 | tee "$GITHUB_WORKSPACE/build/diagnostic26/tests.log"
+      - name: Diagnostic simulator install and launch evidence
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIM_ID="$(cat build/diagnostic26/simulator-id.txt)"
+          xcrun simctl bootstatus "$SIM_ID" -b
+          APP="$RUNNER_TEMP/ios173-dd/Build/Products/Debug-iphonesimulator/IOSNext.app"
+          test -d "$APP"
+          xcrun simctl install "$SIM_ID" "$APP"
+          xcrun simctl terminate "$SIM_ID" de.nicofroeba16.iosnext || true
+          xcrun simctl launch "$SIM_ID" de.nicofroeba16.iosnext | tee build/diagnostic26/launch.log
+          sleep 3
+          xcrun simctl io "$SIM_ID" screenshot build/diagnostic26/diagnostic-launch.png
       - name: Preserve non-release diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
