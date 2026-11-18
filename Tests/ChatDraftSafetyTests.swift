@@ -134,12 +134,14 @@ final class ChatDraftSafetyTests: XCTestCase {
         let valid = Data(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":false}"#.utf8)
         let supported = try JSONDecoder().decode(ChatDeliveryContract.self, from: valid)
         XCTAssertTrue(supported.isSupported)
+        let durable = try JSONDecoder().decode(ChatDeliveryContract.self, from: Data(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true}"#.utf8))
+        XCTAssertTrue(durable.isSupported)
+        XCTAssertTrue(durable.persistent)
         for payload in [
             #"{"mode":"legacy","max_batch":64,"ttl_seconds":120,"persistent":false}"#,
             #"{"mode":"ack_v1","max_batch":0,"ttl_seconds":120,"persistent":false}"#,
             #"{"mode":"ack_v1","max_batch":257,"ttl_seconds":120,"persistent":false}"#,
-            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":10,"persistent":false}"#,
-            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true}"#
+            #"{"mode":"ack_v1","max_batch":64,"ttl_seconds":10,"persistent":false}"#
         ] {
             let contract = try JSONDecoder().decode(ChatDeliveryContract.self, from: Data(payload.utf8))
             XCTAssertFalse(contract.isSupported, "Incompatible Family Broker must never dequeue encrypted content")

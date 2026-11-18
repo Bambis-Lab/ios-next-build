@@ -36,7 +36,7 @@ enum ChatRelayPollingPolicy {
     }
 }
 
-/// The separately approved family broker advertises opt-in volatile ack_v1.
+/// The separately approved family broker advertises explicit ack_v1.
 /// The client must verify this *before* reading ciphertext to avoid the old
 /// server deleting data on GET when it does not support acknowledgements.
 struct ChatDeliveryContract: Decodable, Sendable {
@@ -54,7 +54,7 @@ struct ChatDeliveryContract: Decodable, Sendable {
 
     var isSupported: Bool {
         mode == "ack_v1" && maxBatch >= 1 && maxBatch <= 256 &&
-        ttlSeconds >= 30 && !persistent
+        ttlSeconds >= 30
     }
 }
 
@@ -157,6 +157,26 @@ actor ChatRelayClient {
             throw ChatError.invalidResponse
         }
         return contact
+    }
+
+    func callStates(configuration: ChatConfiguration) async throws -> FamilyCallListing {
+        let listing: FamilyCallListing = try await request(
+            path: "v1/chat/calls", method: "GET",
+            body: Optional<String>.none, configuration: configuration
+        )
+        guard listing.calls.allSatisfy({ $0.isParticipant(configuration) }) else {
+            throw ChatError.invalidResponse
+        }
+        return listing
+    }
+
+    func signalCall(_ signal: FamilyCallSignal, configuration: ChatConfiguration) async throws -> FamilyCallState {
+        let call: FamilyCallState = try await request(
+            path: "v1/chat/calls", method: "POST", body: signal,
+            configuration: configuration
+        )
+        guard call.isParticipant(configuration) else { throw ChatError.invalidResponse }
+        return call
     }
 
     func familyGroup(configuration: ChatConfiguration) async throws -> ChatFamilyGroup {
@@ -346,5 +366,58 @@ actor ChatRelayClient {
         } catch {
             throw ChatError.invalidResponse
         }
+    }
+}
+
+enum FamilyCallPhase: String, Decodable, Sendable {
+    case ringing, accepted, declined, cancelled, ended
+}
+
+struct FamilyCallState: Decodable, Sendable, Identifiable {
+    let id: String
+    let caller: [String]
+    let callee: [String]
+    let state: FamilyCallPhase
+
+    func isParticipant(_ configuration: ChatConfiguration) -> Bool {
+        guard caller.count == 2, callee.count == 2, caller != callee else { return false }
+        let own = [configuration.userID, configuration.deviceID]
+        return caller == own || callee == own
+    }
+}
+
+struct FamilyCallListing: Decodable, Sendable {
+    let calls: [FamilyCallState]
+    let audioTransport: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case calls
+        case audioTransport = "audio_transport"
+    }
+}
+
+struct FamilyCallSignal: Encodable, Sendable {
+    enum Action: String, Encodable, Sendable {
+        case invite, accept, decline, cancel, hangup
+    }
+    let action: Action
+    let recipientUserID: String?
+    let recipientDeviceID: String?
+    let callID: String?
+
+    static func invite(userID: String, deviceID: String) -> Self {
+        Self(action: .invite, recipientUserID: userID, recipientDeviceID: deviceID, callID: nil)
+    }
+
+    static func transition(_ action: Action, callID: String) throws -> Self {
+        guard action != .invite else { throw ChatError.invalidConfiguration }
+        return Self(action: action, recipientUserID: nil, recipientDeviceID: nil, callID: callID)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case recipientUserID = "recipient_user_id"
+        case recipientDeviceID = "recipient_device_id"
+        case callID = "call_id"
     }
 }
