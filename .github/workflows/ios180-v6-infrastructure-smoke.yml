@@ -1,0 +1,56 @@
+name: V6 isolated dual iPhone infrastructure smoke
+on:
+  push:
+    branches: ['feature/ios180-v6-dual-infra-smoke']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dual-infrastructure:
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select exact Xcode and reserve cold devices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/dual-simulator
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            case "${candidate%%$'\n'*}" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") selected="$app/Contents/Developer"; break ;;
+            esac
+          done
+          test -n "$selected"
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          xcodebuild -version | tee build/ios173/dual-simulator/xcode.txt
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          python3 -m py_compile Scripts/Acceptance/run_two_native_simulators.py
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only
+      - name: Reserve exact independent destinations
+        run: python3 Scripts/Acceptance/run_two_native_simulators.py reserve
+      - name: Boot and probe actual guest processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/run_two_native_simulators.py boot 2>&1 | tee build/ios173/dual-simulator/boot.log
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          e=json.loads(Path("build/ios173/dual-simulator/simulators.json").read_text())
+          assert e["both_booted"] and e["A"]!=e["B"]
+          assert {p["udid"] for p in e["probes"]}=={e["A"],e["B"]}
+          assert all(p["process_table_rows"]>0 for p in e["probes"])
+          print("INFRASTRUCTURE_SMOKE_PASS; NOT AUDIO OR G03")
+          PY
+      - name: Preserve infrastructure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V6-Dual-iPhone-Infrastructure
+          path: build/ios173/dual-simulator/
+          retention-days: 14

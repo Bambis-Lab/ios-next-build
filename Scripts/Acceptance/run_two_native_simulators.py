@@ -64,13 +64,25 @@ def boot_reserved():
         run_bounded(["xcrun","simctl","bootstatus",uid,"-b"],timeout=240)
         timings[role]=round(time.monotonic()-started,3)
         diagnostics(f"boot-{role}")
-    # Verify both targeted UDIDs again after the second boot. Do not ask
-    # CoreSimulator for global inventory here. XCResult independently
-    # verifies both actual destinations after the native tests.
-    for uid in (FIRST,second):
-        run_bounded(["xcrun","simctl","bootstatus",uid,"-b"],timeout=60)
+    # Both bootstatus calls already succeeded. A second bootstatus call
+    # stalled in run 44445969729. Check actual guest process execution on
+    # both exact destinations concurrently, without reentering bootstatus.
+    from concurrent.futures import ThreadPoolExecutor
+    def probe(role,uid):
+        started=time.monotonic()
+        output=run_bounded(["xcrun","simctl","spawn",uid,"launchctl","list"],timeout=90,emit_output=False)
+        require("PID" in output and "Label" in output and len(output.splitlines())>1,
+                f"guest launchctl did not return a process table for {role}")
+        return {"role":role,"udid":uid,"started":started,"finished":time.monotonic(),
+                "process_table_rows":len(output.splitlines())-1}
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(probe,role,uid) for role,uid in (("A",FIRST),("B",second))]
+        probes=[future.result() for future in futures]
+    require(max(p["started"] for p in probes)<min(p["finished"] for p in probes),
+            "guest probe invocation windows did not overlap")
     (OUT/"simulators.json").write_text(json.dumps({**reservation,"both_booted":True,"boot_seconds":timings,
-        "verification":"targeted bootstatus on both reserved UDIDs"},indent=2)+"\n")
+        "verification":"successful per-device bootstatus followed by overlapping targeted guest process probes",
+        "probes":probes},indent=2)+"\n")
     print("IOS173_TWO_DISTINCT_BOOTED_SIMULATORS",flush=True)
 
 def run(second):
