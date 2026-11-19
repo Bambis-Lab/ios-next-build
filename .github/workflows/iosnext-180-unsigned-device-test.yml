@@ -1,0 +1,139 @@
+name: iOS Next 1.8.0 Build 32 — unsigned device TEST only
+
+on:
+  pull_request:
+    branches: [feature/ios180-accelerated-native]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios180-unsigned-device-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release-prep/ios-next-180-unsigned-test32'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin tested baseline and exact test-build changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+          from pathlib import Path
+          base = 'ee79eafe6f316c7114ea81938eec5464eed09634'
+          event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
+          assert event['pull_request']['base']['sha'] == base
+          subprocess.run(['git','merge-base','--is-ancestor',base,'HEAD'],check=True)
+          allowed = {'project.yml','Docs/Releases/1.8.0.md','.github/workflows/iosnext-180-unsigned-device-test.yml'}
+          assert set(subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()) == allowed
+          old = subprocess.check_output(['git','show',base+':project.yml'],text=True)
+          anchor = '        MARKETING_VERSION: 1.7.3\n        CURRENT_PROJECT_VERSION: 31\n'
+          assert old.count(anchor) == 1
+          assert Path('project.yml').read_text() == old.replace(anchor,'        MARKETING_VERSION: 1.8.0\n        CURRENT_PROJECT_VERSION: 32\n')
+          request = urllib.request.Request('https://api.github.com/repos/Bambis-Lab/ios-next-build/actions/runs/44532168195',headers={'User-Agent':'IOSNext-unsigned-device-test'})
+          with urllib.request.urlopen(request,timeout=20) as response:
+              run = json.load(response)
+          assert run['status']=='completed' and run['conclusion']=='success' and run['head_sha']==base
+          print('SOURCE_PIN=PASS; SIMULATOR_PREREQUISITE=PASS; FULL_RELEASE=NOT_APPROVED_BY_TESTS')
+          PY
+  device-test:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      EXPECTED_VERSION: '1.8.0'
+      EXPECTED_BUILD: '32'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Select stable Xcode 27 and prepare free-sideload test project
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            version="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            case "$(printf '%s\n' "$version" | sed -n '1p')" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") selected="$app/Contents/Developer"; break ;;
+            esac
+          done
+          test -n "$selected"
+          export DEVELOPER_DIR="$selected"
+          printf 'DEVELOPER_DIR=%s\n' "$selected" >> "$GITHUB_ENV"
+          xcodebuild -version
+          test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" = 27
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          export CM_COMMIT="$GITHUB_SHA"
+          bash Scripts/prepare_free_sideload_project.sh
+      - name: Compile unsigned ARM64 device application with no broker endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project IOSNext.xcodeproj -scheme IOSNext -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ios180-test-derived" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
+            IOSNEXT_FAMILY_BROKER_URL= build
+      - name: Verify actual iPhoneOS binary and package test IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          APP="$RUNNER_TEMP/ios180-test-derived/Build/Products/Release-iphoneos/IOSNext.app"
+          OUT="$RUNNER_TEMP/ios180-test-out"
+          export APP OUT
+          test -x "$APP/IOSNext"
+          test "$(xcrun lipo -archs "$APP/IOSNext")" = arm64
+          xcrun vtool -show-build "$APP/IOSNext" | tee "$RUNNER_TEMP/ios180-platform.txt"
+          grep -Eq '^[[:space:]]*platform[[:space:]]+IOS$' "$RUNNER_TEMP/ios180-platform.txt"
+          python3 - <<'PY'
+          import json, os, plistlib
+          from pathlib import Path
+          app = Path(os.environ['APP'])
+          with (app/'Info.plist').open('rb') as f:
+              p=plistlib.load(f)
+          assert p['CFBundleIdentifier']=='de.nicofroeba16.iosnext'
+          assert p['CFBundleShortVersionString']=='1.8.0' and p['CFBundleVersion']=='32'
+          assert p['CFBundleSupportedPlatforms']==['iPhoneOS'] and p['MinimumOSVersion']=='27.0'
+          assert p.get('IOSNextFamilyBrokerURL','') in ('','$(IOSNEXT_FAMILY_BROKER_URL)')
+          assert not list(app.rglob('*.appex'))
+          found=list(app.rglob('build_info.json'))
+          assert len(found)==1
+          data=json.loads(found[0].read_text())
+          assert data['source_commit']==os.environ['GITHUB_SHA']
+          assert data['version']=='1.8.0' and data['build']=='32' and data['build_flavor']=='free-sideload'
+          PY
+          mkdir -m 700 "$OUT"
+          mkdir "$OUT/Payload"
+          ditto "$APP" "$OUT/Payload/IOSNext.app"
+          (cd "$OUT" && /usr/bin/zip -qry IOSNext-1.8.0-Build32-UNSIGNED-TEST.ipa Payload)
+          unzip -t "$OUT/IOSNext-1.8.0-Build32-UNSIGNED-TEST.ipa" >/dev/null
+          (cd "$OUT" && shasum -a 256 IOSNext-1.8.0-Build32-UNSIGNED-TEST.ipa > SHA256SUMS.txt)
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ['OUT'])
+          report={'source':os.environ['GITHUB_SHA'],'run':os.environ['GITHUB_RUN_ID'],'attempt':os.environ['GITHUB_RUN_ATTEMPT'],'version':'1.8.0','build':'32','platform':'iPhoneOS','arch':'arm64','broker_configured':False,'signature_verified':False,'device_install_verified':False,'release_gates_passed':False,'publication_authorized_by_this_job':False}
+          (p/'TEST-ONLY.json').write_text(json.dumps(report,indent=2)+'\n')
+          PY
+      - name: Upload explicitly unreleased test artifact (no release or feed change)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: IOSNext-1.8.0-Build32-UNSIGNED-TEST-ONLY
+          path: |
+            ${{ runner.temp }}/ios180-test-out/IOSNext-1.8.0-Build32-UNSIGNED-TEST.ipa
+            ${{ runner.temp }}/ios180-test-out/SHA256SUMS.txt
+            ${{ runner.temp }}/ios180-test-out/TEST-ONLY.json
+          retention-days: 14
+          if-no-files-found: error
