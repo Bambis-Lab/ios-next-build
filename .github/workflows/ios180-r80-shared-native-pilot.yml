@@ -109,7 +109,6 @@ jobs:
     timeout-minutes: 35
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: 30
-      PIP_CACHE_DIR: ${{ runner.temp }}/r80-pip-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Identify exact Python download-cache context
@@ -117,6 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          printf 'PIP_CACHE_DIR=%s/r80-pip-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           python_version="$(python3 -c 'import platform; print(platform.python_version())')"
           os_build="$(sw_vers -buildVersion)"
           printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
@@ -251,7 +251,6 @@ jobs:
     timeout-minutes: 55
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: 30
-      PIP_CACHE_DIR: ${{ runner.temp }}/r80-pip-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Identify exact Python download-cache context
@@ -259,6 +258,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          printf 'PIP_CACHE_DIR=%s/r80-pip-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           python_version="$(python3 -c 'import platform; print(platform.python_version())')"
           os_build="$(sw_vers -buildVersion)"
           printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
