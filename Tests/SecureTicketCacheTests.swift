@@ -58,4 +58,23 @@ final class SecureTicketCacheTests: XCTestCase {
         try open().invalidate()
         XCTAssertTrue(try open().list(lease:lease).isEmpty)
     }
+
+    func testTicketReadFenceRejectsSupersededAndInvalidatedRequests() throws {
+        let url=try XCTUnwrap(URL(string:"https://example.invalid"))
+        let a=TicketScreenScope(endpoint:url,user:"a",device:"ios-a",owner:false,keyFingerprint:"fixture-a")
+        let b=TicketScreenScope(endpoint:url,user:"b",device:"ios-b",owner:true,keyFingerprint:"fixture-b")
+        var fence=TicketReadRequestFence()
+        let first=fence.begin(a)
+        XCTAssertTrue(fence.accepts(first,scope:a))
+        XCTAssertFalse(fence.accepts(first,scope:b))
+        let second=fence.begin(a)
+        XCTAssertFalse(fence.accepts(first,scope:a))
+        XCTAssertTrue(fence.accepts(second,scope:a))
+        fence.invalidate()
+        XCTAssertFalse(fence.accepts(second,scope:a))
+        let third=fence.begin(b)
+        XCTAssertFalse(fence.accepts(first,scope:a))
+        XCTAssertFalse(fence.accepts(third,scope:a))
+        XCTAssertTrue(fence.accepts(third,scope:b))
+    }
 }

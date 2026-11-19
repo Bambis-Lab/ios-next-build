@@ -1,5 +1,26 @@
 import Foundation
 
+/// Fences asynchronous cache publications against superseding reads and writes.
+struct TicketReadRequestFence {
+    private(set) var scope:TicketScreenScope?
+    private var revision:UInt64=0
+
+    mutating func begin(_ scope:TicketScreenScope)->UInt64 {
+        revision &+= 1
+        self.scope=scope
+        return revision
+    }
+
+    mutating func invalidate() {
+        revision &+= 1
+        scope=nil
+    }
+
+    func accepts(_ candidate:UInt64,scope:TicketScreenScope)->Bool {
+        revision==candidate && self.scope==scope
+    }
+}
+
 /// In-memory, scope-bound offline read window. Only construct following a
 /// successful authorized server request. Never persist a lease or credentials.
 /// A device revoked while truly offline cannot be detected immediately.

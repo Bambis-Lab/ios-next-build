@@ -78,8 +78,8 @@ final class ChatModel {
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
     private var ticketReadLease: TicketOfflineLease?
-    private var ticketReadRevision: UInt64 = 0
-    private var ticketReadRequestScope: TicketScreenScope?
+    private var ticketReadFence=TicketReadRequestFence()
+    private var ticketWriteGeneration:UInt64?
     private var ticketCacheReady = false
     private var ticketReadOffline = false
     private typealias HistorySnapshot = ChatPersistentSnapshot
@@ -1753,15 +1753,14 @@ extension ChatModel {
     }
 
     private func resetTicketReadAccess() {
-        ticketReadRevision &+= 1
-        ticketReadRequestScope=nil
+        ticketReadFence.invalidate()
         ticketReadLease=nil
         ticketCacheReady=false
         ticketReadOffline=false
     }
 
     func invalidateSecureTicketRead(_ scope:TicketScreenScope) {
-        if ticketReadLease?.scope==scope || ticketReadRequestScope==scope { resetTicketReadAccess() }
+        if ticketReadLease?.scope==scope || ticketReadFence.scope==scope { resetTicketReadAccess() }
     }
 
     func secureTicketCanRead(_ scope:TicketScreenScope,app:AppModel) -> Bool {
@@ -1805,13 +1804,12 @@ extension ChatModel {
     func secureTicketList(_ scope:TicketScreenScope,app:AppModel) async throws -> [EncryptedTicketSummary] {
         try checkTicketScope(scope,app)
         let generation=configurationGeneration
-        ticketReadRevision &+= 1
-        let revision=ticketReadRevision
-        ticketReadRequestScope=scope
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        let revision=ticketReadFence.begin(scope)
         do {
             let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
             let result=try await fetchSecureTicketList(scope,app:app,auth:auth,generation:generation)
-            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             let local=try ticketLocalIdentity(scope,app:app)
             let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
             ticketCacheReady=false
@@ -1823,7 +1821,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
-            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
                 invalidateSecureTicketRead(scope)
@@ -1844,13 +1842,12 @@ extension ChatModel {
     func readSecureTicketDetail(_ id:String,scope:TicketScreenScope,app:AppModel) async throws -> EncryptedTicketDetail {
         try checkTicketScope(scope,app)
         let generation=configurationGeneration
-        ticketReadRevision &+= 1
-        let revision=ticketReadRevision
-        ticketReadRequestScope=scope
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        let revision=ticketReadFence.begin(scope)
         do {
             let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
             let result=try await EncryptedTicketClient().detail(id,using:auth)
-            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             let local=try ticketLocalIdentity(scope,app:app)
             guard TicketIdentityBinding.matches(local,scope.owner ? result.owner : result.requester)
             else {throw ChatError.identityChanged}
@@ -1863,7 +1860,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
-            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
                 invalidateSecureTicketRead(scope)
@@ -1971,17 +1968,39 @@ extension ChatModel {
         try SecureTicketOutbox(scope: scope).stage(pending)
     }
 
+    private func beginTicketWrite() throws -> UInt64 {
+        let generation=configurationGeneration
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        ticketWriteGeneration=generation
+        ticketReadFence.invalidate()
+        ticketCacheReady=false
+        return generation
+    }
+
+    private func finishTicketWrite(_ generation:UInt64) {
+        guard ticketWriteGeneration==generation else {return}
+        ticketWriteGeneration=nil
+        if generation==configurationGeneration {
+            ticketReadFence.invalidate()
+            ticketCacheReady=false
+        }
+    }
+
     func submitSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
         guard pending.scope == scope, let configuration,
               secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
         // An ambiguous write may have changed remote history.
-        ticketCacheReady=false
+        let generation=try beginTicketWrite()
+        defer {finishTicketWrite(generation)}
         try checkTicketScope(scope, app)
+        guard generation==configurationGeneration else {throw CancellationError()}
         let current = try await relay.identities(for: pending.peer.userID, configuration: configuration)
         try checkTicketScope(scope, app)
+        guard generation==configurationGeneration else {throw CancellationError()}
         guard current.contains(where: { TicketIdentityBinding.matches($0, pending.peer) }) else { throw ChatError.identityChanged }
         let auth = try await ticketAuthorization(scope, app)
         try checkTicketScope(scope, app)
+        guard generation==configurationGeneration else {throw CancellationError()}
         // Reauthenticate the stored signed message against the current key.
         guard let keys, try SecureTicketOutbox(scope: scope).pending() == pending,
               let safety = ChatDeviceKeys.safetyNumber(for: pending.peer) else { throw ChatError.authenticationFailed }
@@ -1996,6 +2015,7 @@ extension ChatModel {
             result = try await client.reply(pending.message, using: auth)
         }
         try checkTicketScope(scope, app)
+        guard generation==configurationGeneration else {throw CancellationError()}
         guard TicketIdentityBinding.matches(scope.owner ? result.owner : result.requester, local),
               TicketIdentityBinding.matches(scope.owner ? result.requester : result.owner, pending.peer)
         else { throw ChatError.identityChanged }
@@ -2024,10 +2044,14 @@ extension ChatModel {
     func secureTicketStatus(_ status: EncryptedTicketStatus, id: String,
                             scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
         guard scope.owner,secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
-        ticketCacheReady=false
+        let generation=try beginTicketWrite()
+        defer {finishTicketWrite(generation)}
         let auth = try await ticketAuthorization(scope, app)
+        try checkTicketScope(scope,app)
+        guard generation==configurationGeneration else {throw CancellationError()}
         let result = try await EncryptedTicketClient().status(status, ticketID: id, using: auth)
         try checkTicketScope(scope, app)
+        guard generation==configurationGeneration,result.ticketID==id,result.status==status else {throw ChatError.invalidResponse}
         return result
     }
 }
