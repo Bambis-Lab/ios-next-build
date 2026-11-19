@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 @testable import IOSNext
 
-// Generated ONLY in the disposable SDK26 diagnostic checkout by Python.
+// Generated ONLY in a disposable native CI checkout by Python.
 // Keys, tokens, and frames are deliberately public synthetic fixtures.
 final class FamilyAudioNetworkTests: XCTestCase {
     @MainActor
@@ -32,6 +32,7 @@ final class FamilyAudioNetworkTests: XCTestCase {
             endpoint: endpoint, context: ca, syntheticLoopback: true)
         let right = try FamilyAudioWire(configuration: .init(baseURL: base, token: "fixture-b", userID: b[0], deviceID: b[1]),
             endpoint: endpoint, context: cb, syntheticLoopback: true)
+        // @TLS_PROBE@
         defer { left.close(); right.close() }
         try await left.connect()
         try await right.connect()

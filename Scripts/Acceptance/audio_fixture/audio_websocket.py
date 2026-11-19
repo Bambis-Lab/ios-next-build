@@ -12,7 +12,65 @@ from cryptography.exceptions import InvalidSignature
 from websockets.sync.server import serve
 from websockets.exceptions import ConnectionClosed
 
-def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
+class AudioWriteDeadline:
+    """One watchdog per admitted connection; never change the shared socket timeout.
+
+    A timed-out send irreversibly shuts down the transport, which also wakes a
+    blocked sendall. The connection cannot be reused after timeout.
+    """
+    def __init__(self, ws, timeout):
+        self.ws, self.timeout = ws, timeout
+        self.condition = threading.Condition()
+        self.deadline = None
+        self.stopped = False
+        self.expired = False
+        self.thread = threading.Thread(target=self._watch, daemon=True,
+                                       name="iosnext-audio-write-deadline")
+        self.thread.start()
+
+    def _watch(self):
+        with self.condition:
+            while not self.stopped:
+                if self.deadline is None:
+                    self.condition.wait()
+                    continue
+                remaining = self.deadline - time.monotonic()
+                if remaining > 0:
+                    self.condition.wait(remaining)
+                    continue
+                self.expired = True
+                self.deadline = None
+                try:
+                    self.ws.socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                return
+
+    def send(self, message):
+        with self.condition:
+            if self.expired or self.stopped or self.deadline is not None:
+                raise TimeoutError("audio_write_unavailable")
+            self.deadline = time.monotonic() + self.timeout
+            self.condition.notify_all()
+        try:
+            self.ws.send(message)
+        finally:
+            with self.condition:
+                self.deadline = None
+                self.condition.notify_all()
+        if self.expired:
+            raise TimeoutError("audio_write_timeout")
+
+    def close(self):
+        with self.condition:
+            self.stopped = True
+            self.condition.notify_all()
+        self.thread.join(timeout=1)
+
+
+def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0, write_timeout=1.0):
+    if not 0.1 <= write_timeout <= 1.0:
+        raise ValueError("invalid_write_timeout")
     if not 0.25 <= idle_timeout <= 60:
         raise ValueError("invalid_idle_timeout")
     slots=threading.BoundedSemaphore(16)
@@ -46,7 +104,9 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
             ws.close(1013,"capacity")
             return
         binding=None
+        writer=None
         try:
+            writer=AudioWriteDeadline(ws,write_timeout)
             headers=ws.request.headers.get_all("Authorization")
             if len(headers)!=1:
                 raise PermissionError("unauthorized")
@@ -71,7 +131,7 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
                     raise PermissionError("duplicate_connection")
                 bound.add(candidate)
                 binding=candidate
-            ws.send(json.dumps({"bound":True} if mode=="request" else {"bound":True,"mode":"stream"}))
+            writer.send(json.dumps({"bound":True} if mode=="request" else {"bound":True,"mode":"stream"}))
             budget=100.0
             last=time.monotonic()
             last_valid=last
@@ -79,7 +139,7 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
             def deliver():
                 result=invoke(token,cid,{"action":"stream_drain"})
                 if result["packets"]:
-                    ws.send(json.dumps({"event":"audio","packets":result["packets"]}))
+                    writer.send(json.dumps({"event":"audio","packets":result["packets"]}))
 
             while True:
                 remaining=idle_timeout-(time.monotonic()-last_valid)
@@ -123,7 +183,7 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
                 else:
                     result=invoke(token,cid,payload)
                 last_valid=time.monotonic()
-                ws.send(json.dumps({"status":200,"result":result}))
+                writer.send(json.dumps({"status":200,"result":result}))
                 if mode=="stream":
                     deliver()
         except ConnectionClosed:
@@ -131,6 +191,8 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
         except (ValueError,TypeError,TimeoutError,OSError,InvalidSignature):
             ws.close(1008,"transport_closed")
         finally:
+            if writer is not None:
+                writer.close()
             if binding is not None:
                 with binding_lock:
                     bound.discard(binding)
@@ -152,7 +214,8 @@ def audio_websocket(broker, *, port=0, control=None, idle_timeout=15.0):
                 control.active.discard(ws)
                 control.condition.notify_all()
     return serve(guarded_handle,"127.0.0.1",port,max_size=16384,max_queue=4,
-                 compression=None,open_timeout=3,close_timeout=1)
+                 compression=None,open_timeout=3,close_timeout=1,
+                 origins=[None])
 
 
 class ManagedAudioListener:
