@@ -48,6 +48,30 @@ final class FamilyAudioWireTests: XCTestCase {
         XCTAssertThrowsError(try FamilyAudioCommand.refresh("bad\nheader").wireData())
     }
 
+    func testMediaWindowIsBoundedAndAcknowledgementsAreStrictFIFO() throws {
+        var window = FamilyAudioSendWindow()
+        let now = ContinuousClock().now
+        for index in 0..<32 {
+            XCTAssertTrue(window.reserve(now: now.advanced(by: .milliseconds(index * 20))))
+        }
+        XCTAssertFalse(window.reserve(now: now))
+        XCTAssertEqual(window.count, 32)
+        XCTAssertEqual(window.oldest, now.advanced(by: .seconds(2)))
+        let wrong = FamilyAudioResult(active: true, published: nil, queued: nil,
+                                      refreshed: nil, expiresAt: nil, offer: nil)
+        XCTAssertThrowsError(try window.acknowledge(wrong))
+        XCTAssertEqual(window.count, 32)
+        let ack = FamilyAudioResult(active: nil, published: nil, queued: true,
+                                    refreshed: nil, expiresAt: nil, offer: nil)
+        try window.acknowledge(ack)
+        XCTAssertEqual(window.count, 31)
+        XCTAssertEqual(window.oldest, now.advanced(by: .milliseconds(2020)))
+        XCTAssertTrue(window.reserve(now: now.advanced(by: .seconds(1))))
+        window.clear()
+        XCTAssertNil(window.oldest)
+        XCTAssertThrowsError(try window.acknowledge(ack))
+    }
+
     func testCommandUsesExactBackendFields() throws {
         let bytes = Data(repeating: 4, count: 32)
         let data = try FamilyAudioCommand.push(sequence: 42, ciphertext: bytes).wireData()

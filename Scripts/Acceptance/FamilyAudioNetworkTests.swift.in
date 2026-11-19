@@ -19,9 +19,13 @@ final class FamilyAudioNetworkTests: XCTestCase {
         let oa = try ha.offer(signingKey: ka.signing)
         let ob = try hb.offer(signingKey: kb.signing)
         XCTAssertEqual(oa.ephemeral, "@OFFER_A@")
-        XCTAssertEqual(oa.signature, "@SIGNATURE_A@")
+        // CryptoKit randomizes Ed25519 signatures. Verify the reference signature
+        // against the exact transcript; the Python relay verifies Swift signatures.
+        let refA = try XCTUnwrap(Data(base64Encoded: "@SIGNATURE_A@"))
+        XCTAssertTrue(ka.signing.publicKey.isValidSignature(refA, for: try ca.transcript(actor: a, ephemeral: XCTUnwrap(Data(base64Encoded: oa.ephemeral)))))
         XCTAssertEqual(ob.ephemeral, "@OFFER_B@")
-        XCTAssertEqual(ob.signature, "@SIGNATURE_B@")
+        let refB = try XCTUnwrap(Data(base64Encoded: "@SIGNATURE_B@"))
+        XCTAssertTrue(kb.signing.publicKey.isValidSignature(refB, for: try cb.transcript(actor: b, ephemeral: XCTUnwrap(Data(base64Encoded: ob.ephemeral)))))
         let base = try XCTUnwrap(URL(string: "http://127.0.0.1:18766/"))
         let endpoint = try XCTUnwrap(URL(string: "ws://127.0.0.1:18766/v1/audio"))
         let left = try FamilyAudioWire(configuration: .init(baseURL: base, token: "fixture-a", userID: a[0], deviceID: a[1]),
@@ -61,11 +65,48 @@ final class FamilyAudioNetworkTests: XCTestCase {
             XCTAssertEqual(try rc.open(sequence: rb.sequence, packet: rb.validatedCiphertext()), data)
         }
         _ = try await right.send(.heartbeat)
+        // A burst must not wait for a relay acknowledgement per packet.
+        // The heartbeat acts as an ordered response barrier after the burst.
+        for sequence in UInt64(11)...30 {
+            let data = Data(repeating: UInt8(sequence), count: 640)
+            let submittedA = try await left.sendMedia(sequence: sequence, ciphertext: lc.seal(sequence: sequence, frame: data))
+            let submittedB = try await right.sendMedia(sequence: sequence, ciphertext: rc.seal(sequence: sequence, frame: data))
+            XCTAssertTrue(submittedA)
+            XCTAssertTrue(submittedB)
+        }
+        _ = try await left.send(.heartbeat)
+        _ = try await right.send(.heartbeat)
+        let batchA = try await collect(left, count: 20)
+        let batchB = try await collect(right, count: 20)
+        for (idx, packet) in batchA.enumerated() {
+            XCTAssertEqual(packet.sequence, UInt64(idx + 11))
+            XCTAssertEqual(try lc.open(sequence: packet.sequence, packet: packet.validatedCiphertext()),
+                           Data(repeating: UInt8(idx + 11), count: 640))
+        }
+        for (idx, packet) in batchB.enumerated() {
+            XCTAssertEqual(packet.sequence, UInt64(idx + 11))
+            XCTAssertEqual(try rc.open(sequence: packet.sequence, packet: packet.validatedCiphertext()),
+                           Data(repeating: UInt8(idx + 11), count: 640))
+        }
         do {
             _ = try await left.send(.refresh("fixture-foreign"))
             XCTFail("Foreign credential must be rejected")
         } catch {}
         XCTAssertFalse(left.isConnected)
+    }
+
+    @MainActor
+    private func collect(_ wire: FamilyAudioWire, count: Int) async throws -> [FamilyAudioPacket] {
+        var result: [FamilyAudioPacket] = []
+        for _ in 0..<200 {
+            result.append(contentsOf: wire.takePackets())
+            if result.count >= count {
+                XCTAssertEqual(result.count, count)
+                return result
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        throw FamilyAudioWireError.transportClosed
     }
 
     @MainActor

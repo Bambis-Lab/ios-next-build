@@ -6,6 +6,7 @@ protocol FamilyCallWire: AnyObject {
     var isConnected: Bool { get }
     func connect() async throws
     func send(_ command: FamilyAudioCommand) async throws -> FamilyAudioResult
+    func sendMedia(sequence: UInt64, ciphertext: Data) async throws -> Bool
     func takePackets() -> [FamilyAudioPacket]
     func close()
 }
@@ -18,6 +19,14 @@ protocol FamilyCallAudio: AnyObject {
     func takeCapture() -> Data?
     @discardableResult func play(_ data: Data) throws -> Bool
     func stop()
+}
+
+extension FamilyCallWire {
+    // Deterministic adapter fixtures may implement only the request path.
+    func sendMedia(sequence: UInt64, ciphertext: Data) async throws -> Bool {
+        _ = try await send(.push(sequence: sequence, ciphertext: ciphertext))
+        return true
+    }
 }
 
 extension FamilyAudioWire: FamilyCallWire {}
@@ -37,6 +46,7 @@ final class FamilyAudioCallSession {
     private(set) var state: FamilyAudioSessionState = .idle
     private(set) var muted = false
     private(set) var sentFrames = 0
+    private(set) var droppedFrames = 0
     private(set) var receivedFrames = 0
 
     private let context: FamilyAudioContext
@@ -154,9 +164,9 @@ final class FamilyAudioCallSession {
                     }
                     let ciphertext = try codec.seal(sequence: sequence, frame: frame)
                     sequence += 1
-                    _ = try await wire.send(.push(sequence: sequence - 1, ciphertext: ciphertext))
+                    let submitted = try await wire.sendMedia(sequence: sequence - 1, ciphertext: ciphertext)
                     try requireCurrent(attempt)
-                    sentFrames += 1
+                    if submitted { sentFrames += 1 } else { droppedFrames += 1 }
                 }
                 try await Task.sleep(nanoseconds: 5_000_000)
             }

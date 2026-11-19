@@ -149,8 +149,33 @@ enum FamilyAudioCommand: Sendable {
     }
 }
 
-/// Experimental, single-use transport. Exactly one receiver reads the socket,
-/// and only one command is awaiting its response. Unsolicited audio is separate
+/// Bounded FIFO for outstanding media acknowledgements. The server replies
+/// in request order; a control command can follow outstanding media without
+/// confusing its response with a media acknowledgement.
+struct FamilyAudioSendWindow {
+    private var deadlines: [ContinuousClock.Instant] = []
+    let capacity = 32
+    var count: Int { deadlines.count }
+    var oldest: ContinuousClock.Instant? { deadlines.first }
+
+    mutating func reserve(now: ContinuousClock.Instant) -> Bool {
+        guard count < capacity else { return false }
+        deadlines.append(now.advanced(by: .seconds(2)))
+        return true
+    }
+
+    mutating func acknowledge(_ result: FamilyAudioResult) throws {
+        guard !deadlines.isEmpty, result.queued == true, result.active == nil,
+              result.published == nil, result.refreshed == nil, result.expiresAt == nil,
+              result.offer == nil else { throw FamilyAudioWireError.invalidMessage }
+        deadlines.removeFirst()
+    }
+
+    mutating func clear() { deadlines.removeAll() }
+}
+
+/// Experimental, single-use transport. Exactly one receiver reads the socket.
+/// Control commands await responses; media frames use a bounded FIFO window. Unsolicited audio is separate
 /// from command responses. Closing cancels pending reads and discards queued
 /// ciphertext. The caller owns the crypto codec and must not reset its counters.
 @MainActor
@@ -162,6 +187,10 @@ final class FamilyAudioWire {
     private var deadline: Task<Void, Never>?
     private var waiter: CheckedContinuation<FamilyAudioResult?, Error>?
     private var expected: FamilyAudioCommand?
+    private var mediaWindow = FamilyAudioSendWindow()
+    private var mediaWriting = false
+    private var mediaDeadline: Task<Void, Never>?
+    private var writeDeadline: Task<Void, Never>?
     private var binding = false
     private var started = false
     private var closed = false
@@ -205,11 +234,57 @@ final class FamilyAudioWire {
     }
 
     func send(_ command: FamilyAudioCommand) async throws -> FamilyAudioResult {
-        guard ready, !closed, waiter == nil else { throw FamilyAudioWireError.invalidState }
+        guard ready, !closed, waiter == nil, !mediaWriting else { throw FamilyAudioWireError.invalidState }
         guard let result = try await exchange(data: command.wireData(), command: command) else {
             throw FamilyAudioWireError.invalidMessage
         }
         return result
+    }
+
+    /// Returns false only when the bounded media window is full. A caller
+    /// drops that frame, never retries its nonce, and keeps control commands
+    /// responsive. Completion means socket submission, not remote playout.
+    func sendMedia(sequence: UInt64, ciphertext: Data) async throws -> Bool {
+        try Task.checkCancellation()
+        guard ready, !closed, waiter == nil, !mediaWriting else { throw FamilyAudioWireError.invalidState }
+        let data = try FamilyAudioCommand.push(sequence: sequence, ciphertext: ciphertext).wireData()
+        guard let text = String(data: data, encoding: .utf8) else { throw FamilyAudioWireError.invalidMessage }
+        guard mediaWindow.reserve(now: ContinuousClock().now) else { return false }
+        scheduleMediaDeadline()
+        mediaWriting = true
+        writeDeadline = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            self?.close()
+        }
+        defer {
+            mediaWriting = false
+            writeDeadline?.cancel()
+            writeDeadline = nil
+        }
+        do {
+            try await withTaskCancellationHandler {
+                try await task.send(.string(text))
+            } onCancel: {
+                Task { @MainActor [weak self] in self?.close() }
+            }
+            try Task.checkCancellation()
+            guard isConnected else { throw FamilyAudioWireError.transportClosed }
+            return true
+        } catch {
+            close()
+            throw error
+        }
+    }
+
+    private func scheduleMediaDeadline() {
+        mediaDeadline?.cancel()
+        mediaDeadline = nil
+        guard let limit = mediaWindow.oldest else { return }
+        mediaDeadline = Task { @MainActor [weak self] in
+            do { try await ContinuousClock().sleep(until: limit) } catch { return }
+            guard let self, self.mediaWindow.oldest == limit else { return }
+            self.close()
+        }
     }
 
     func takePackets() -> [FamilyAudioPacket] {
@@ -264,6 +339,11 @@ final class FamilyAudioWire {
                     ready = true
                     try finish(nil)
                 case let .response(result):
+                    if ready, mediaWindow.count > 0 {
+                        try mediaWindow.acknowledge(result)
+                        scheduleMediaDeadline()
+                        continue
+                    }
                     guard ready, let command = expected, command.accepts(result) else {
                         throw FamilyAudioWireError.invalidMessage
                     }
@@ -286,6 +366,11 @@ final class FamilyAudioWire {
         binding = false
         deadline?.cancel()
         deadline = nil
+        mediaDeadline?.cancel()
+        mediaDeadline = nil
+        writeDeadline?.cancel()
+        writeDeadline = nil
+        mediaWindow.clear()
         receiveTask?.cancel()
         receiveTask = nil
         task.cancel(with: .goingAway, reason: nil)
