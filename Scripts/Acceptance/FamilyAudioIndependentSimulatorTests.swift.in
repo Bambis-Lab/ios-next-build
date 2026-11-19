@@ -105,6 +105,22 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
     @MainActor
     func testDistributedB() async throws { try await exercise(roleA:false,distributed:true) }
 
+    // Explicitly selected XCTest cases bind the expected duration outside the
+    // private role file. All six share ONE compiled bundle, but each needs its
+    // own independently provisioned, authorized session. No fixture fallback.
+    @MainActor
+    func testDistributedA30() async throws { try await exercise(roleA:true,distributed:true,stageDuration:30) }
+    @MainActor
+    func testDistributedB30() async throws { try await exercise(roleA:false,distributed:true,stageDuration:30) }
+    @MainActor
+    func testDistributedA120() async throws { try await exercise(roleA:true,distributed:true,stageDuration:120) }
+    @MainActor
+    func testDistributedB120() async throws { try await exercise(roleA:false,distributed:true,stageDuration:120) }
+    @MainActor
+    func testDistributedA300() async throws { try await exercise(roleA:true,distributed:true,stageDuration:300) }
+    @MainActor
+    func testDistributedB300() async throws { try await exercise(roleA:false,distributed:true,stageDuration:300) }
+
     /// Real execution inside the exact simulator; no network or credentials.
     @MainActor
     func testNativeExecutionPrerequisite() throws {
@@ -141,6 +157,20 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         raw["tokens"]=["1","2","3"].map{String(repeating:$0,count:64)}
         raw["peerSigningKey"]=signing.publicKey.rawRepresentation.base64EncodedString()
         XCTAssertThrowsError(try parse())
+        // Keep the networkless prerequisite count unchanged; exercise every
+        // required stage's contract and reject cross-stage/role substitutions.
+        raw["peerSigningKey"]=peerKey.publicKey.rawRepresentation.base64EncodedString()
+        raw["expiresAt"]=now+660
+        raw["grantExpiries"]=[now+120,now+240,now+660]
+        for duration:Int64 in [30,120,300] {
+            raw["duration"]=duration
+            let data=try JSONSerialization.data(withJSONObject:raw)
+            XCTAssertEqual(try DistributedAudioRole.parse(data,role:"A",duration:duration,now:now).duration,duration)
+            for other:Int64 in [30,120,300] where other != duration {
+                XCTAssertThrowsError(try DistributedAudioRole.parse(data,role:"A",duration:other,now:now))
+            }
+            XCTAssertThrowsError(try DistributedAudioRole.parse(data,role:"B",duration:duration,now:now))
+        }
         print("V64_NATIVE_EXECUTION_PREREQUISITE=PASS")
         #else
         XCTFail("Simulator prerequisite requires an iOS simulator")
@@ -187,14 +217,16 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
     }
 
     @MainActor
-    private func exercise(roleA:Bool,distributed:Bool=false) async throws {
+    private func exercise(roleA:Bool,distributed:Bool=false,stageDuration:Int64?=nil) async throws {
         let a=["ha-fixture-a","ios-a"], b=["ha-fixture-b","ios-b"]
         let local=roleA ? a : b
         let peer=roleA ? b : a
         let role=roleA ? "A" : "B"
         let marker:UInt8=roleA ? 31 : 73
         let peerMarker:UInt8=roleA ? 73 : 31
-        let duration:Int64 = @DURATION_SECONDS@
+        let duration:Int64 = stageDuration ?? @DURATION_SECONDS@
+        guard [30,120,300].contains(duration), stageDuration == nil || distributed
+        else {throw FamilyAudioWireError.invalidCredential}
         let roleConfig=distributed ? try DistributedAudioRole.load(role:role,duration:duration) : nil
         let context=try FamilyAudioContext(callID:roleConfig?.callID ?? String(repeating:"a",count:32),caller:a,callee:b,local:local)
         let keys:ChatDeviceKeys
