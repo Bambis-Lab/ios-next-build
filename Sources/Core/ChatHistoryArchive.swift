@@ -66,6 +66,12 @@ final class ChatHistoryArchive {
     }
 
     func load<T: Decodable>(_ type: T.Type) throws -> T? {
+        try loadAuthenticated(type)?.value
+    }
+
+    /// Bind migration verification to the exact authenticated ciphertext read,
+    /// not a separately opened file which may have changed in the meantime.
+    func loadAuthenticated<T: Decodable>(_ type: T.Type) throws -> (value: T, fingerprint: Data)? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
@@ -79,7 +85,7 @@ final class ChatHistoryArchive {
         do {
             let box = try AES.GCM.SealedBox(combined: data.dropFirst(Self.magic.count))
             let plain = try AES.GCM.open(box, using: key, authenticating: aad)
-            return try JSONDecoder().decode(type, from: plain)
+            return (try JSONDecoder().decode(type, from: plain), Data(SHA256.hash(data: data)))
         } catch { throw ChatHistoryError.invalidArchive }
     }
 
