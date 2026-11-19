@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "date": "2026-11-19",
+  "scope": "V6.3 follow-up: terminal native subgates and diagnostics, not G99 certification",
+  "duration_seconds": [
+    30,
+    120,
+    300
+  ],
+  "successful_runs": [
+    {
+      "run": 44451913796,
+      "sha": "4043c224730721da0b4bd68e1f654794a19804b5"
+    },
+    {
+      "run": 44451990508,
+      "sha": "afd930a49842b66ff01cdd6f06d8c3e48a657e94"
+    },
+    {
+      "run": 44452901768,
+      "sha": "5917558ff53bdeb4f921ad622cd4315338c5d292",
+      "xctest": 132,
+      "ui": 3
+    }
+  ],
+  "failures": [
+    {
+      "run": 44452947920,
+      "sha": "5a9a4c0d4165b6ba71f54f7a2e9d25b56e279c8c",
+      "cause": "Call to nonexistent AppModel.clearFamilyOwnerSession; AppModel requests owner approval anew, no cache in that API."
+    },
+    {
+      "run": 44452823424,
+      "sha": "3b68c614b1f323a3413770da8037da0fb51b0e12",
+      "cause": "Download action commit typo; build and upload succeeded; native job did not start."
+    }
+  ],
+  "new_heads": [
+    {
+      "branch": "feature/ios180-v63-ticket-denial-fence",
+      "sha": "e3ce9ad59a8c2648e4b4acf57c29bc32f58d6bcf",
+      "run": 44455651636
+    },
+    {
+      "branch": "feature/ios180-v62-native-staged-call",
+      "sha": "7dc3c2a9ecee7c317b6c25003e78221f836f3e95",
+      "run": 44455670503
+    }
+  ],
+  "archive": {
+    "name": "iosnext-v63-followup-evidence-2026-11-19.zip",
+    "sha256": "1385c4392f0047566bcff190c44715ed094ca1b44b69322b71796bc84e31c412",
+    "bytes": 24961176,
+    "storage": "private user file library",
+    "archives": [
+      {
+        "run": 44452901768,
+        "id": 14496822552,
+        "sha256": "17532ad383266fcd4fae0a6bc0af901b6ea2b92b2853409a4fe5d7a1af0a8254"
+      },
+      {
+        "run": 44451913796,
+        "id": 14496053458,
+        "sha256": "e78b981df451641fa3ff8c22c97b83fbc67753e28cef7475cab004dbf4fdee1e"
+      },
+      {
+        "run": 44451990508,
+        "id": 14495828221,
+        "sha256": "9eec39eeffa8b0192154aaf3aa990ac13d645091f9306eb58ece25c20627547f"
+      },
+      {
+        "run": 44452947920,
+        "id": 14496811243,
+        "sha256": "80f94897790939851c8fa2f70442da9e0c18f9e453e27dbbc14e27da2d5f7f73"
+      },
+      {
+        "run": 44452823424,
+        "id": 14496936038,
+        "sha256": "abdbbdb52e0851165bff6626c6ecceb6957c309b1ff9497bc9b8a6375142b997"
+      },
+      {
+        "run": 44452823424,
+        "id": 14495764865,
+        "sha256": "71e8a6221ed188c6f7b7e534b019cac4cfb97bd6d340165bc33cc9719c9ece1a"
+      }
+    ],
+    "independently_verified": true,
+    "zip_crc_all_pass": true
+  },
+  "limitations": [
+    "No timed native dual audio PASS yet. G03/G04/G99 blocked.",
+    "Passing selected regression suites does not establish full G01/G02.",
+    "Six additional archives include three successful runs and failure/build diagnostics, not six successful gates.",
+    "No release IPA."
+  ]
+}
