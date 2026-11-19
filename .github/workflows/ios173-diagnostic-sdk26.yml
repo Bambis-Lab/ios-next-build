@@ -1,7 +1,5 @@
 name: iOS173 diagnostic compilation (NOT release)
 on:
-  push:
-    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-durable-ack-candidate']
   workflow_dispatch:
 permissions:
   contents: read
