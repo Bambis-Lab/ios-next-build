@@ -5,7 +5,11 @@ struct OwnerTicketInboxView: View {
 
     var body: some View {
         List {
-            if model.supportTickets.isEmpty {
+            if FamilyBootstrapClient.configuredURL() != nil {
+                ContentUnavailableView("Verschlüsselte Familien-Tickets", systemImage: "lock.shield",
+                    description: Text("Öffne die sicheren Tickets im Chat-Bereich. Die alte Ticket-Schnittstelle ist für Familienkonten gesperrt."))
+                .accessibilityIdentifier("legacy-owner-tickets-blocked")
+            } else if model.supportTickets.isEmpty {
                 ContentUnavailableView(
                     "Keine Tickets",
                     systemImage: "ticket",
@@ -49,7 +53,9 @@ struct OwnerTicketInboxView: View {
             }
         }
         .navigationTitle("Owner-Tickets")
-        .refreshable { await model.refresh() }
+        .refreshable {
+            if FamilyBootstrapClient.configuredURL() == nil { await model.refresh() }
+        }
     }
 
     private func statusTitle(_ status: String) -> String {

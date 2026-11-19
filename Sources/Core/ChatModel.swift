@@ -1453,6 +1453,24 @@ extension ChatModel {
         return result
     }
 
+    func secureTicketProjects(_ scope: TicketScreenScope, app: AppModel) async throws -> [String:String] {
+        guard scope.owner else { throw ChatError.authenticationFailed }
+        _ = try await ticketAuthorization(scope, app)
+        try checkTicketScope(scope, app)
+        return try SecureTicketProjectStore(scope: scope).read()
+    }
+
+    func assignSecureTicketProject(_ projectID: String?, ticket: EncryptedTicketDetail,
+                                  scope: TicketScreenScope, app: AppModel) async throws {
+        guard scope.owner else { throw ChatError.authenticationFailed }
+        let authorized = try await secureTicketDetail(ticket.ticketID, scope: scope, app: app)
+        try checkTicketScope(scope, app)
+        guard TicketIdentityBinding.matches(authorized.owner, ticket.owner),
+              TicketIdentityBinding.matches(authorized.requester, ticket.requester)
+        else { throw ChatError.identityChanged }
+        try SecureTicketProjectStore(scope: scope).assign(ticketID: authorized.ticketID, projectID: projectID)
+    }
+
     func secureTicketStatus(_ status: EncryptedTicketStatus, id: String,
                             scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
         guard scope.owner else { throw ChatError.authenticationFailed }

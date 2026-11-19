@@ -31,8 +31,9 @@ final class ChatHistoryArchive {
     /// Separate Keychain namespace and directory for each local protocol.
     convenience init(scopedData scope: Data, namespace: String, folder: String) throws {
         guard !scope.isEmpty, scope.count <= 8192,
-              ["chatHistory.v1", "ticketOutbox.v1"].contains(namespace),
-              ["EncryptedChatHistory", "EncryptedTicketOutbox"].contains(folder)
+              [( "chatHistory.v1", "EncryptedChatHistory"),
+               ( "ticketOutbox.v1", "EncryptedTicketOutbox"),
+               ( "ticketProject.v1", "EncryptedTicketProjects")].contains(where: { $0.0 == namespace && $0.1 == folder })
         else { throw ChatHistoryError.invalidScope }
         let digest = SHA256.hash(data: scope).map { String(format: "%02x", $0) }.joined()
         let directory = try FileManager.default.url(for: .applicationSupportDirectory,

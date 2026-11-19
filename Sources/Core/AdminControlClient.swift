@@ -628,11 +628,17 @@ final class AdminControlModel {
             lastError = nil
             async let status = client.status(configuration: configuration)
             async let audit = client.audit(configuration: configuration)
-            async let tickets = client.tickets(configuration: configuration)
             async let routes = client.projectRoutes(configuration: configuration)
             backendStatus = try await status
             auditEvents = try await audit
-            supportTickets = try await tickets
+            if FamilyBootstrapClient.configuredURL() == nil {
+                let tickets = try await client.tickets(configuration: configuration)
+                if FamilyBootstrapClient.configuredURL() == nil { supportTickets = tickets }
+            } else {
+                supportTickets = []
+                ticketDetails = [:]
+                lastDispatch = nil
+            }
             projectRoutes = try await routes
             await refreshV2()
         } catch {
@@ -641,6 +647,7 @@ final class AdminControlModel {
     }
 
     func loadTicket(_ id: String) async {
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard case .unlocked = state, let configuration else { return }
         do {
             lastError = nil
@@ -652,6 +659,7 @@ final class AdminControlModel {
 
     @discardableResult
     func replyToTicket(_ id: String, message: String) async -> Bool {
+        guard FamilyBootstrapClient.configuredURL() == nil else { return false }
         guard case .unlocked = state, let configuration else { return false }
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, normalized.count <= 4000 else {
@@ -675,6 +683,7 @@ final class AdminControlModel {
 
     @discardableResult
     func approveTicket(_ id: String, projectID: String) async -> Bool {
+        guard FamilyBootstrapClient.configuredURL() == nil else { return false }
         guard case .unlocked = state, let configuration else { return false }
         guard projectRoutes.contains(where: { $0.id == projectID }) else {
             lastError = "Ungültiges Zielprojekt."
@@ -698,6 +707,7 @@ final class AdminControlModel {
     }
 
     func setTicketStatus(_ id: String, status: String) async {
+        guard FamilyBootstrapClient.configuredURL() == nil else { return }
         guard case .unlocked = state, let configuration else { return }
         do {
             lastError = nil

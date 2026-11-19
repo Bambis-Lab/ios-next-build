@@ -47,6 +47,7 @@ private struct SecureTicketScreen: View {
     @State private var busy = false
     @State private var errorText: String?
     @State private var search = ""
+    @State private var projects: [String:String] = [:]
     @State private var work: Task<Void, Never>?
     @State private var generation = UUID()
 
@@ -75,6 +76,7 @@ private struct SecureTicketScreen: View {
                     ForEach(tickets.filter { item in
                         search.isEmpty || item.requester.userID.localizedStandardContains(search)
                             || item.ticketID.localizedStandardContains(search)
+                            || (scope.owner && (projectTitle(item.ticketID)?.localizedStandardContains(search) == true))
                     }) { item in
                         Button {
                             launch {
@@ -87,6 +89,9 @@ private struct SecureTicketScreen: View {
                             VStack(alignment: .leading) {
                                 Text(scope.owner ? item.requester.userID : "Ticket " + String(item.id.prefix(8)))
                                 Text(title(item.status)).font(.caption).foregroundStyle(.secondary)
+                                if scope.owner, let project = projectTitle(item.ticketID) {
+                                    Text(project).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                         }
                         .disabled(busy)
@@ -96,7 +101,7 @@ private struct SecureTicketScreen: View {
                             .disabled(busy).accessibilityIdentifier("secure-ticket-new")
                     }
                 }
-                if scope.owner { TextField("Nach Benutzer oder Ticket-ID suchen", text: $search) }
+                if scope.owner { TextField("Benutzer, Ticket-ID oder Projekt suchen", text: $search) }
                 Button("Aktualisieren", systemImage: "arrow.clockwise") { load() }.disabled(busy)
             }
         }
@@ -108,6 +113,7 @@ private struct SecureTicketScreen: View {
             work?.cancel()
             clearEditor()
             tickets = []
+            projects = [:]
         }
     }
 
@@ -134,6 +140,27 @@ private struct SecureTicketScreen: View {
                         }.disabled(busy || pending != nil)
                     }
                 }
+            }
+        }
+        if scope.owner, verified, let detail {
+            Section("Lokale Projektzuordnung") {
+                Picker("Projekt", selection: Binding(
+                    get: { projects[detail.ticketID] ?? "" },
+                    set: { selection in
+                        launch {
+                            try await chat.assignSecureTicketProject(selection.isEmpty ? nil : selection,
+                                ticket: detail, scope: scope, app: app)
+                            try requireActive()
+                            projects[detail.ticketID] = selection.isEmpty ? nil : selection
+                        }
+                    })) {
+                    Text("Nicht zugeordnet").tag("")
+                    ForEach(ProjectRegistry.projects) { project in Text(project.title).tag(project.id) }
+                }
+                .disabled(busy || pending != nil)
+                .accessibilityIdentifier("secure-ticket-local-project")
+                Text("Nur verschlüsselt auf diesem Gerät gespeichert. Keine Weiterleitung und kein Arbeitsauftrag.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         Section("Schlüsselprüfung") {
@@ -176,6 +203,18 @@ private struct SecureTicketScreen: View {
         Button("Zur Übersicht") { clearEditor(); load() }.disabled(busy || pending != nil)
     }
 
+    private func projectTitle(_ ticketID: String) -> String? {
+        guard let id = projects[ticketID] else { return nil }
+        return ProjectRegistry.projects.first(where: { $0.id == id })?.title
+    }
+
+    private func refreshProjects() async throws {
+        guard scope.owner else { return }
+        let local = try await chat.secureTicketProjects(scope, app: app)
+        try requireActive()
+        projects = local
+    }
+
     private func title(_ status: EncryptedTicketStatus) -> String {
         switch status { case .open: "Offen"; case .inProgress: "In Arbeit"; case .resolved: "Erledigt" }
     }
@@ -205,6 +244,7 @@ private struct SecureTicketScreen: View {
         launch {
             let saved = try await chat.restoreSecureTicketPending(scope, app: app)
             try requireActive()
+            try await refreshProjects()
             if let saved {
                 pending = saved
                 restoredPending = true
@@ -228,6 +268,7 @@ private struct SecureTicketScreen: View {
             let items = try await chat.secureTicketList(scope, app: app)
             try requireActive()
             tickets = items
+            try await refreshProjects()
         }
     }
 
