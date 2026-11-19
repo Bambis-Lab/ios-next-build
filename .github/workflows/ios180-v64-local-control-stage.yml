@@ -1,0 +1,34 @@
+name: V6.4 local continuous WSS stage
+on:
+  workflow_call:
+    inputs:
+      duration:
+        required: true
+        type: number
+permissions:
+  contents: read
+jobs:
+  local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    env:
+      IOSNEXT_LOCAL_WSS_DURATION: ${{ inputs.duration }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install pinned fixture dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/relay"
+          "$RUNNER_TEMP/relay/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+      - name: Timed synthetic WSS control
+        run: |
+          set -euo pipefail
+          mkdir -p build/v64
+          "$RUNNER_TEMP/relay/bin/python" Scripts/Acceptance/test_distributed_wss_timed.py 2>&1 | tee build/v64/wss-timed-control.log
+      - name: Preserve original local control evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-local-WSS-control-${{ inputs.duration }}s
+          path: build/v64/
+          retention-days: 14
+          if-no-files-found: error

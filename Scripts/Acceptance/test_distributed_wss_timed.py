@@ -1,4 +1,4 @@
-"""Actual continuous 30s control using two Python clients, not native G03.
+"""Actual continuous 30/120/300s control using two Python clients, not native G03.
 
 No external network or real family data. Exact media frames, peer
 authentication, TLS, refresh and monotonic elapsed time are checked.
@@ -22,7 +22,9 @@ from test_distributed_wss_gateway import certificates
 from audio_fixture.audio_websocket import ManagedAudioListener
 from audio_fixture.audio_crypto_reference import offer, establish, public
 
-DURATION=30
+DURATION=int(os.environ.get("IOSNEXT_LOCAL_WSS_DURATION","30"))
+if DURATION not in (30,120,300):
+    raise SystemExit("unsupported control duration")
 TARGET=DURATION*50
 
 def b64(value):
@@ -36,7 +38,7 @@ def frame(sequence,marker):
 
 class TimedWSSControl(unittest.IsolatedAsyncioTestCase):
     async def test_continuous_bidirectional_encrypted_wss(self):
-        async with asyncio.timeout(100):
+        async with asyncio.timeout(DURATION+70):
             await self.exercise()
 
     async def exercise(self):
@@ -45,7 +47,7 @@ class TimedWSSControl(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root,patch.dict(os.environ,{"IOSNEXT_EXPERIMENTAL_AUDIO":"true"}):
             ca,cert,key=certificates(root)
             server=ManagedAudioListener(contract.broker(),0)
-            gateway=LoopbackWSSGateway(server.port,cert,key,lifetime=100)
+            gateway=LoopbackWSSGateway(server.port,cert,key,lifetime=DURATION+70)
             try:
                 port=await gateway.start()
                 trust=ssl.create_default_context(cafile=str(ca))
@@ -105,8 +107,10 @@ class TimedWSSControl(unittest.IsolatedAsyncioTestCase):
                         start=clock.time()
                         renewals=0
                         sent=0
+                        max_lateness=0.0
                         for sequence in range(1,TARGET+1):
-                            await asyncio.sleep(max(0,start+sequence/50-clock.time()))
+                            scheduled=start+sequence/50
+                            await asyncio.sleep(max(0,scheduled-clock.time()))
                             if sequence in (TARGET//3,2*TARGET//3):
                                 renewals+=1
                                 result=await command({"action":"refresh","token":roles[role]["tokens"][renewals]})
@@ -114,6 +118,7 @@ class TimedWSSControl(unittest.IsolatedAsyncioTestCase):
                                 self.assertEqual(result["expires_at"],roles[role]["grantExpiries"][renewals])
                             await push(sequence)
                             sent+=1
+                            max_lateness=max(max_lateness,clock.time()-scheduled)
                         elapsed=clock.time()-start
                         self.assertGreaterEqual(elapsed,DURATION)
                         await command({"action":"heartbeat"})
@@ -122,11 +127,13 @@ class TimedWSSControl(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(received,TARGET+1)
                         self.assertEqual(sent,TARGET)
                         self.assertEqual(renewals,2)
+                        self.assertLessEqual(max_lateness,2.0,"timed control fell more than 2s behind schedule")
                         await barrier.wait()
                         await command({"action":"heartbeat"})
                         self.assertEqual(received,TARGET+1)
                         return {"role":role,"sent":sent,"received":received-1,
-                                "elapsed_seconds":round(elapsed,4),"renewals":renewals}
+                                "elapsed_seconds":round(elapsed,4),"renewals":renewals,
+                                "max_send_lateness_ms":round(max_lateness*1000,3)}
                     async with asyncio.TaskGroup() as group:
                         left=group.create_task(client("A"))
                         right=group.create_task(client("B"))

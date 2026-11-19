@@ -1,0 +1,16 @@
+name: V6.4 staged local WSS controls (not native acceptance)
+on:
+  push:
+    branches: ['feature/ios180-v64-wss-staged-control']
+permissions:
+  contents: read
+jobs:
+  control120:
+    uses: ./.github/workflows/ios180-v64-local-control-stage.yml
+    with:
+      duration: 120
+  control300:
+    needs: control120
+    uses: ./.github/workflows/ios180-v64-local-control-stage.yml
+    with:
+      duration: 300
