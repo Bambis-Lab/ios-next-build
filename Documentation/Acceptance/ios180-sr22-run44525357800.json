@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "phase": "SR22",
+  "run": 44525357800,
+  "head": "43323ac66cd82435bffc7faff19857c6fb330502",
+  "test_merge": "53a674062963f6bfb9350e287cd36bd75f627fce",
+  "unit": 148,
+  "ui": 4,
+  "roleHandoffAccepted": 1,
+  "roleA": {
+    "failure": "resolve_app_container/runtime_or_command_failure",
+    "observedTimeoutSeconds": 30
+  },
+  "roleB": {
+    "receipt_verified": true,
+    "sandbox_lifecycle": "VERIFIED_OFFLINE_ROTATION",
+    "native_container_observed": "CURRENT",
+    "transient_file_removed": true,
+    "network_used": false,
+    "media_tested": false
+  },
+  "distinctBootSessions": 4,
+  "productSha256": "388d076ee28c6360d26fd474304bdb624e31f42ebcd57c8c8f427dd4951d13a4",
+  "archive": {
+    "sha256": "062146198ae3aa2846c1b49d0d4a46d8e356cb2ba8978213e19f7442102fb4c0",
+    "bytes": 20041895,
+    "verifiedOriginalArchives": 8,
+    "scope": "local private conversation export, not public repo upload"
+  },
+  "repair": {
+    "head": "ef61727bd8cd8117bb4ba051947fcefceda1cd54",
+    "localMockTests": 7,
+    "native": "pending"
+  },
+  "G03": "BLOCKED",
+  "release": false
+}
