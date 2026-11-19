@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "scope": "R80-06 clean-install regression preparation, no native acceptance",
+  "integration": {
+    "previous": "5ea57f20a970c2fadddcd8baf7639c560ffadb67",
+    "current": "80ec22998b6f14327ae9e2c488cfbd115b93013d",
+    "commits": [
+      "ffbaab36a3d02fd930c7a43bef1d054f90b56516",
+      "c424713c7ffae8c70d01577ee5cad98bed27fc9d",
+      "80ec22998b6f14327ae9e2c488cfbd115b93013d"
+    ],
+    "method": "non-forced fast-forward",
+    "files_changed": 2
+  },
+  "clean_install": {
+    "target": "iPhone 18 Pro Max / iOS 27.0",
+    "user_installation": "fresh install via SideStore",
+    "version_config": "1.7.3 build 31; 1.8.0 build number not verified",
+    "test": "IOSNextUITests/CleanInstallUITests/testFreshLaunchAndInvalidHAAddressStayUnauthenticated",
+    "workflow": ".github/workflows/ios173-cloud-macos.yml",
+    "workflow_blob": "27dfdec81dcf74852581eccbba3aa9e3daec5cd0",
+    "fresh_simulator": "newly created on GitHub-hosted runner; not yet executed",
+    "scope": "launch, invalid HA address, no preconnect test-only owner/runner controls, restart; not live enrollment or physical SideStore acceptance",
+    "expected_artifacts": [
+      "clean-install-destination.json",
+      "CleanInstall.log",
+      "CleanInstall.xcresult"
+    ],
+    "unit_suite_count": 31,
+    "ui_case_count": 4,
+    "static_checks_passed": 11,
+    "native_tests_confirmed": 0
+  },
+  "blockers": [
+    "PR-only run query returned empty",
+    "public Actions and API fetch inaccessible; local DNS lookup failed",
+    "Factory host execution disabled",
+    "no authorized shared relay route",
+    "original V6.5 failure run unknown",
+    "full original V6.4 requirements incomplete",
+    "no verified build number or signed IPA"
+  ],
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "production_changes": false,
+  "release": false
+}
