@@ -16,7 +16,7 @@ final class ChatV2MigrationCoordinator {
         let sourceFingerprint: Data?
     }
     enum Failure: Error, Equatable {
-        case busy, notPrepared, alreadyActivated, sourceChanged, missingCandidate, invalidMarker
+        case busy, notPrepared, alreadyActivated, sourceChanged, missingCandidate, invalidMarker, authorizationChanged
     }
 
     private let file: URL
@@ -145,7 +145,8 @@ final class ChatV2MigrationCoordinator {
     /// Explicit one-way cutover, with source revalidation immediately before
     /// atomic add-only marker publication. Must be called while all legacy
     /// writers are quiesced by the app. No background auto-cutover.
-    func activate(prepared: Source, archive: ChatHistoryArchive) async throws -> ChatRecordReceiveCheckpoint {
+    func activate(prepared: Source, archive: ChatHistoryArchive,
+                  authorize: @MainActor () -> Bool) async throws -> ChatRecordReceiveCheckpoint {
         guard !busy else { throw Failure.busy }
         busy=true; defer { busy=false }
         guard try marker() == nil else { throw Failure.alreadyActivated }
@@ -156,6 +157,9 @@ final class ChatV2MigrationCoordinator {
         try Task.checkCancellation()
         guard try Self.capture(archive) == prepared else { throw Failure.sourceChanged }
         let data = try JSONEncoder().encode(Marker(schema:2,scopeDigest:scopeDigest,sourceFingerprint:prepared.ciphertextFingerprint))
+        // The caller rechecks live scope immediately before point of no return.
+        // No actor suspension between the check and the add-only marker.
+        guard authorize() else { throw Failure.authorizationChanged }
         guard try insertMarker(data) else { throw Failure.alreadyActivated }
         return ChatRecordReceiveCheckpoint(store:db)
     }

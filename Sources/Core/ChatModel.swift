@@ -71,6 +71,9 @@ final class ChatModel {
     private typealias HistorySnapshot = ChatPersistentSnapshot
     private var historyArchive: ChatHistoryArchive?
     private var historyRecordCheckpoint: ChatRecordReceiveCheckpoint?
+    private(set) var historyMigrationInProgress=false
+    private(set) var historyMigrationNotice:String?
+    var historyUsesV2:Bool { historyRecordCheckpoint != nil }
     @ObservationIgnored private let historyMutationGate = ChatHistoryMutationGate()
     private var partialMessages: [String: PartialMessage] = [:]
 
@@ -127,6 +130,93 @@ final class ChatModel {
             seenEnvelopeIDs = [:]
         }
         historyArchive = archive
+    }
+
+    // Only this interactive path can publish a new marker. It is never called
+    // automatically at login or by a background task.
+    func canActivateHistoryV2(_ app:AppModel) -> Bool {
+        guard isFamilyCredentialActive, state == .online, !historyMigrationInProgress,
+              !isSending, !callBusy, !audioPreparing, audioSession==nil,
+              startupTask==nil, historyArchive != nil, historyRecordCheckpoint==nil,
+              let configuration,let family=app.familyChatContext(),
+              family.haUserID==configuration.userID,family.deviceID==configuration.deviceID,
+              family.endpoint==configuration.baseURL,family.grant.accessToken==configuration.token
+        else {return false}
+        return !(callListing?.calls.contains(where:{$0.state == .accepted || $0.state == .ringing}) ?? false)
+    }
+
+    func activateHistoryV2(using app:AppModel) async {
+        guard canActivateHistoryV2(app),let configuration,let keys else {return}
+        historyMigrationNotice=nil
+        historyMigrationInProgress=true
+        defer {historyMigrationInProgress=false}
+        let originalGeneration=configurationGeneration
+        var migrationGeneration=originalGeneration
+        func matches() -> Bool {
+            guard !Task.isCancelled,configurationGeneration==migrationGeneration,
+                  self.configuration==configuration,isFamilyCredentialActive,
+                  let family=app.familyChatContext(),family.haUserID==configuration.userID,
+                  family.deviceID==configuration.deviceID,family.endpoint==configuration.baseURL,
+                  family.grant.accessToken==configuration.token,
+                  self.keys?.safetyNumber==keys.safetyNumber
+            else {return false}
+            return true
+        }
+        // Device authentication is local; it does not mint an owner privilege.
+        // Recheck after the interactive prompt because the account may change.
+        var paused=false
+        do {
+            let auth=LAContext()
+            var policyError:NSError?
+            guard auth.canEvaluatePolicy(.deviceOwnerAuthentication,error:&policyError),
+                  try await auth.evaluatePolicy(.deviceOwnerAuthentication,
+                    localizedReason:"Verschlüsselten Chatverlauf einmalig auf V2 umstellen"),
+                  matches(),state == .online,!isSending,!callBusy,!audioPreparing,
+                  audioSession==nil,startupTask==nil,
+                  !(callListing?.calls.contains(where:{$0.state == .accepted || $0.state == .ringing}) ?? false)
+            else {throw ChatError.authenticationFailed}
+            // Stop new sends/calls, cancel receive and renew, then wait for
+            // any already-admitted durable transaction to finish.
+            state = .connecting
+            paused=true
+            receiveTask?.cancel()
+            receiveTask=nil
+            familyRenewalTask?.cancel()
+            familyRenewalTask=nil
+            try await historyMutationGate.withExclusive(isCurrent:{matches()}) {
+                guard matches(),let archive=historyArchive,historyRecordCheckpoint==nil else {
+                    throw ChatError.authenticationFailed
+                }
+                configurationGeneration &+= 1
+                migrationGeneration=configurationGeneration
+                let coordinator=try ChatV2MigrationCoordinator(configuration:configuration,keyFingerprint:keys.safetyNumber)
+                let source=try await coordinator.prepare(archive)
+                guard matches() else {throw ChatError.authenticationFailed}
+                // Read-only broker identity/delivery check after import.
+                let session=try await relay.session(configuration:configuration)
+                guard session.userID==configuration.userID else {throw ChatError.authenticationFailed}
+                try await relay.requireAcknowledgedDelivery(configuration:configuration)
+                let active=try await coordinator.activate(prepared:source,archive:archive,authorize:{matches()})
+                // Marker publication is irreversible even if the account
+                // changes while the async call returns. Never reattach V1.
+                guard matches() else {throw CancellationError()}
+                historyArchive=nil
+                historyRecordCheckpoint=active
+            }
+            if matches() {historyMigrationNotice="V2 aktiviert. Das ursprüngliche Archiv bleibt unverändert erhalten."}
+        } catch {
+            if configurationGeneration==migrationGeneration,self.configuration==configuration {
+                historyMigrationNotice="Umstellung nicht abgeschlossen. Der Speicherzustand wird beim erneuten Verbinden sicher geprüft."
+            }
+        }
+        guard paused,configurationGeneration==migrationGeneration,self.configuration==configuration,
+              !Task.isCancelled else {return}
+        // Reopen exclusively through marker-aware startup, including after a
+        // failure near marker publication. Never resume an old writer directly.
+        historyArchive=nil
+        historyRecordCheckpoint=nil
+        historyMigrationInProgress=false
+        await start(using:app)
     }
 
     private func historySnapshot() -> HistorySnapshot {
@@ -262,7 +352,7 @@ final class ChatModel {
             }
         }
     }
-    var canSignalCalls: Bool { isFamilyCredentialActive && state == .online }
+    var canSignalCalls: Bool { isFamilyCredentialActive && state == .online && !historyMigrationInProgress }
     var canShowCallPanel: Bool { canSignalCalls || (isFamilyCredentialActive && audioSession != nil) }
 
     private func resetCalls() {
@@ -367,6 +457,7 @@ final class ChatModel {
     }
 
     func start(using appModel: AppModel) async {
+        guard !historyMigrationInProgress else {return}
         if let existingStartupTask = startupTask {
             let observedToken = startupToken
             await existingStartupTask.value
@@ -551,6 +642,7 @@ final class ChatModel {
     }
 
     func start() async {
+        guard !historyMigrationInProgress else {return}
         // Pre-HA standalone chat cannot reuse a stale legacy credential when
         // authenticated family enrollment is mandatory.
         guard FamilyBootstrapClient.configuredURL() == nil || isFamilyCredentialActive else {
@@ -870,7 +962,7 @@ final class ChatModel {
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys, state == .online, !isSending,
+        guard let configuration, let keys, state == .online, !isSending, !historyMigrationInProgress,
               showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false

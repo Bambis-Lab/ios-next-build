@@ -47,12 +47,20 @@ final class ChatV2MigrationCoordinatorTests: XCTestCase {
         let changed=ChatPersistentSnapshot(version:1,messages:[],partials:[:],seen:["new":date])
         try archive.save(changed)
         do {
-            _ = try await first.activate(prepared:prepared,archive:archive)
+            _ = try await first.activate(prepared:prepared,archive:archive,authorize:{true})
             XCTFail("changed legacy archive was promoted")
         } catch let failure as ChatV2MigrationCoordinator.Failure { XCTAssertEqual(failure,.sourceChanged) }
         XCTAssertNil(marker)
         try original.write(to:v1,options:.atomic)
-        let active=try await first.activate(prepared:prepared,archive:archive)
+        do {
+            _ = try await first.activate(prepared:prepared,archive:archive,authorize:{false})
+            XCTFail("authorization change permitted marker publication")
+        } catch let failure as ChatV2MigrationCoordinator.Failure {
+            XCTAssertEqual(failure,.authorizationChanged)
+        }
+        XCTAssertNil(marker)
+        XCTAssertEqual(try Data(contentsOf:v1),original)
+        let active=try await first.activate(prepared:prepared,archive:archive,authorize:{true})
         XCTAssertNotNil(marker)
         let wrongBinding=try ChatV2MigrationCoordinator(file:v2,scope:Data("rotated-key-scope".utf8),key:key,
             readMarker:{marker},insertMarker:{_ in false})
