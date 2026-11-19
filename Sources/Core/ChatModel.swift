@@ -68,6 +68,9 @@ final class ChatModel {
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
+    private var ticketReadLease: TicketOfflineLease?
+    private var ticketCacheReady = false
+    private var ticketReadOffline = false
     private typealias HistorySnapshot = ChatPersistentSnapshot
     private var historyArchive: ChatHistoryArchive?
     private var partialMessages: [String: PartialMessage] = [:]
@@ -482,6 +485,7 @@ final class ChatModel {
             stop()
         }
         configurationGeneration &+= 1
+        resetTicketReadAccess()
         resetCalls()
         historyArchive = nil
         if replacesIdentity {
@@ -616,6 +620,7 @@ final class ChatModel {
     func stop() {
         resetCalls()
         configurationGeneration &+= 1
+        resetTicketReadAccess()
         historyArchive = nil
         startupEpoch &+= 1
         startupTask?.cancel()
@@ -633,6 +638,7 @@ final class ChatModel {
     func forgetConfiguration(preservingStartup: Bool = false) {
         historyArchive = nil
         configurationGeneration &+= 1
+        resetTicketReadAccess()
         resetCalls()
         draft = ""
         showingFamilyGroup = false
@@ -773,6 +779,7 @@ final class ChatModel {
                     try KeychainStore.save(family.grant.accessToken, account: self.tokenAccount)
                     self.receiveTask?.cancel()
                     self.configurationGeneration &+= 1
+                    self.resetTicketReadAccess()
                     self.configuration = ChatConfiguration(baseURL: current.baseURL,
                         token: family.grant.accessToken, userID: current.userID, deviceID: current.deviceID)
                     self.receiveTask = Task { [weak self] in await self?.receiveLoop() }
@@ -1301,29 +1308,65 @@ extension ChatModel {
     }
 
     private func ticketAuthorization(_ scope: TicketScreenScope, _ app: AppModel) async throws -> EncryptedTicketAuthorization {
+        let (auth,_)=try await ticketAuthorizationWithExpiry(scope,app)
+        return auth
+    }
+
+    private func ticketAuthorizationWithExpiry(_ scope: TicketScreenScope, _ app: AppModel) async throws -> (EncryptedTicketAuthorization,Date) {
         try checkTicketScope(scope, app)
-        guard let configuration else { throw ChatError.authenticationFailed }
+        let generation=configurationGeneration
+        guard let configuration,let family=app.familyChatContext(),
+              family.grant.accessToken==configuration.token else { throw ChatError.authenticationFailed }
         if scope.owner {
             let approved = try await app.requestApprovedFamilyOwnerSession()
             try checkTicketScope(scope, app)
-            guard approved.isValid(haUserID: scope.user, deviceID: scope.device)
+            guard generation==configurationGeneration, approved.isValid(haUserID: scope.user, deviceID: scope.device)
             else { throw ChatError.authenticationFailed }
-            return .owner(AdminControlConfiguration(baseURL: scope.endpoint,
+            return (.owner(AdminControlConfiguration(baseURL: scope.endpoint,
                 ownerToken: approved.accessToken, ownerDeviceSession: approved.deviceSession),
-                userID: scope.user, deviceID: scope.device)
+                userID: scope.user, deviceID: scope.device),
+                Date(timeIntervalSince1970:TimeInterval(min(approved.expiresAt,family.grant.expiresAt))))
         }
-        return .member(configuration)
+        return (.member(configuration),Date(timeIntervalSince1970:TimeInterval(family.grant.expiresAt)))
     }
 
-    func secureTicketList(_ scope: TicketScreenScope, app: AppModel) async throws -> [EncryptedTicketSummary] {
-        let auth = try await ticketAuthorization(scope, app)
+    private func resetTicketReadAccess() {
+        ticketReadLease=nil
+        ticketCacheReady=false
+        ticketReadOffline=false
+    }
+
+    func invalidateSecureTicketRead(_ scope:TicketScreenScope) {
+        if ticketReadLease?.scope==scope { resetTicketReadAccess() }
+    }
+
+    func secureTicketCanRead(_ scope:TicketScreenScope,app:AppModel) -> Bool {
+        guard secureTicketScope(app)==scope,let lease=ticketReadLease else {return false}
+        return (try? lease.require(scope,generation:configurationGeneration)) != nil
+    }
+
+    func secureTicketIsOffline(_ scope:TicketScreenScope,app:AppModel) -> Bool {
+        secureTicketCanRead(scope,app:app) && ticketReadOffline
+    }
+
+    private func ticketLocalIdentity(_ scope:TicketScreenScope,app:AppModel) throws -> ChatIdentity {
+        try checkTicketScope(scope,app)
+        guard let keys else {throw ChatError.authenticationFailed}
+        return keys.publicIdentity(userID:scope.user,deviceID:scope.device)
+    }
+
+    private func fetchSecureTicketList(_ scope:TicketScreenScope,app:AppModel,
+                                       auth:EncryptedTicketAuthorization,generation:UInt64) async throws -> [EncryptedTicketSummary] {
         let client = EncryptedTicketClient()
         var result: [EncryptedTicketSummary] = []
         var cursor: String?
         for _ in 0..<21 {
             let page = try await client.list(using: auth, after: cursor)
             try checkTicketScope(scope, app)
-            guard page.tickets.allSatisfy({ cursor == nil || $0.ticketID > cursor! }),
+            guard generation==configurationGeneration else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            guard page.tickets.allSatisfy({ (cursor == nil || $0.ticketID > cursor!) &&
+                TicketIdentityBinding.matches(local,scope.owner ? $0.owner : $0.requester) }),
                   Set(result.map(\.id)).isDisjoint(with: Set(page.tickets.map(\.id)))
             else { throw ChatError.invalidResponse }
             result.append(contentsOf: page.tickets)
@@ -1333,6 +1376,78 @@ extension ChatModel {
             cursor = next
         }
         throw ChatError.invalidResponse
+    }
+
+    func secureTicketList(_ scope:TicketScreenScope,app:AppModel) async throws -> [EncryptedTicketSummary] {
+        let generation=configurationGeneration
+        do {
+            let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
+            let result=try await fetchSecureTicketList(scope,app:app,auth:auth,generation:generation)
+            guard generation==configurationGeneration else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
+            ticketCacheReady=false
+            do {
+                try SecureTicketCache(scope:scope,local:local).replaceList(result,lease:lease)
+                ticketCacheReady=true
+            } catch {}
+            ticketReadLease=lease
+            ticketReadOffline=false
+            return result
+        } catch {
+            guard generation==configurationGeneration,!Task.isCancelled else {throw CancellationError()}
+            guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
+                  secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+            do {
+                let local=try ticketLocalIdentity(scope,app:app)
+                let result=try SecureTicketCache(scope:scope,local:local).list(lease:lease)
+                ticketReadOffline=true
+                return result
+            } catch {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+        }
+    }
+
+    func readSecureTicketDetail(_ id:String,scope:TicketScreenScope,app:AppModel) async throws -> EncryptedTicketDetail {
+        let generation=configurationGeneration
+        do {
+            let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
+            let result=try await EncryptedTicketClient().detail(id,using:auth)
+            guard generation==configurationGeneration else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            guard TicketIdentityBinding.matches(local,scope.owner ? result.owner : result.requester)
+            else {throw ChatError.identityChanged}
+            let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
+            if ticketCacheReady {
+                do {try SecureTicketCache(scope:scope,local:local).putDetail(result,lease:lease)}
+                catch {ticketCacheReady=false}
+            }
+            ticketReadLease=lease
+            ticketReadOffline=false
+            return result
+        } catch {
+            guard generation==configurationGeneration,!Task.isCancelled else {throw CancellationError()}
+            guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
+                  secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+            do {
+                let local=try ticketLocalIdentity(scope,app:app)
+                guard let result=try SecureTicketCache(scope:scope,local:local).detail(id,lease:lease)
+                else {throw ChatError.invalidResponse}
+                ticketReadOffline=true
+                return result
+            } catch {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+        }
     }
 
     func secureTicketOwnerDevices(_ scope: TicketScreenScope, app: AppModel) async throws -> [ChatIdentity] {
@@ -1367,7 +1482,7 @@ extension ChatModel {
     func openSecureTicket(_ detail: EncryptedTicketDetail, number: String,
                           scope: TicketScreenScope, app: AppModel) throws -> [TicketReadableMessage] {
         try checkTicketScope(scope, app)
-        guard let keys else { throw ChatError.authenticationFailed }
+        guard secureTicketCanRead(scope,app:app),let keys else { throw ChatError.authenticationFailed }
         let local = TicketIdentityBinding.canonical(keys.publicIdentity(userID: scope.user, deviceID: scope.device))
         let requester = TicketIdentityBinding.canonical(detail.requester)
         let owner = TicketIdentityBinding.canonical(detail.owner)
@@ -1425,7 +1540,10 @@ extension ChatModel {
     }
 
     func submitSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
-        guard pending.scope == scope, let configuration else { throw ChatError.authenticationFailed }
+        guard pending.scope == scope, let configuration,
+              secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
+        // An ambiguous write may have changed remote history.
+        ticketCacheReady=false
         try checkTicketScope(scope, app)
         let current = try await relay.identities(for: pending.peer.userID, configuration: configuration)
         try checkTicketScope(scope, app)
@@ -1473,7 +1591,8 @@ extension ChatModel {
 
     func secureTicketStatus(_ status: EncryptedTicketStatus, id: String,
                             scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
-        guard scope.owner else { throw ChatError.authenticationFailed }
+        guard scope.owner,secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
+        ticketCacheReady=false
         let auth = try await ticketAuthorization(scope, app)
         let result = try await EncryptedTicketClient().status(status, ticketID: id, using: auth)
         try checkTicketScope(scope, app)

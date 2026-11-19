@@ -1,7 +1,7 @@
 name: iOS173 Cloud macOS target acceptance
 on:
   push:
-    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-ticket-cache']
+    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-ticket-cache', 'feature/ios173-v3-ticket-read-integration']
   workflow_dispatch:
 permissions:
   contents: read

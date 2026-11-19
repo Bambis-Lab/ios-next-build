@@ -5,21 +5,33 @@ import Foundation
 /// A device revoked while truly offline cannot be detected immediately.
 struct TicketOfflineLease: Sendable {
     let scope: TicketScreenScope
+    let generation: UInt64
     private let deadline: ContinuousClock.Instant
     private let wallDeadline: Date
 
-    init(scope: TicketScreenScope, verifiedGrantExpiry: Date, now: Date = .now) throws {
+    init(scope: TicketScreenScope, verifiedGrantExpiry: Date, generation: UInt64 = 0, now: Date = .now) throws {
         let seconds = min(scope.owner ? 60.0 : 120.0,verifiedGrantExpiry.timeIntervalSince(now)-15)
         guard seconds > 0, seconds.isFinite else { throw ChatError.authenticationFailed }
         self.scope=scope
+        self.generation=generation
         wallDeadline=now.addingTimeInterval(seconds)
         deadline=ContinuousClock().now.advanced(by:.milliseconds(Int64(seconds*1000)))
     }
 
-    func require(_ expected: TicketScreenScope, now: Date = .now) throws {
-        guard expected==scope, now < wallDeadline, ContinuousClock().now < deadline else {
+    func require(_ expected: TicketScreenScope, generation expectedGeneration: UInt64? = nil, now: Date = .now) throws {
+        guard expected==scope, expectedGeneration == nil || expectedGeneration == generation,
+              now < wallDeadline, ContinuousClock().now < deadline else {
             throw ChatError.authenticationFailed
         }
+    }
+}
+
+/// Authorization failures, TLS errors and cancellation never permit fallback.
+enum TicketOfflineFallbackPolicy {
+    static func allows(_ error: Error) -> Bool {
+        guard let network = error as? URLError else { return false }
+        return [.notConnectedToInternet, .networkConnectionLost, .timedOut,
+                .cannotConnectToHost, .dnsLookupFailed].contains(network.code)
     }
 }
 

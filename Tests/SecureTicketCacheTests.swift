@@ -3,6 +3,19 @@ import XCTest
 @testable import IOSNext
 
 final class SecureTicketCacheTests: XCTestCase {
+    func testOfflineFallbackExcludesTLSAuthorizationAndCancellation() throws {
+        XCTAssertTrue(TicketOfflineFallbackPolicy.allows(URLError(.notConnectedToInternet)))
+        XCTAssertTrue(TicketOfflineFallbackPolicy.allows(URLError(.networkConnectionLost)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(URLError(.serverCertificateUntrusted)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(URLError(.secureConnectionFailed)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(URLError(.cancelled)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(ChatError.rejected(401)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(ChatError.rejected(403)))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(ChatError.invalidResponse))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(FamilyBootstrapError.unauthorized))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.allows(CancellationError()))
+    }
+
     @MainActor
     func testCiphertextCacheScopeExpiryPruningAndInvalidation() throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -31,6 +44,8 @@ final class SecureTicketCacheTests: XCTestCase {
         XCTAssertEqual(try open().detail(id,lease:lease)?.messages,[message])
         XCTAssertNil(try Data(contentsOf:file).range(of:Data("synthetic confidential message".utf8)))
         XCTAssertThrowsError(try lease.require(scope,now:Date().addingTimeInterval(121)))
+        XCTAssertThrowsError(try lease.require(scope,generation:1))
+        XCTAssertNoThrow(try lease.require(scope,generation:0))
         let foreign=TicketScreenScope(endpoint:scope.endpoint,user:"foreign",device:scope.device,
             owner:false,keyFingerprint:scope.keyFingerprint)
         let wrongLease=try TicketOfflineLease(scope:foreign,verifiedGrantExpiry:Date().addingTimeInterval(300))
