@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
+import uuid
 from boot_simulator import run_bounded
 
 _stage="startup"
@@ -15,6 +17,7 @@ _SAFE_REASONS=frozenset({
     "container_escape","invalid_expiry","invalid_grant_expiry",
     "xcresult_missing","xcresult_wrong_test","xcresult_test_not_passed",
     "native_command_failed","native_marker_missing","xcresult_invalid_schema",
+    "invalid_simulator_id","invalid_role_result_directory",
 })
 
 class HandoffError(RuntimeError):
@@ -80,6 +83,22 @@ def inspect_result(result,out,role,uid):
     require(status=="PASS","xcresult_test_not_passed")
     return summary,tree
 
+def resolve_container(uid):
+    raw=run_bounded(["xcrun","simctl","get_app_container",uid,
+        "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip()
+    path=Path(raw)
+    require(bool(raw) and path.is_absolute() and path.is_dir()
+            and not path.is_symlink(),"invalid_container")
+    # Restrict all writes to this exact disposable simulator's data sandbox.
+    parts=path.resolve().parts
+    expected=("Devices",uid.lower(),"data","Containers","Data","Application")
+    lowered=tuple(x.lower() for x in parts)
+    needle=tuple(x.lower() for x in expected)
+    require(any(lowered[i:i+len(needle)]==needle
+                and i+len(needle)==len(parts)-1
+                for i in range(len(parts))),"invalid_container")
+    return path.resolve()
+
 def rehearse():
     stage("import_dependencies")
     from distributed_role_provisioning import generate
@@ -90,6 +109,10 @@ def rehearse():
     role=os.environ["IOSNEXT_PREFLIGHT_ROLE"]
     uid=os.environ["SIM_ID"]
     require(role in ("A","B"),"wrong_role")
+    try:
+        require(str(uuid.UUID(uid)).lower()==uid.lower(),"invalid_simulator_id")
+    except ValueError:
+        raise HandoffError("invalid_simulator_id") from None
     out=Path("build/ios173/dual-simulator")
     stage("verify_preflight")
     pre=json.loads((out/"preflight.json").read_text())
@@ -99,15 +122,27 @@ def rehearse():
     # The successful prerequisite already installed this disposable test app.
     # Locate only its sandbox; do not touch any existing real user profile.
     stage("resolve_app_container")
-    container=Path(run_bounded(["xcrun","simctl","get_app_container",uid,
-         "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip())
+    container=resolve_container(uid)
     stage("generate_offline_contract")
     _,roles=generate(os.environ["GITHUB_RUN_ID"]+":"+os.environ["GITHUB_RUN_ATTEMPT"],
         30,"https://fixture.invalid/")
     raw=json.dumps(roles[role],separators=(",",":")).encode("ascii")
     stage("install_private_role")
-    target=install_role(raw,container,role,30)
-    result=out/("role-"+role+".xcresult")
+    # Raw role-test results may contain sensitive diagnostics. Keep them
+    # outside the artifact tree and destroy them after structured inspection.
+    with tempfile.TemporaryDirectory(prefix="iosnext-v70-role-",dir=os.environ["RUNNER_TEMP"]) as private:
+        result=Path(private)/("role-"+role+".xcresult")
+        target=install_role(raw,container,role,30)
+        execute_handoff(target,result,out,role,uid,container,raw,roles[role])
+    stage("write_handoff_evidence")
+    (out/"handoff-evidence.json").write_text(json.dumps({"role":role,"source":pre["source"],
+        "run":pre["run"],"attempt":pre["attempt"],"simulator":uid,
+        "build_sha256":pre["build_sha256"],"host_boot_sha256":pre["boot_session_sha256"],
+        "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
+        "transient_file_removed":True,"network_used":False,"media_tested":False},indent=2)+"\n")
+    print("V65_OFFLINE_ROLE_HANDOFF_COMPLETE role="+role)
+
+def execute_handoff(target,result,out,role,uid,container,raw,role_data):
     try:
         stage("run_native_xctest")
         command_failed=False
@@ -132,15 +167,14 @@ def rehearse():
         require(log.count("V65_OFFLINE_NATIVE_ROLE_HANDOFF=PASS role="+role)==1,
                 "native_marker_missing")
         stage("verify_sandbox_identity")
-        current=Path(run_bounded(["xcrun","simctl","get_app_container",uid,
-            "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip())
+        current=resolve_container(uid)
         require(current.resolve()==container.resolve(),"sandbox_changed")
         stage("verify_private_role_integrity")
         require(target.is_file() and read_private(target)==raw,"role_file_changed")
         # Never publish a source role file or any bearer/key material.
         stage("verify_output_privacy")
         require(all(x not in log and x not in summary and x not in tree
-                    for x in roles[role]["tokens"]+[roles[role]["signingSeed"]]),
+                    for x in role_data["tokens"]+[role_data["signingSeed"]]),
                 "sensitive_output_detected")
         # The sanitized structured status is sufficient; do not duplicate raw summary.
     finally:
@@ -152,13 +186,6 @@ def rehearse():
             print("V66_HANDOFF_CLEANUP=FAIL",file=sys.stderr,flush=True)
             raise
         print("V66_HANDOFF_CLEANUP=PASS",flush=True)
-    stage("write_handoff_evidence")
-    (out/"handoff-evidence.json").write_text(json.dumps({"role":role,"source":pre["source"],
-        "run":pre["run"],"attempt":pre["attempt"],"simulator":uid,
-        "build_sha256":pre["build_sha256"],"host_boot_sha256":pre["boot_session_sha256"],
-        "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
-        "transient_file_removed":True,"network_used":False,"media_tested":False},indent=2)+"\n")
-    print("V65_OFFLINE_ROLE_HANDOFF_COMPLETE role="+role)
 
 def self_test():
     import unittest
@@ -214,5 +241,12 @@ if __name__=="__main__":
         elif not sys.argv[1:]: rehearse()
         else: raise RuntimeError("invalid_arguments")
     except Exception as error:
-        print("V66_HANDOFF_FAILURE stage="+_stage+" reason="+safe_failure(error),file=sys.stderr,flush=True)
+        reason=safe_failure(error)
+        print("V66_HANDOFF_FAILURE stage="+_stage+" reason="+reason,file=sys.stderr,flush=True)
+        if not sys.argv[1:] and os.environ.get("GITHUB_ACTIONS")=="true" and os.environ.get("RUNNER_ENVIRONMENT")=="github-hosted":
+            # Only fixed non-secret enums are persisted, even on a failing job.
+            try:
+                (Path("build/ios173/dual-simulator")/"handoff-failure.json").write_text(json.dumps({"stage":_stage,"reason":reason})+"\n")
+            except OSError:
+                print("V70_FAILURE_RECORD_UNAVAILABLE",file=sys.stderr,flush=True)
         raise SystemExit("V65_OFFLINE_ROLE_HANDOFF_FAILED") from None
