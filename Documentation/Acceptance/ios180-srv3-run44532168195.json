@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "phase": "SR-V3",
+  "run": 44532168195,
+  "attempt": 1,
+  "prHead": "ee79eafe6f316c7114ea81938eec5464eed09634",
+  "testedMerge": "89da3459538140d05b1f0045a00221c6f7f2f6d4",
+  "terminalJobs": {
+    "source": "success",
+    "build": "success",
+    "AB": "success",
+    "CF": "success",
+    "A": "success",
+    "B": "success",
+    "validate": "success",
+    "aggregate": "success"
+  },
+  "native": {
+    "unitTests": 148,
+    "uiTests": 4,
+    "offlineRoleHandoffAccepted": 2,
+    "independentHosts": 4,
+    "productSha256": "c8a37b2e405610af9b2a38e4fa14b4b6f39427bb57c9837786c6f575de8a264a"
+  },
+  "strictRevalidation": {
+    "status": "PASS_NATIVE_PILOT_PREREQUISITE_ONLY",
+    "matchesOriginalAggregate": true
+  },
+  "archive": {
+    "bytes": 20048458,
+    "sha256": "8fec37b8185798cebd184ab5642abd23206a5a03cdb4e0a5568714937624a71c",
+    "verifiedOriginalArchives": 8,
+    "artifactIds": [
+      14535665674,
+      14535611163,
+      14535452058,
+      14534548753,
+      14534478959,
+      14533952291,
+      14533724975,
+      14533398287
+    ],
+    "scope": "conversation export; originals not uploaded to public repository"
+  },
+  "relay": "NOT_CONFIGURED_OR_TESTED",
+  "G03": "BLOCKED",
+  "G04": "BLOCKED",
+  "release": false
+}
