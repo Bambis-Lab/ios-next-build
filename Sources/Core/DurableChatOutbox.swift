@@ -1,9 +1,9 @@
 import Foundation
 import CryptoKit
 
-/// Isolated durable sender journal. Until a digest-bound idempotent receipt
-/// contract exists on the broker, attempted but unconfirmed envelopes are
-/// intentionally blocked, not re-encrypted or silently resent.
+/// Durable sender journal. An uncertain envelope may only be replayed
+/// after explicit caller negotiation of the digest-bound receipt contract.
+/// Its exact signed bytes, identity and original timestamp are retained.
 struct ChatOutboxScope: Codable, Equatable, Sendable {
     let endpoint: URL
     let user: String
@@ -108,14 +108,15 @@ final class DurableChatOutbox {
     }
 
     /// Caller must revalidate the entire peer roster with the authenticated
-    /// server before sending. Never return a possibly attempted envelope.
-    func beginNext(currentRecipients:[ChatIdentity],now:Date = .now) throws -> ChatEnvelope? {
+    /// server before sending, including before an explicitly negotiated replay.
+    func beginNext(currentRecipients:[ChatIdentity],allowIdempotentReplay:Bool=false,now:Date = .now) throws -> ChatEnvelope? {
         guard var batch=try pending() else {return nil}
-        guard !batch.entries.contains(where:{$0.phase == .uncertain}) else {throw ChatHistoryError.busy}
+        let uncertain=batch.entries.firstIndex(where:{$0.phase == .uncertain})
+        guard uncertain==nil || allowIdempotentReplay else {throw ChatHistoryError.busy}
         guard currentRecipients.count==batch.recipients.count,
               batch.recipients.allSatisfy({old in currentRecipients.contains(where:{TicketIdentityBinding.matches(old,$0)})})
         else {throw ChatError.identityChanged}
-        guard let i=batch.entries.firstIndex(where:{$0.phase == .ready}) else {return nil}
+        guard let i=uncertain ?? batch.entries.firstIndex(where:{$0.phase == .ready}) else {return nil}
         let envelope=batch.entries[i].envelope
         // Do not submit stale signed envelopes. The broker lifetime is
         // shorter than the client's incoming timestamp window.
@@ -123,16 +124,18 @@ final class DurableChatOutbox {
               now.timeIntervalSince(stamp)>=(-5),now.timeIntervalSince(stamp)<90 else {
             throw ChatError.invalidEnvelope
         }
-        batch.entries[i].phase = .uncertain
-        try save(batch) // durable before returning anything to the transport
+        if uncertain==nil {
+            batch.entries[i].phase = .uncertain
+            try save(batch) // durable before returning anything to the transport
+        }
         return envelope
     }
 
-    func confirm(_ envelope:ChatEnvelope,receipt:ChatRelayReceipt) throws {
+    func confirm(_ envelope:ChatEnvelope,receipt:ChatSendReceiptV1) throws {
+        try receipt.requireMatch(envelope)
         guard var batch=try pending(),
               let i=batch.entries.firstIndex(where:{$0.phase == .uncertain}),
-              batch.entries[i].envelope==envelope,receipt.id==envelope.id,
-              receipt.state=="queued_persistent",receipt.expiresInSeconds>0
+              batch.entries[i].envelope==envelope
         else {throw ChatError.invalidResponse}
         batch.entries[i].phase = .confirmed
         try save(batch)

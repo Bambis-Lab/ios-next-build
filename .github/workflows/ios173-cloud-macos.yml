@@ -1,7 +1,7 @@
 name: iOS173 Cloud macOS target acceptance
 on:
   push:
-    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover', 'feature/ios173-v3-storage-binding', 'feature/ios173-v3-storage-routing', 'feature/ios173-v3-storage-explicit-activation', 'feature/ios173-v3-chat-outbox']
+    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover', 'feature/ios173-v3-storage-binding', 'feature/ios173-v3-storage-routing', 'feature/ios173-v3-storage-explicit-activation', 'feature/ios173-v3-chat-outbox', 'feature/ios180-v4-receipt-client']
   workflow_dispatch:
 permissions:
   contents: read
@@ -123,7 +123,8 @@ jobs:
           selected=""
           for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
             test -d "$app" || continue
-            candidate_version="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version | head -n 1)"
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
             case "$candidate_version" in
               "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
                 selected="$app/Contents/Developer"

@@ -44,12 +44,21 @@ struct ChatDeliveryContract: Decodable, Sendable {
     let maxBatch: Int
     let ttlSeconds: Int
     let persistent: Bool
+    let sendReceiptVersion: Int?
+    let sendMaxAgeSeconds: Int?
 
     enum CodingKeys: String, CodingKey {
         case mode
         case maxBatch = "max_batch"
         case ttlSeconds = "ttl_seconds"
         case persistent
+        case sendReceiptVersion = "send_receipt_version"
+        case sendMaxAgeSeconds = "send_max_age_seconds"
+    }
+
+    var supportsIdempotentSender: Bool {
+        isSupported && persistent && sendReceiptVersion == 1 &&
+        sendMaxAgeSeconds == 90 && ttlSeconds > 90
     }
 
     var isSupported: Bool {
@@ -273,6 +282,23 @@ actor ChatRelayClient {
             body: envelope,
             configuration: configuration
         )
+    }
+
+    func requireIdempotentSender(configuration: ChatConfiguration) async throws {
+        let contract: ChatDeliveryContract = try await request(
+            path:"v1/chat/delivery-contract", method:"GET", body:Optional<String>.none,
+            configuration:configuration)
+        guard contract.supportsIdempotentSender else {throw ChatError.invalidResponse}
+    }
+
+    // Never fall back to the legacy POST when this contract is unavailable.
+    func sendWithReceipt(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws -> ChatSendReceiptV1 {
+        guard envelope.senderUserID==configuration.userID,
+              envelope.senderDeviceID==configuration.deviceID else {throw ChatError.authenticationFailed}
+        let receipt:ChatSendReceiptV1=try await request(
+            path:"v1/chat/messages/receipt-v1",method:"POST",body:envelope,configuration:configuration)
+        try receipt.requireMatch(envelope)
+        return receipt
     }
 
     func requireAcknowledgedDelivery(configuration: ChatConfiguration) async throws {

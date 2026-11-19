@@ -3,6 +3,16 @@ import XCTest
 @testable import IOSNext
 
 final class DurableChatOutboxTests:XCTestCase {
+    func testReceiptContractMustBeExplicitAndPersistent() throws {
+        let decoder=JSONDecoder()
+        func contract(_ value:String) throws -> ChatDeliveryContract {
+            try decoder.decode(ChatDeliveryContract.self,from:Data(value.utf8))
+        }
+        XCTAssertFalse(try contract(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true}"#).supportsIdempotentSender)
+        XCTAssertFalse(try contract(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":false,"send_receipt_version":1,"send_max_age_seconds":90}"#).supportsIdempotentSender)
+        XCTAssertTrue(try contract(#"{"mode":"ack_v1","max_batch":64,"ttl_seconds":120,"persistent":true,"send_receipt_version":1,"send_max_age_seconds":90}"#).supportsIdempotentSender)
+    }
+
     @MainActor
     func testPersistBeforeSendAmbiguousReceiptAndScopeBinding() throws {
         let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -28,12 +38,21 @@ final class DurableChatOutboxTests:XCTestCase {
         XCTAssertEqual(first,entries[0])
         XCTAssertEqual(try open().pending()?.entries.first?.phase,.uncertain)
         XCTAssertThrowsError(try open().beginNext(currentRecipients:[peer]))
-        XCTAssertThrowsError(try open().confirm(first,receipt:.init(id:entries[1].id,state:"queued_persistent",expiresInSeconds:120)))
+        let replay=try XCTUnwrap(open().beginNext(currentRecipients:[peer],allowIdempotentReplay:true))
+        XCTAssertEqual(replay,first)
+        XCTAssertThrowsError(try open().beginNext(currentRecipients:[peer],allowIdempotentReplay:true,now:Date().addingTimeInterval(100)))
+        func receipt(_ envelope:ChatEnvelope,replayed:Bool=false) throws -> ChatSendReceiptV1 {
+            .init(id:envelope.id,state:"queued_persistent",expiresInSeconds:120,receiptVersion:1,
+                  envelopeSHA256:try ChatSendReceiptV1.digest(envelope),replayed:replayed)
+        }
+        XCTAssertThrowsError(try open().confirm(first,receipt:receipt(entries[1])))
+        XCTAssertThrowsError(try open().confirm(first,receipt:.init(id:first.id,state:"queued_persistent",
+            expiresInSeconds:120,receiptVersion:1,envelopeSHA256:String(repeating:"0",count:64),replayed:true)))
         XCTAssertThrowsError(try open().finishAfterHistoryCommit(groupID:group))
-        try open().confirm(first,receipt:.init(id:first.id,state:"queued_persistent",expiresInSeconds:120))
+        try open().confirm(first,receipt:receipt(first,replayed:true))
         let second=try XCTUnwrap(open().beginNext(currentRecipients:[peer]))
         XCTAssertEqual(second,entries[1])
-        try open().confirm(second,receipt:.init(id:second.id,state:"queued_persistent",expiresInSeconds:120))
+        try open().confirm(second,receipt:receipt(second))
         XCTAssertNil(try open().beginNext(currentRecipients:[peer]))
         try open().finishAfterHistoryCommit(groupID:group)
         XCTAssertNil(try open().pending())
