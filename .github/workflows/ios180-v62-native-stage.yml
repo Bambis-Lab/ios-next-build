@@ -178,7 +178,7 @@ jobs:
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
           printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
       - name: Restore only this run's verified build products
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdfc3d59b
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: V63-native-products-${{ inputs.duration }}s
           path: build/ios173/handoff
