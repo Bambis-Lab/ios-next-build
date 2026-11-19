@@ -1,7 +1,7 @@
 name: V6.4 isolated relay synthetic contract
 on:
   push:
-    branches: ['feature/ios180-v64-isolated-relay']
+    branches: ['feature/ios180-v64-isolated-relay', 'feature/ios180-v64-relay-reconnect']
 permissions:
   contents: read
 jobs:

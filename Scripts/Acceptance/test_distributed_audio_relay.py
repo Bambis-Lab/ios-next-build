@@ -12,6 +12,9 @@ from websockets.sync.client import connect
 from websockets.exceptions import ConnectionClosed
 from distributed_audio_relay import RelayContract
 from audio_fixture.audio_websocket import ManagedAudioListener
+from audio_fixture.audio_crypto_reference import public, offer, establish
+from distributed_audio_relay import ROLES
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 class ContractTests(unittest.TestCase):
     def setUp(self):
@@ -69,6 +72,82 @@ class ContractTests(unittest.TestCase):
                 with bind(secrets.token_hex(32)) as stranger:
                     with self.assertRaises(ConnectionClosed): stranger.recv(timeout=3)
             finally:
+                listener.close()
+
+    def test_encrypted_media_reconnect_replay_and_device_revocation(self):
+        # Real socket I/O and fresh E2EE keys, synthetic identities only.
+        signing={r:Ed25519PrivateKey.generate() for r in ROLES}
+        ephemeral={r:X25519PrivateKey.generate() for r in ROLES}
+        for role in ROLES:
+            self.config["roles"][role]["signing_public_key"]=base64.b64encode(public(signing[role])).decode("ascii")
+        c=self.contract()
+        def b64(raw): return base64.b64encode(raw).decode("ascii")
+        caller,callee=ROLES["A"],ROLES["B"]
+        offers={r:offer(c.call_id,caller,callee,ROLES[r],ephemeral[r],signing[r]) for r in ROLES}
+        with patch.dict(os.environ,{"IOSNEXT_EXPERIMENTAL_AUDIO":"true"}):
+            listener=ManagedAudioListener(c.broker(),0)
+            connections=[]
+            def bind(role,index):
+                ws=connect("ws://127.0.0.1:%d/v1/audio"%listener.port,
+                    additional_headers={"Authorization":"Bearer "+self.tokens[role][index]},open_timeout=3,close_timeout=1)
+                connections.append(ws)
+                ws.send(json.dumps({"call_id":c.call_id}))
+                self.assertTrue(json.loads(ws.recv(timeout=3))["bound"])
+                return ws
+            def action(ws,value):
+                ws.send(json.dumps(value))
+                result=json.loads(ws.recv(timeout=3))
+                self.assertEqual(result["status"],200)
+                return result["result"]
+            def deliver(ws,codec,sequence,payload):
+                packets=action(ws,{"action":"drain"})["packets"]
+                self.assertEqual(len(packets),1)
+                self.assertEqual(packets[0]["sequence"],sequence)
+                self.assertEqual(codec.open(sequence,base64.b64decode(packets[0]["ciphertext"])),payload)
+            try:
+                a,b=bind("A",0),bind("B",0)
+                for role,ws in (("A",a),("B",b)):
+                    k,s=offers[role]
+                    self.assertTrue(action(ws,{"action":"offer","ephemeral":b64(k),"signature":b64(s)})["published"])
+                codecs={}
+                for r,peer,ws in (("A","B",a),("B","A",b)):
+                    received=action(ws,{"action":"peer_offer"})["offer"]
+                    self.assertEqual(received,{"ephemeral":b64(offers[peer][0]),"signature":b64(offers[peer][1])})
+                    codecs[r]=establish(c.call_id,caller,callee,ROLES[r],ephemeral[r],
+                        base64.b64decode(received["ephemeral"]),base64.b64decode(received["signature"]),public(signing[peer]))
+                left,right=codecs["A"],codecs["B"]
+                payload=bytes([31])*640
+                original={"action":"push","sequence":0,"ciphertext":b64(left.seal(0,payload))}
+                self.assertTrue(action(a,original)["queued"])
+                deliver(b,right,0,payload)
+                reverse=bytes([73])*640
+                self.assertTrue(action(b,{"action":"push","sequence":0,"ciphertext":b64(right.seal(0,reverse))})["queued"])
+                deliver(a,left,0,reverse)
+                a.close()
+                a=bind("A",1)
+                self.assertTrue(action(a,{"action":"push","sequence":1,"ciphertext":b64(left.seal(1,payload))})["queued"])
+                deliver(b,right,1,payload)
+                # Transport replacement must not reset the call's high-water mark.
+                a.send(json.dumps(original))
+                with self.assertRaises(ConnectionClosed): a.recv(timeout=3)
+                a=bind("A",2)
+                self.assertTrue(action(a,{"action":"push","sequence":2,"ciphertext":b64(left.seal(2,payload))})["queued"])
+                deliver(b,right,2,payload)
+                c.revoke("B")
+                self.assertIsNone(c.authenticate(self.tokens["B"][2]))
+                for ws in (a,b):
+                    try:
+                        ws.send(json.dumps({"action":"heartbeat"}))
+                        ws.recv(timeout=3)
+                    except ConnectionClosed:
+                        pass
+                    else:
+                        self.fail("revoked call remained accessible")
+                self.assertNotIn(c.call_id,c.calls.calls)
+                self.assertNotIn(c.call_id,c.calls.audio)
+            finally:
+                for ws in connections:
+                    ws.close()
                 listener.close()
 
 if __name__=="__main__":

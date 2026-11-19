@@ -66,11 +66,22 @@ class RelayContract:
                 self.grants[digest]=(actor,until,steady()+(until-now))
                 previous=until
         self.calls=CallSignalling(clock=steady)
+        self.revoked=set()
         self.calls.calls[self.call_id]={"id":self.call_id,"caller":A,"callee":B,
             "state":"accepted","expires":self.deadline}
 
     def active(self, user, device):
-        return (user,device) in ROLES.values() and self.wall()<self.session_expiry and self.steady()<self.deadline
+        with self.calls.lock:
+            return ((user,device) in ROLES.values() and (user,device) not in self.revoked
+                    and self.wall()<self.session_expiry and self.steady()<self.deadline)
+
+    def revoke(self, role):
+        """Local test harness only; no network administrative endpoint."""
+        require(role in ROLES,"invalid_role")
+        with self.calls.lock:
+            actor=ROLES[role]
+            self.revoked.add(actor)
+            self.calls.revoke(actor)
 
     def authenticate(self, token):
         if not isinstance(token,str) or not HEX64.fullmatch(token):
