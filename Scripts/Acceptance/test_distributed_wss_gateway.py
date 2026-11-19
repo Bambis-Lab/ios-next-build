@@ -27,13 +27,22 @@ def certificates(root):
     authority=(x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name).public_key(ca.public_key())
         .serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(minutes=1))
         .not_valid_after(now+datetime.timedelta(minutes=20))
-        .add_extension(x509.BasicConstraints(ca=True,path_length=0),critical=True).sign(ca,hashes.SHA256()))
+        .add_extension(x509.BasicConstraints(ca=True,path_length=0),critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca.public_key()),critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.public_key()),critical=False)
+        .add_extension(x509.KeyUsage(digital_signature=False,content_commitment=False,key_encipherment=False,
+            data_encipherment=False,key_agreement=False,key_cert_sign=True,crl_sign=True,encipher_only=False,decipher_only=False),critical=True)
+        .sign(ca,hashes.SHA256()))
     key=ec.generate_private_key(ec.SECP256R1())
     leaf=(x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"fixture")]))
         .issuer_name(ca_name).public_key(key.public_key()).serial_number(x509.random_serial_number())
         .not_valid_before(now-datetime.timedelta(minutes=1)).not_valid_after(now+datetime.timedelta(minutes=15))
         .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]),critical=False)
         .add_extension(x509.BasicConstraints(ca=False,path_length=None),critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()),critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.public_key()),critical=False)
+        .add_extension(x509.KeyUsage(digital_signature=True,content_commitment=False,key_encipherment=False,
+            data_encipherment=False,key_agreement=False,key_cert_sign=False,crl_sign=False,encipher_only=False,decipher_only=False),critical=True)
         .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),critical=False)
         .sign(ca,hashes.SHA256()))
     def write(name,data):
