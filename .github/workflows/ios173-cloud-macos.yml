@@ -1,7 +1,7 @@
 name: iOS173 Cloud macOS target acceptance
 on:
   push:
-    branches: ['feature/ios173-n00-n08-cloud']
+    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-ticket-cache']
   workflow_dispatch:
 permissions:
   contents: read
@@ -207,6 +207,7 @@ jobs:
             '-only-testing:IOSNextTests/ChatHistoryRecordMigrationTests' \
             '-only-testing:IOSNextTests/ChatRecordReceiveCheckpointTests' \
             '-only-testing:IOSNextTests/SecureTicketProjectStoreTests' \
+            '-only-testing:IOSNextTests/SecureTicketCacheTests' \
             '-only-testing:IOSNextTests/FactoryWorkspaceCollectionTests' \
             '-only-testing:IOSNextTests/FactoryWorkspaceContractsTests' \
             '-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests' \
@@ -214,7 +215,7 @@ jobs:
             '-only-testing:IOSNextTests/MasterPlatform140Tests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/ios173/OwnerNavigation.log
-          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests ProjectRegistryTests FamilyAudioCryptoTests FamilyAudioSessionTests FamilyAudioWireTests FamilyPCMTests ChatHistoryArchiveTests ChatMediaThumbnailCacheTests EncryptedTicketClientTests EncryptedTicketMessageTests TicketIdentityBindingTests SecureTicketOutboxTests EncryptedChatRecordStoreTests ChatHistoryRecordMigrationTests ChatRecordReceiveCheckpointTests SecureTicketProjectStoreTests FactoryWorkspaceCollectionTests FactoryWorkspaceContractsTests FactoryWorkspaceCoordinatorTests FactoryWorkspaceEventsTests MasterPlatform140Tests; do
+          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests ProjectRegistryTests FamilyAudioCryptoTests FamilyAudioSessionTests FamilyAudioWireTests FamilyPCMTests ChatHistoryArchiveTests ChatMediaThumbnailCacheTests EncryptedTicketClientTests EncryptedTicketMessageTests TicketIdentityBindingTests SecureTicketOutboxTests EncryptedChatRecordStoreTests ChatHistoryRecordMigrationTests ChatRecordReceiveCheckpointTests SecureTicketProjectStoreTests SecureTicketCacheTests FactoryWorkspaceCollectionTests FactoryWorkspaceContractsTests FactoryWorkspaceCoordinatorTests FactoryWorkspaceEventsTests MasterPlatform140Tests; do
             grep -Fq "Test Suite '$suite' passed" build/ios173/OwnerNavigation.log
           done
           grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/OwnerNavigation.log

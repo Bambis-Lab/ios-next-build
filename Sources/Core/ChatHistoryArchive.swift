@@ -33,7 +33,8 @@ final class ChatHistoryArchive {
         guard !scope.isEmpty, scope.count <= 8192,
               [( "chatHistory.v1", "EncryptedChatHistory"),
                ( "ticketOutbox.v1", "EncryptedTicketOutbox"),
-               ( "ticketProject.v1", "EncryptedTicketProjects")].contains(where: { $0.0 == namespace && $0.1 == folder })
+               ( "ticketProject.v1", "EncryptedTicketProjects"),
+               ( "ticketCache.v1", "EncryptedTicketCache")].contains(where: { $0.0 == namespace && $0.1 == folder })
         else { throw ChatHistoryError.invalidScope }
         let digest = SHA256.hash(data: scope).map { String(format: "%02x", $0) }.joined()
         let directory = try FileManager.default.url(for: .applicationSupportDirectory,

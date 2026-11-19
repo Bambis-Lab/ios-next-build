@@ -4,7 +4,7 @@ enum EncryptedTicketStatus: String, Codable, Sendable {
     case open, inProgress = "in_progress", resolved
 }
 
-struct EncryptedTicketSummary: Decodable, Sendable, Identifiable {
+struct EncryptedTicketSummary: Codable, Sendable, Identifiable {
     let ticketID: String
     let requester: ChatIdentity
     let owner: ChatIdentity
@@ -17,7 +17,7 @@ struct EncryptedTicketSummary: Decodable, Sendable, Identifiable {
     }
 }
 
-struct EncryptedTicketDetail: Decodable, Sendable {
+struct EncryptedTicketDetail: Codable, Sendable {
     let ticketID: String
     let requester: ChatIdentity
     let owner: ChatIdentity
