@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from boot_simulator import run_bounded
+from boot_simulator import run_bounded, terminate_owned_process
 
 OUT=Path("build/ios173/dual-simulator").resolve()
 OUT.mkdir(parents=True,exist_ok=True)
@@ -176,14 +176,7 @@ def run(second):
     finally:
         for _,_,p,_ in processes:
             if p.poll() is None:
-                try: os.killpg(p.pid,signal.SIGTERM)
-                except ProcessLookupError: pass
-        for _,_,p,_ in processes:
-            try: p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                try: os.killpg(p.pid,signal.SIGKILL)
-                except ProcessLookupError: pass
-                p.wait(timeout=5)
+                terminate_owned_process(p)
         for stream in streams: stream.close()
 
 if __name__=="__main__":

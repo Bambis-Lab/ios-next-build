@@ -8,6 +8,37 @@ import sys
 import time
 
 
+def signal_owned_process(process, sig):
+    """Best-effort cleanup of our child only, never kill unrelated processes."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        # Some hosted macOS sandboxes deny process-group signalling even
+        # for a child. Fall back to the original child's process handle.
+        print("SIMULATOR_GROUP_SIGNAL_DENIED", flush=True)
+        try:
+            process.send_signal(sig)
+        except (ProcessLookupError, PermissionError):
+            print("SIMULATOR_CHILD_SIGNAL_UNAVAILABLE", flush=True)
+
+
+def terminate_owned_process(process):
+    """Bounded cleanup; never replace the original error with cleanup EPERM."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        signal_owned_process(process, sig)
+        try:
+            process.wait(timeout=3)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+    print("SIMULATOR_CHILD_REAP_UNCONFIRMED", flush=True)
+    return False
+
+
 def run_bounded(argv, timeout=90, *, emit_output=True):
     print(f"SIMULATOR_COMMAND_START timeout={timeout}s cmd={argv[0]}", flush=True)
     process = subprocess.Popen(
@@ -16,35 +47,14 @@ def run_bounded(argv, timeout=90, *, emit_output=True):
     )
     try:
         output, _ = process.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         print(f"SIMULATOR_COMMAND_TIMEOUT cmd={argv[0]} timeout={timeout}s", flush=True)
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            output, _ = process.communicate(timeout=3)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                # Never perform an unbounded communicate() after SIGKILL.
-                output, _ = process.communicate(timeout=3)
-            except subprocess.TimeoutExpired:
-                # A descendant may still hold the pipe open. Close our side
-                # and bound reaping so this watchdog cannot stall the whole job.
-                if process.stdout is not None:
-                    process.stdout.close()
-                try:
-                    process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    pass
-                output = ""
-        if output and emit_output:
-            print(output, end="" if output.endswith("\n") else "\n", flush=True)
-        raise RuntimeError(f"Command timed out after {timeout}s: {argv[0]}")
+        # Close our read end even if a descendant inherited the pipe. No
+        # unbounded communicate and no attempt to elevate permissions.
+        if process.stdout is not None:
+            process.stdout.close()
+        reaped = terminate_owned_process(process)
+        raise RuntimeError(f"Command timed out after {timeout}s: {argv[0]}; child_reaped={reaped}") from exc
     if output and emit_output:
         print(output, end="" if output.endswith("\n") else "\n", flush=True)
     if process.returncode != 0:
