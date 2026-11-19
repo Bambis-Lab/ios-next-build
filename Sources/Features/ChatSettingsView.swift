@@ -58,6 +58,23 @@ struct ChatSettingsView: View {
                 }
 
                 if appModel.familyBrokerConfigured {
+                    Section("Ausstehender Versand") {
+                        if chatModel.chatOutboxBlocked {
+                            Text("Versandjournal nicht lesbar. Kein automatischer Versand.").foregroundStyle(.secondary)
+                        } else if chatModel.pendingChatSendID != nil {
+                            Text("Eine Nachricht ist noch nicht vollständig bestätigt.").font(.footnote)
+                            Button("Identische Nachricht erneut prüfen und übertragen",systemImage:"arrow.clockwise") {
+                                Task {await chatModel.retryPendingChatSend()}
+                            }
+                            .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
+                            .accessibilityIdentifier("chat-settings-retry-pending-send")
+                            Text("Nur nach erneuter Empfängerprüfung und innerhalb des zulässigen Zeitfensters. Keine neue Nachrichten-ID.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Keine ausstehenden Versandaufträge").foregroundStyle(.secondary)
+                        }
+                        if let error=chatModel.lastError {Text(error).font(.caption)}
+                    }
                     Section("Lokaler Chatverlauf") {
                         LabeledContent("Speicher",value:chatModel.historyUsesV2 ? "V2 · verschlüsselte Datenbank" : "V1 / noch nicht geöffnet")
                         if chatModel.historyMigrationInProgress {
