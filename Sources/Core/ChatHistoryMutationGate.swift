@@ -7,7 +7,7 @@ import Foundation
 final class ChatHistoryMutationGate {
     private var active=false
 
-    func waitUntilIdle(isCurrent: () -> Bool) async throws {
+    private func acquire(isCurrent: () -> Bool) async throws {
         let clock=ContinuousClock()
         let deadline=clock.now.advanced(by:.seconds(30))
         while active {
@@ -18,6 +18,17 @@ final class ChatHistoryMutationGate {
         }
         try Task.checkCancellation()
         guard isCurrent() else { throw CancellationError() }
+        // Acquire in the same actor turn as the successful check.
+        active=true
+    }
+
+    func withExclusive<T>(isCurrent: () -> Bool,
+                          operation: @MainActor () async throws -> T) async throws -> T {
+        try await acquire(isCurrent:isCurrent)
+        defer { active=false }
+        try Task.checkCancellation()
+        guard isCurrent() else { throw CancellationError() }
+        return try await operation()
     }
 
     func commit(isCurrent: () -> Bool,
@@ -25,10 +36,8 @@ final class ChatHistoryMutationGate {
                 apply: (ChatPersistentSnapshot) -> Void,
                 mutate: () throws -> Void,
                 persist: (ChatPersistentSnapshot, ChatPersistentSnapshot) async throws -> Void) async throws {
-        try await waitUntilIdle(isCurrent:isCurrent)
-        active=true
-        defer { active=false }
-        let previous=read()
+        try await withExclusive(isCurrent:isCurrent) {
+            let previous=read()
         let next:ChatPersistentSnapshot
         do {
             try mutate()
@@ -43,6 +52,7 @@ final class ChatHistoryMutationGate {
         try await persist(previous,next)
         guard isCurrent() else { throw CancellationError() }
         apply(next)
-        try Task.checkCancellation()
+            try Task.checkCancellation()
+        }
     }
 }

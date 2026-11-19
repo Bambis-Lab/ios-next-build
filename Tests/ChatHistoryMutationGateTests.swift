@@ -24,7 +24,14 @@ final class ChatHistoryMutationGateTests: XCTestCase {
                 durable=next
             }
         }
-        while !entered { try await Task.sleep(for:.milliseconds(5)) }
+        for _ in 0..<200 {
+            if entered { break }
+            try await Task.sleep(for:.milliseconds(5))
+        }
+        guard entered else {
+            first.cancel()
+            return XCTFail("first write did not enter its transaction")
+        }
         let second=Task { @MainActor in
             try await gate.commit(isCurrent:{current},read:{state},apply:{state=$0},mutate:{add("second")}) { previous,next in
                 XCTAssertEqual(previous,durable)
@@ -54,5 +61,24 @@ final class ChatHistoryMutationGateTests: XCTestCase {
         } catch is CancellationError {}
         XCTAssertEqual(state,initial)
         XCTAssertNotNil(durable.seen["old-account"])
+    }
+
+    @MainActor
+    func testExclusiveAcquisitionCannotOverlapAcrossSuspension() async throws {
+        let gate=ChatHistoryMutationGate()
+        var inFlight=0, highWater=0
+        let tasks=(0..<8).map { _ in
+            Task { @MainActor in
+                try await gate.withExclusive(isCurrent:{true}) {
+                    inFlight += 1
+                    highWater=max(highWater,inFlight)
+                    defer { inFlight -= 1 }
+                    try await Task.sleep(for:.milliseconds(10))
+                }
+            }
+        }
+        for task in tasks { try await task.value }
+        XCTAssertEqual(highWater,1)
+        XCTAssertEqual(inFlight,0)
     }
 }

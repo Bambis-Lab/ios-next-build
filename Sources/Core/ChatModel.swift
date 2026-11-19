@@ -76,7 +76,12 @@ final class ChatModel {
 
     private func loadFamilyHistory(configuration: ChatConfiguration) async throws {
         let generation=configurationGeneration
-        try await historyMutationGate.waitUntilIdle { generation == self.configurationGeneration }
+        try await historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
+            try await loadFamilyHistoryLocked(configuration:configuration,generation:generation)
+        }
+    }
+
+    private func loadFamilyHistoryLocked(configuration:ChatConfiguration,generation:UInt64) async throws {
         guard self.configuration == configuration, let keys else { throw CancellationError() }
         historyArchive=nil
         historyRecordCheckpoint=nil
@@ -810,17 +815,18 @@ final class ChatModel {
                family.grant.expiresAt > grant.expiresAt,
                family.grant.accessToken != current.token {
                 do {
-                    try KeychainStore.save(family.grant.accessToken, account: self.tokenAccount)
                     self.receiveTask?.cancel()
-                    try await self.historyMutationGate.waitUntilIdle { generation == self.configurationGeneration }
-                    guard generation == self.configurationGeneration else { return }
-                    self.configurationGeneration &+= 1
-                    self.configuration = ChatConfiguration(baseURL: current.baseURL,
-                        token: family.grant.accessToken, userID: current.userID, deviceID: current.deviceID)
-                    self.receiveTask = Task { [weak self] in await self?.receiveLoop() }
-                    self.scheduleFamilyRenewal(using: appModel, grant: family.grant)
+                    try await self.historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
+                        try KeychainStore.save(family.grant.accessToken, account:self.tokenAccount)
+                        self.configurationGeneration &+= 1
+                        self.configuration=ChatConfiguration(baseURL:current.baseURL,
+                            token:family.grant.accessToken,userID:current.userID,deviceID:current.deviceID)
+                        self.receiveTask=Task { [weak self] in await self?.receiveLoop() }
+                        self.scheduleFamilyRenewal(using:appModel,grant:family.grant)
+                    }
                     return
                 } catch {
+                    guard generation == self.configurationGeneration, !Task.isCancelled else { return }
                     self.stopAudio()
                 }
             }
