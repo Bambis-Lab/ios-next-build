@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "scope": "V73-00-06 private archival readback; not new CI acceptance",
+  "integration": "9ffcacea8b9562d1cb46cd0b4301c4ac22333452",
+  "handoff": "9692d35f0c748239cdd89668b424959934970726",
+  "prior_evidence": "3ff3c3a6f8ba865566624e6055ac7263829b0038",
+  "archive": {
+    "name": "ios180-v73-private-ci-history.zip",
+    "destination": "user private personal file library; not GitHub build-artifacts",
+    "original_count": 8,
+    "bytes": 16758779,
+    "sha256": "0274072de6774e89ade7dd930a1b4b2c021b888c30b8c8bcb293d27f8dcf5850",
+    "original_sha256_verified": 8,
+    "zip_crc_pass": true,
+    "readback_byte_identical": true,
+    "originals_retained": true
+  },
+  "integration_workflow": {
+    "path": ".github/workflows/ios173-cloud-macos.yml",
+    "blob": "4d8b87a59b39137c56bf4cc42fc50c5a9f899ca9",
+    "targeted_unit_suites": 31,
+    "targeted_ui_cases": [
+      "IndependentServicesUITests/testAllServiceEntriesWorkWithoutHomeAssistant",
+      "FamilyOnboardingUITests/testMikaFamilyPreview",
+      "FamilyOnboardingUITests/testJuliFamilyPreview"
+    ],
+    "scope": "configuration inspection only; not comprehensive native five-role UI or G99 acceptance"
+  },
+  "version": {
+    "marketing": "1.7.3",
+    "build": 31,
+    "new_build_verified": false
+  },
+  "blockers": [
+    "current push run IDs not available from PR-only query",
+    "original V6.5 native role failure run not identified",
+    "Factory host execution disabled",
+    "authorized shared relay route not confirmed",
+    "complete original V6.4 requirements missing"
+  ],
+  "new_native_runs": 0,
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "production_changes": false,
+  "release": false
+}
