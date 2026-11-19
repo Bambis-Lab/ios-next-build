@@ -106,8 +106,24 @@ jobs:
     timeout-minutes: 35
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: 30
+      PIP_CACHE_DIR: ${{ runner.temp }}/r80-pip-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Identify exact Python download-cache context
+        id: pip_cache_context
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_version="$(python3 -c 'import platform; print(platform.python_version())')"
+          os_build="$(sw_vers -buildVersion)"
+          printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Restore version-bound public Python package download cache
+        id: pip_cache
+        continue-on-error: true
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: r80-pip-xcode27-cryptography46.0.5-websockets15.0.1-${{ steps.pip_cache_context.outputs.context }}-${{ hashFiles('.github/workflows/ios180-r80-shared-native-pilot.yml') }}
       - name: Resolve simulator and generate project without cold boot
         shell: bash
         run: |
@@ -169,6 +185,13 @@ jobs:
           mkdir -p build/ios173
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
           printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Save only public dependency downloads, never build products
+        if: steps.pip_cache.outcome == 'success' && steps.pip_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: ${{ steps.pip_cache.outputs.cache-primary-key }}
       - name: Build targeted XCTest bundle before cold simulator startup
         shell: bash
         run: |
@@ -225,8 +248,24 @@ jobs:
     timeout-minutes: 55
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: 30
+      PIP_CACHE_DIR: ${{ runner.temp }}/r80-pip-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Identify exact Python download-cache context
+        id: pip_cache_context
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_version="$(python3 -c 'import platform; print(platform.python_version())')"
+          os_build="$(sw_vers -buildVersion)"
+          printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Restore version-bound public Python package download cache
+        id: pip_cache
+        continue-on-error: true
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: r80-pip-xcode27-cryptography46.0.5-websockets15.0.1-${{ steps.pip_cache_context.outputs.context }}-${{ hashFiles('.github/workflows/ios180-r80-shared-native-pilot.yml') }}
       - name: Select identical toolchain without building on execution runner
         shell: bash
         run: |
@@ -567,6 +606,38 @@ jobs:
         shell: bash
         run: |
           test "${{ steps.clean_install.outcome }}" = success
+      - name: Preserve structured XCTest summaries bound to selected destination
+        if: always()
+        shell: bash
+        env:
+          REGRESSION_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path("build/ios173")
+          names = ["OwnerNavigation"]
+          if os.environ["REGRESSION_SHARD"] == "CF":
+              names += ["CleanInstall", "IndependentServices"]
+          failures = []
+          for name in names:
+              result = root / (name + ".xcresult")
+              if not result.is_dir():
+                  failures.append(name + ": missing bundle")
+                  continue
+              try:
+                  raw = subprocess.check_output(["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result)], timeout=60)
+                  data = json.loads(raw)
+                  (root / (name + "-summary.json")).write_bytes(raw)
+                  devices = {g["device"]["deviceId"].lower() for g in data["devicesAndConfigurations"]}
+                  if devices != {os.environ["SIM_ID"].lower()}:
+                      failures.append(name + ": destination mismatch")
+              except (subprocess.SubprocessError, ValueError, KeyError, TypeError):
+                  failures.append(name + ": summary unavailable")
+          if failures:
+              raise SystemExit("; ".join(failures))
+          PY
       - name: Preserve regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -579,6 +650,11 @@ jobs:
             build/ios173/CleanInstall.xcresult
             build/ios173/OwnerNavigation.log
             build/ios173/OwnerNavigation.xcresult
+            build/ios173/OwnerNavigation-summary.json
+            build/ios173/CleanInstall-summary.json
+            build/ios173/IndependentServices-summary.json
+            build/ios173/dual-simulator/SHA256SUMS
+            build/ios173/handoff/run-and-attempt.txt
             build/ios173/IndependentServices.log
             build/ios173/IndependentServices.xcresult
             build/ios173/resolve.log
@@ -590,7 +666,7 @@ jobs:
           if-no-files-found: error
   validate:
     needs: [client]
-    if: always()
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/ios180-accelerated-native'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
