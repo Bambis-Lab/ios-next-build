@@ -18,6 +18,8 @@ struct ChatView: View {
     @State private var isPresentingMemberTickets = false
     @State private var voicePressIsActive = false
     @State private var captureTarget:ChatModel.MediaTarget?
+    @State private var mediaLoadTask:Task<Void,Never>?
+    @State private var mediaLoadRevision=UUID()
     @State private var voiceTarget:ChatModel.MediaTarget?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -73,12 +75,14 @@ struct ChatView: View {
         .onDisappear {
             AudioPlayback.shared.stop()
             cancelVoiceCapture()
+            cancelMediaLoading()
             captureTarget=nil
             IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared()
         }
         .onChange(of:chatModel.mediaTarget()) { _,_ in
             AudioPlayback.shared.stop()
             cancelVoiceCapture()
+            cancelMediaLoading()
             captureTarget=nil
             isPresentingCamera=false
             isPresentingImagePicker=false
@@ -121,12 +125,17 @@ struct ChatView: View {
             guard let item else { return }
             guard let target=captureTarget,chatModel.acceptsMediaTarget(target) else {imageSelection=nil;return}
             captureTarget=nil
-            Task {
-                defer { if imageSelection==item {imageSelection = nil} }
+            cancelMediaLoading()
+            let revision=mediaLoadRevision
+            mediaLoadTask=Task {
+                defer {
+                    if mediaLoadRevision==revision {imageSelection=nil;mediaLoadTask=nil}
+                }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
                         throw ChatError.unsupportedMedia
                     }
+                    guard !Task.isCancelled,mediaLoadRevision==revision else {return}
                     await chatModel.sendCapturedMedia(data,kind:.image,contentType:"image/jpeg",target:target)
                 } catch {if chatModel.acceptsMediaTarget(target) {chatModel.lastError=error.localizedDescription}}
             }
@@ -135,13 +144,18 @@ struct ChatView: View {
             guard let item else { return }
             guard let target=captureTarget,chatModel.acceptsMediaTarget(target) else {videoSelection=nil;return}
             captureTarget=nil
-            Task {
-                defer { if videoSelection==item {videoSelection = nil} }
+            cancelMediaLoading()
+            let revision=mediaLoadRevision
+            mediaLoadTask=Task {
+                defer {
+                    if mediaLoadRevision==revision {videoSelection=nil;mediaLoadTask=nil}
+                }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
                         throw ChatError.unsupportedMedia
                     }
                     let contentType = item.supportedContentTypes.first(where: { $0.conforms(to: .movie) })?.preferredMIMEType ?? "video/mp4"
+                    guard !Task.isCancelled,mediaLoadRevision==revision else {return}
                     await chatModel.sendCapturedMedia(data,kind:.video,contentType:contentType,target:target)
                 } catch {if chatModel.acceptsMediaTarget(target) {chatModel.lastError=error.localizedDescription}}
             }
@@ -291,7 +305,7 @@ struct ChatView: View {
             }
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
-            .disabled(!chatModel.canSend)
+            .disabled(!chatModel.canSend || mediaLoadTask != nil || isPresentingImagePicker || isPresentingVideoPicker || isPresentingCamera)
 
             TextField("Nachricht", text: Bindable(chatModel).draft, axis: .vertical)
                 .accessibilityIdentifier("chat-composer-field")
@@ -362,6 +376,12 @@ struct ChatView: View {
                         .offset(y: -18)
                 }
             }
+    }
+
+    private func cancelMediaLoading() {
+        mediaLoadRevision=UUID()
+        mediaLoadTask?.cancel()
+        mediaLoadTask=nil
     }
 
     private func cancelVoiceCapture() {

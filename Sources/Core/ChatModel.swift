@@ -31,12 +31,23 @@ final class ChatModel {
         .video: 30 * 1024 * 1024,
     ]
 
-    var state: State = .notConfigured
+    // Independent of authentication generation: A -> B -> A must not
+    // revive an asynchronous capture originally issued in conversation A.
+    private(set) var mediaContextRevision:UInt64=0
+    var state: State = .notConfigured {
+        didSet {if oldValue != state {mediaContextRevision &+= 1}}
+    }
     var messages: [ChatMessage] = []
     var draft = ""
-    var recipientUserID = ""
-    var showingFamilyGroup = false
-    var familyGroup: ChatFamilyGroup?
+    var recipientUserID = "" {
+        didSet {if oldValue != recipientUserID {mediaContextRevision &+= 1}}
+    }
+    var showingFamilyGroup = false {
+        didSet {if oldValue != showingFamilyGroup {mediaContextRevision &+= 1}}
+    }
+    var familyGroup: ChatFamilyGroup? {
+        didSet {if oldValue != familyGroup && showingFamilyGroup {mediaContextRevision &+= 1}}
+    }
     private var draftsByPeer: [String: String] = [:]
 
     var visibleMessages: [ChatMessage] {
@@ -1075,6 +1086,7 @@ final class ChatModel {
     /// different contact or account. No bearer or private key enters this value.
     struct MediaTarget:Equatable,Sendable {
         let generation:UInt64
+        let selectionRevision:UInt64
         let endpoint:URL
         let user:String
         let device:String
@@ -1086,7 +1098,7 @@ final class ChatModel {
     func mediaTarget() -> MediaTarget? {
         guard let configuration, state == .online,
               showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty else {return nil}
-        return MediaTarget(generation:configurationGeneration,endpoint:configuration.baseURL,
+        return MediaTarget(generation:configurationGeneration,selectionRevision:mediaContextRevision,endpoint:configuration.baseURL,
             user:configuration.userID,device:configuration.deviceID,peer:recipientUserID,
             family:showingFamilyGroup,members:showingFamilyGroup ? (familyGroup?.members.map(\.userID).sorted() ?? []) : [])
     }
@@ -1098,9 +1110,15 @@ final class ChatModel {
     func sendCapturedMedia(_ data:Data,kind:ChatMessageKind,contentType:String,target:MediaTarget) async {
         guard acceptsMediaTarget(target) else {return}
         switch kind {
-        case .image: await sendImage(data)
-        case .video: await sendVideo(data,contentType:contentType)
-        case .voice: await sendVoice(data)
+        case .image:
+            do {
+                let prepared=try Self.preparedImageData(data)
+                _=await send(prepared,kind:.image,contentType:"image/jpeg",expectedMediaTarget:target)
+            } catch {
+                if acceptsMediaTarget(target) {lastError=error.localizedDescription}
+            }
+        case .video: _=await send(data,kind:.video,contentType:contentType,expectedMediaTarget:target)
+        case .voice: _=await send(data,kind:.voice,contentType:"audio/wav",expectedMediaTarget:target)
         case .text: return
         }
     }
@@ -1123,7 +1141,8 @@ final class ChatModel {
     }
 
     @discardableResult
-    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
+    func send(_ data: Data, kind: ChatMessageKind, contentType: String, expectedMediaTarget:MediaTarget?=nil) async -> Bool {
+        if let expectedMediaTarget,!acceptsMediaTarget(expectedMediaTarget) {return false}
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
         guard let configuration, let keys, state == .online, !isSending, !historyMigrationInProgress,
@@ -1161,6 +1180,7 @@ final class ChatModel {
                 return false
             }
         }
+        if let expectedMediaTarget,!acceptsMediaTarget(expectedMediaTarget) {return false}
         if selectedGroup {
             guard let familyGroup, familyGroup.isReady,
                   familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {

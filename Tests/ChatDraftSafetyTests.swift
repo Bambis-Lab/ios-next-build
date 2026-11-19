@@ -419,17 +419,38 @@ final class ChatDraftSafetyTests: XCTestCase {
 
     func testCapturedMediaScopeChangesOnRecipientRoleOrAccountSwitch() throws {
         let endpoint=try XCTUnwrap(URL(string:"https://example.invalid"))
-        func target(generation:UInt64=1,user:String="a",device:String="ios-a",peer:String="b",
+        func target(generation:UInt64=1,revision:UInt64=0,user:String="a",device:String="ios-a",peer:String="b",
                     family:Bool=false,members:[String]=[]) -> ChatModel.MediaTarget {
-            .init(generation:generation,endpoint:endpoint,user:user,device:device,peer:peer,family:family,members:members)
+            .init(generation:generation,selectionRevision:revision,endpoint:endpoint,user:user,device:device,peer:peer,family:family,members:members)
         }
         let original=target()
         XCTAssertEqual(original,target())
         XCTAssertNotEqual(original,target(generation:2))
+        XCTAssertNotEqual(original,target(revision:1))
         XCTAssertNotEqual(original,target(user:"c"))
         XCTAssertNotEqual(original,target(device:"ios-c"))
         XCTAssertNotEqual(original,target(peer:"c"))
         XCTAssertNotEqual(original,target(family:true,members:["a","b"]))
         XCTAssertNotEqual(target(family:true,members:["a","b"]),target(family:true,members:["a","c"]))
+    }
+
+    func testMediaContextNeverRevivesAfterRoundTripOrOfflineReconnect() {
+        let chat=ChatModel()
+        chat.recipientUserID="fixture-a"
+        let initial=chat.mediaContextRevision
+        chat.recipientUserID="fixture-b"
+        chat.recipientUserID="fixture-a"
+        XCTAssertEqual(chat.mediaContextRevision,initial+2)
+        let direct=chat.mediaContextRevision
+        chat.showingFamilyGroup=true
+        chat.showingFamilyGroup=false
+        XCTAssertEqual(chat.mediaContextRevision,direct+2)
+        chat.state = .online
+        let online=chat.mediaContextRevision
+        chat.state = .offline("synthetic disconnect")
+        chat.state = .online
+        XCTAssertEqual(chat.mediaContextRevision,online+2)
+        chat.state = .online
+        XCTAssertEqual(chat.mediaContextRevision,online+2)
     }
 }
