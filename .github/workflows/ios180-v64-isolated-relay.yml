@@ -1,0 +1,28 @@
+name: V6.4 isolated relay synthetic contract
+on:
+  push:
+    branches: ['feature/ios180-v64-isolated-relay']
+permissions:
+  contents: read
+jobs:
+  local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install pinned synthetic fixture dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/relay"
+          "$RUNNER_TEMP/relay/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+      - name: Test only loopback relay authentication and expiry
+        run: |
+          set -euo pipefail
+          mkdir -p build/v64
+          "$RUNNER_TEMP/relay/bin/python" Scripts/Acceptance/test_distributed_audio_relay.py -v 2>&1 | tee build/v64/relay-tests.log
+      - name: Preserve result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-isolated-relay-local-evidence
+          path: build/v64/
+          retention-days: 14
