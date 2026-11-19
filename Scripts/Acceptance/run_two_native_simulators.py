@@ -60,14 +60,47 @@ def boot_reserved():
     reservation=json.loads((OUT/"reservation.json").read_text())
     second=reservation["B"]
     require(reservation["A"]==FIRST and FIRST.lower()!=second.lower(),"reservation mismatch")
+    from concurrent.futures import ThreadPoolExecutor
+    pair=(("A",FIRST),("B",second))
     timings={}
-    for role,uid in (("A",FIRST),("B",second)):
+    warmup={}
+    def cold_inventory():
+        inventory=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],
+                                         timeout=45,emit_output=False))
+        states={d["udid"]:d["state"] for devices in inventory["devices"].values() for d in devices}
+        return {role:states.get(uid) for role,uid in pair}
+    def boot_one(role,uid,label):
         started=time.monotonic()
-        run_bounded(["xcrun","simctl","boot",uid],timeout=60)
+        run_bounded(["xcrun","simctl","boot",uid],timeout=90)
         run_bounded(["xcrun","simctl","bootstatus",uid,"-b"],timeout=240)
-        timings[role]=round(time.monotonic()-started,3)
-        diagnostics(f"boot-{role}")
-    # Both bootstatus calls already succeeded. A second bootstatus call
+        return round(time.monotonic()-started,3)
+
+    # In three full acceptance runs, booting B for the first time while A
+    # was already live stalled. Complete each guest's first-boot migration
+    # with no other guest active, then prove both warm guests run together.
+    # Only disposable CI devices are affected. No erase or runtime changes.
+    for role,uid in pair:
+        require(all(s=="Shutdown" for s in cold_inventory().values()),
+                "warmup requires both exact guests shut down")
+        warmup[role]=boot_one(role,uid,"warmup")
+        diagnostics(f"warmup-{role}")
+        run_bounded(["xcrun","simctl","shutdown",uid],timeout=90)
+        deadline=time.monotonic()+90
+        while True:
+            states=cold_inventory()
+            if all(s=="Shutdown" for s in states.values()): break
+            require(time.monotonic()<deadline,"guest shutdown not confirmed")
+            time.sleep(2)
+        (OUT/"warmup.json").write_text(json.dumps({"warmup_seconds":warmup,
+            "cold_states":states},indent=2)+"\n")
+    # Launch both warmed guests without waiting for one guest's bootstatus
+    # before requesting the other boot. Both exact bootstatus calls must pass.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures={role:pool.submit(boot_one,role,uid,"paired") for role,uid in pair}
+        for role,future in futures.items():
+            timings[role]=future.result()
+    diagnostics("boot-pair")
+    # Both final bootstatus calls already succeeded. A second bootstatus call
     # stalled in run 44445969729. Check actual guest process execution on
     # both exact destinations concurrently, without reentering bootstatus.
     from concurrent.futures import ThreadPoolExecutor
@@ -83,7 +116,7 @@ def boot_reserved():
         probes=[future.result() for future in futures]
     require(max(p["started"] for p in probes)<min(p["finished"] for p in probes),
             "guest probe invocation windows did not overlap")
-    (OUT/"simulators.json").write_text(json.dumps({**reservation,"both_booted":True,"boot_seconds":timings,
+    (OUT/"simulators.json").write_text(json.dumps({**reservation,"both_booted":True,"boot_seconds":timings,"isolated_warmup_seconds":warmup,
         "verification":"successful per-device bootstatus followed by overlapping targeted guest process probes",
         "probes":probes},indent=2)+"\n")
     print("IOS173_TWO_DISTINCT_BOOTED_SIMULATORS",flush=True)

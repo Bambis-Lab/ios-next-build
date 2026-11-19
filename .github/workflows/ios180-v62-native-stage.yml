@@ -124,7 +124,7 @@ jobs:
   native:
     needs: build
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 55
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: ${{ inputs.duration }}
     steps:
@@ -203,7 +203,7 @@ jobs:
           python3 -m py_compile Scripts/Acceptance/run_two_native_simulators.py
           bash -n Scripts/Acceptance/run_native_wss_smoke.sh
           python3 Scripts/Acceptance/run_two_native_simulators.py reserve 2>&1 | tee build/ios173/dual-reserve.log
-      - name: Boot both pre-reserved iPhones and verify exact destinations
+      - name: Warm each iPhone separately then boot and verify both exact destinations
         shell: bash
         run: |
           set -euo pipefail
