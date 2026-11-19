@@ -210,6 +210,8 @@ jobs:
             exit 1
           fi
       - name: Test clean installation before any other app tests
+        id: clean_install
+        continue-on-error: true
         if: github.ref == 'refs/heads/feature/ios180-v70-integration'
         shell: bash
         run: |
@@ -295,6 +297,11 @@ jobs:
           grep -Fq "testJuliFamilyPreview" build/ios173/IndependentServices.log
           grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/IndependentServices.log
           echo "IOS173_INTEGRATION_UI_SMOKE=PASS"
+      - name: Enforce clean-install result after independent regressions
+        if: always() && github.ref == 'refs/heads/feature/ios180-v70-integration'
+        shell: bash
+        run: |
+          test "${{ steps.clean_install.outcome }}" = success
       - name: Preserve regression evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
