@@ -74,6 +74,7 @@ final class ChatModel {
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
+    private var readyOutboxTask: Task<Void,Never>?
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
@@ -687,6 +688,8 @@ final class ChatModel {
         } else {
             stop()
         }
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
         configurationGeneration &+= 1
         resetTicketReadAccess()
         resetCalls()
@@ -822,6 +825,7 @@ final class ChatModel {
             }
             state = .online
             receiveTask = Task { [weak self] in await self?.receiveLoop() }
+            scheduleReadyOutboxResume()
         } catch {
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             state = .offline(error.localizedDescription)
@@ -829,6 +833,8 @@ final class ChatModel {
     }
 
     func stop() {
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
         applyPendingChatState([])
         stagingChatID=nil
         isSending=false
@@ -852,6 +858,8 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
         applyPendingChatState([])
         stagingChatID=nil
         isSending=false
@@ -1000,11 +1008,16 @@ final class ChatModel {
                     self.receiveTask?.cancel()
                     try await self.historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
                         try KeychainStore.save(family.grant.accessToken, account:self.tokenAccount)
+                        self.readyOutboxTask?.cancel()
+                        self.readyOutboxTask=nil
+                        self.isSending=false
+                        self.stagingChatID=nil
                         self.configurationGeneration &+= 1
                         self.resetTicketReadAccess()
                         self.configuration=ChatConfiguration(baseURL:current.baseURL,
                             token:family.grant.accessToken,userID:current.userID,deviceID:current.deviceID)
                         self.receiveTask=Task { [weak self] in await self?.receiveLoop() }
+                        self.scheduleReadyOutboxResume()
                         self.scheduleFamilyRenewal(using:appModel,grant:family.grant)
                     }
                     return
@@ -1233,6 +1246,8 @@ final class ChatModel {
             try outbox.closeExpiredAfterHistoryCommit(groupID:pending.groupID)
             try reloadChatOutboxState(outbox)
             lastError="Versandauftrag abgeschlossen. Eine frühere Zustellung kann nicht ausgeschlossen werden."
+            // A later, positively ready head may continue; this never replays the closed group.
+            try await drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
         } catch {
             guard generation==configurationGeneration else {return}
             lastError="Abschluss nicht möglich. Der gesicherte Versandauftrag bleibt erhalten."
@@ -1258,6 +1273,38 @@ final class ChatModel {
         }
     }
 
+    /// A fresh session or successful receive after an offline period may
+    /// resume a proven ready head, never a partially submitted group.
+    static func canAutomaticallyResume(_ pending:DurableChatOutbox.Pending?) -> Bool {
+        guard let pending,!pending.entries.isEmpty else {return false}
+        return pending.entries.allSatisfy{$0.phase == .ready}
+    }
+
+    private func scheduleReadyOutboxResume() {
+        guard readyOutboxTask==nil,isFamilyCredentialActive,state == .online,!isSending,
+              !historyMigrationInProgress,!chatOutboxBlocked,pendingChatNeverSubmitted,
+              let configuration,let keys else {return}
+        let generation=configurationGeneration
+        readyOutboxTask=Task { [weak self] in
+            guard let self else {return}
+            defer {if generation==self.configurationGeneration {self.readyOutboxTask=nil}}
+            guard !Task.isCancelled,generation==self.configurationGeneration,
+                  self.configuration==configuration,self.isFamilyCredentialActive,self.state == .online,
+                  !self.historyMigrationInProgress,!self.isSending,!self.chatOutboxBlocked else {return}
+            self.isSending=true
+            defer {if generation==self.configurationGeneration {self.isSending=false}}
+            do {
+                let outbox=try self.openChatOutbox(configuration:configuration,keys:keys)
+                try self.reloadChatOutboxState(outbox)
+                guard Self.canAutomaticallyResume(try outbox.pending()) else {return}
+                try await self.drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
+            } catch {
+                guard generation==self.configurationGeneration,!Task.isCancelled else {return}
+                self.lastError="Gesicherter Versand bleibt erhalten. Bitte Versandstatus prüfen."
+            }
+        }
+    }
+
     /// Continue only positively unsubmitted heads. Never automatically replay
     /// an uncertain request or change the roster of a queued group.
     private func drainReadyChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64) async throws {
@@ -1265,7 +1312,7 @@ final class ChatModel {
             try Task.checkCancellation()
             guard generation==configurationGeneration,self.configuration==configuration,isFamilyCredentialActive,
                   state == .online,!historyMigrationInProgress else {throw CancellationError()}
-            guard let head=try outbox.pending(),head.entries.allSatisfy({$0.phase == .ready}) else {return}
+            guard Self.canAutomaticallyResume(try outbox.pending()) else {return}
             try await flushChatOutbox(outbox,configuration:configuration,generation:generation,allowIdempotentReplay:false)
         }
     }
@@ -1496,7 +1543,9 @@ final class ChatModel {
                     // decrypted content or detailed crypto errors in UI/logs.
                     lastError = "\(invalidCount) ungültige oder nicht verifizierte Chat-Nachrichten verworfen."
                 }
+                let recovered = state != .online
                 state = .online
+                if recovered {scheduleReadyOutboxResume()}
                 retryNanoseconds = 500_000_000
             } catch is CancellationError {
                 return

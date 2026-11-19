@@ -394,4 +394,26 @@ final class ChatDraftSafetyTests: XCTestCase {
         XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([message(group,"other")],pending:[pending]))
         XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([durable,durable],pending:[pending]))
     }
+
+    func testAutomaticResumeRequiresAllEntriesNeverSubmitted() throws {
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a")
+        let peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,
+            device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        let group=UUID().uuidString.lowercased()
+        let e=try keys.encrypt(Data("fixture".utf8),kind:.text,contentType:"text/plain",groupID:group,
+            chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:ISO8601DateFormatter().string(from:Date()))
+        var pending=DurableChatOutbox.Pending(scope:scope,groupID:group,recipients:[peer],
+            entries:[.init(envelope:e,phase:.ready)])
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(nil))
+        XCTAssertTrue(ChatModel.canAutomaticallyResume(pending))
+        pending.entries[0].phase = .uncertain
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+        pending.entries[0].phase = .confirmed
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+        pending.entries=[]
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+    }
 }
