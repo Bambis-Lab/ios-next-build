@@ -1215,7 +1215,7 @@ final class ChatModel {
                 handedOff=true
                 pendingChatGroupIDs.insert(groupID)
                 try reloadChatOutboxState(outbox)
-                if pendingChatSendID==groupID || pendingChatNeverSubmitted {
+                if pendingChatSendID==groupID || pendingChatNeverSubmitted || pendingChatAllConfirmed {
                     try await drainReadyChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
                 } else {
                     // A new send is not authorization to replay an older
@@ -1307,7 +1307,7 @@ final class ChatModel {
 
     private func scheduleReadyOutboxResume() {
         guard readyOutboxTask==nil,isFamilyCredentialActive,state == .online,!isSending,
-              !historyMigrationInProgress,!chatOutboxBlocked,pendingChatNeverSubmitted,
+              !historyMigrationInProgress,!chatOutboxBlocked,(pendingChatNeverSubmitted || pendingChatAllConfirmed),
               let configuration,let keys else {return}
         let generation=configurationGeneration
         readyOutboxTask=Task { [weak self] in
@@ -1321,7 +1321,6 @@ final class ChatModel {
             do {
                 let outbox=try self.openChatOutbox(configuration:configuration,keys:keys)
                 try self.reloadChatOutboxState(outbox)
-                guard Self.canAutomaticallyResume(try outbox.pending()) else {return}
                 try await self.drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
             } catch {
                 guard generation==self.configurationGeneration,!Task.isCancelled else {return}
@@ -1337,7 +1336,10 @@ final class ChatModel {
             try Task.checkCancellation()
             guard generation==configurationGeneration,self.configuration==configuration,isFamilyCredentialActive,
                   state == .online,!historyMigrationInProgress else {throw CancellationError()}
-            guard Self.canAutomaticallyResume(try outbox.pending()) else {return}
+            guard let head=try outbox.pending(), !head.entries.isEmpty,
+                  Self.canAutomaticallyResume(head) || head.entries.allSatisfy({$0.phase == .confirmed})
+            else {return}
+            // An all-confirmed head needs only local finalization, no send.
             try await flushChatOutbox(outbox,configuration:configuration,generation:generation,allowIdempotentReplay:false)
         }
     }
@@ -1409,7 +1411,8 @@ final class ChatModel {
             let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
             // Complete expectations are written before forgetting the head.
             // Capacity/error leaves the confirmed head intact, never replays it.
-            try ledger.registerConfirmed(confirmed)
+            let retained=Set(messages.filter{$0.direction == .outgoing}.map(\.id)).union(pendingChatGroupIDs)
+            try ledger.registerConfirmed(confirmed,retaining:retained)
             recipientProofSummaries=try ledger.summaries()
         }
         try await commitHistoryMutation(generation:generation) {
@@ -1667,7 +1670,7 @@ final class ChatModel {
         if !ids.isEmpty {
             let claims=try await relay.queryRecipientProofs(ids,configuration:configuration)
             try requireCurrent()
-            if !claims.isEmpty {try ledger.apply(claims)}
+            try ledger.applyQuery(claims,requested:ids)
             recipientProofPollCursor=ids.last
         }
         try requireCurrent()

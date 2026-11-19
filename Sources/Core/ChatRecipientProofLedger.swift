@@ -91,7 +91,7 @@ final class ChatRecipientProofLedger {
 
     /// Caller passes an authenticated outbox snapshot; incomplete or uncertain
     /// heads must remain in the outbox and cannot become delivery expectations.
-    func registerConfirmed(_ pending:DurableChatOutbox.Pending) throws {
+    func registerConfirmed(_ pending:DurableChatOutbox.Pending, retaining retainedGroupIDs:Set<String>?=nil) throws {
         guard pending.scope==scope,!pending.entries.isEmpty,
               pending.entries.allSatisfy({$0.phase == .confirmed}) else {throw ChatHistoryError.invalidArchive}
         let fragments=try pending.entries.map { entry -> Fragment in
@@ -105,9 +105,17 @@ final class ChatRecipientProofLedger {
               Set(pending.recipients.map(\.deviceID)).count==pending.recipients.count
         else {throw ChatHistoryError.invalidArchive}
         var snapshot=try load()
+        // Only derived delivery metadata for messages no longer present in
+        // the durable history may be retired. Always protect the in-flight head.
+        // No history, message, device identity or key is modified here.
+        if let retainedGroupIDs {
+            guard retainedGroupIDs.contains(pending.groupID) else {throw ChatHistoryError.invalidArchive}
+            snapshot.groups.removeAll{!retainedGroupIDs.contains($0.id)}
+        }
         if let existing=snapshot.groups.first(where:{$0.id==pending.groupID}) {
             let baseline=existing.fragments.map { f -> Fragment in var v=f;v.proof=nil;return v }
             guard baseline==fragments else {throw ChatHistoryError.invalidArchive}
+            if retainedGroupIDs != nil {try save(snapshot)}
             return
         }
         guard snapshot.groups.count<Self.maximumGroups,
@@ -133,6 +141,17 @@ final class ChatRecipientProofLedger {
             snapshot.groups[i]=Group(id:snapshot.groups[i].id,fragments:entries)
         }
         try save(snapshot)
+    }
+
+    /// A query can be in flight while the history retires an old group.
+    /// Reject unsolicited IDs; ignore only requested IDs no longer retained.
+    func applyQuery(_ proofs:[ChatRecipientProofV1],requested:[String]) throws {
+        guard (1...256).contains(requested.count),Set(requested).count==requested.count,
+              proofs.count<=requested.count,Set(proofs.map(\.id)).count==proofs.count,
+              Set(proofs.map(\.id)).isSubset(of:Set(requested)) else {throw ChatHistoryError.invalidArchive}
+        let known=Set(try load().groups.flatMap(\.fragments).map(\.id))
+        let applicable=proofs.filter{known.contains($0.id)}
+        if !applicable.isEmpty {try apply(applicable)}
     }
 
     func unconfirmedIDs(limit:Int=256) throws -> [String] {

@@ -61,5 +61,21 @@ final class ChatRecipientProofLedgerTests:XCTestCase {
         XCTAssertEqual(summary.confirmedUsers,1)
         XCTAssertTrue(summary.allConfirmed)
         try open().apply([proofs[0]])
+        // Retire only a group outside the current history, never an active
+        // group; a delayed query for the retired group must not resurrect it.
+        let newGroup=UUID().uuidString.lowercased()
+        let fresh=try sender.encrypt(Data("next".utf8),kind:.text,contentType:"text/plain",groupID:newGroup,
+            chunkIndex:0,chunkCount:1,sender:a,recipient:b,createdAt:stamp)
+        let next=DurableChatOutbox.Pending(scope:scope,groupID:newGroup,recipients:[b],
+            entries:[.init(envelope:fresh,phase:.confirmed)])
+        XCTAssertThrowsError(try open().registerConfirmed(next,retaining:[group]))
+        try open().registerConfirmed(next,retaining:[group,newGroup])
+        XCTAssertTrue(try XCTUnwrap(open().summaries()[group]).allConfirmed)
+        try open().registerConfirmed(next,retaining:[newGroup])
+        XCTAssertNil(try open().summaries()[group])
+        try open().applyQuery([proofs[0]],requested:[proofs[0].id])
+        XCTAssertNil(try open().summaries()[group])
+        XCTAssertThrowsError(try open().applyQuery([proofs[0]],requested:[fresh.id]))
+        XCTAssertEqual(try open().unconfirmedIDs(),[fresh.id])
     }
 }
