@@ -22,11 +22,6 @@ struct FactoryStandaloneView: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
 
-                FactoryCommandDeck(factoryConnected: factory.phase == .connected,
-                    ownerConnected: false,
-                    runnerConnected: runnerOnline,
-                    reportedSources: factory.snapshot?.rows.count ?? 0)
-
                 NavigationLink {
                     FactoryConnectionView(model: factory)
                 } label: {
@@ -49,7 +44,16 @@ struct FactoryStandaloneView: View {
                     .contentShape(RoundedRectangle(cornerRadius: 21))
                 }
                 .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(factory.phase == .disconnected ? "Factory verbinden" : "Factory-Verbindung verwalten")
+                .accessibilityValue(factory.phase.title)
+                .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("preconnect-factory-configure")
+
+                FactoryCommandDeck(factoryConnected: factory.phase == .connected,
+                    ownerConnected: false,
+                    runnerConnected: runnerOnline,
+                    reportedSources: factory.snapshot?.rows.count ?? 0)
 
                 if factory.phase == .loading {
                     ProgressView("Factory-Verbindung wird aktualisiert …")

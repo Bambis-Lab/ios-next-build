@@ -83,12 +83,20 @@ final class IndependentServicesUITests: XCTestCase {
         tapService("factory", in: app)
         XCTAssertTrue(app.navigationBars["Master Factory"].waitForExistence(timeout: 8),
                       "Factory cannot be opened before HA configuration")
-        let configuration = app.descendants(matching: .any)
-            .matching(identifier: "preconnect-factory-configure").firstMatch
-        XCTAssertTrue(configuration.waitForExistence(timeout: 5),
+        // Query the actual actionable control rather than constructing a
+        // full AX snapshot of the lazy Factory workspace hierarchy.
+        let configuration = app.buttons["preconnect-factory-configure"]
+        XCTAssertTrue(configuration.waitForExistence(timeout: 10),
                       "Factory connection is missing")
+        XCTAssertTrue(configuration.isHittable,"Factory configuration is not tappable")
         configuration.tap()
         XCTAssertTrue(app.navigationBars["Factory verbinden"].waitForExistence(timeout: 8),
                       "Factory OAuth setup does not open")
+        XCTAssertTrue(app.textFields["factory-endpoint"].waitForExistence(timeout: 5),
+                      "Factory OAuth setup lacks the endpoint field")
+        let factoryAttachment=XCTAttachment(screenshot:app.screenshot())
+        factoryAttachment.name="ios180-real-factory-connect"
+        factoryAttachment.lifetime = .keepAlways
+        add(factoryAttachment)
     }
 }
