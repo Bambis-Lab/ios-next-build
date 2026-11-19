@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "date": "2026-11-19",
+  "scope": "V6.3 selected source and diagnostic evidence, not final acceptance",
+  "source_heads": [
+    {
+      "branch": "feature/ios180-v62-native-staged-call",
+      "sha": "0254cc74b2be6d1265c61c2a4c44cb5a9f48421c",
+      "run": 44451591882
+    },
+    {
+      "branch": "feature/ios180-v63-proof-checkpoint",
+      "sha": "e1a7e627e17b8f10bde222ac7ba55b44dcab31da",
+      "run": 44451749396
+    },
+    {
+      "branch": "feature/ios180-v63-proof-integration",
+      "sha": "4043c224730721da0b4bd68e1f654794a19804b5",
+      "run": 44451913796
+    },
+    {
+      "branch": "feature/ios180-v63-factory-accessibility",
+      "sha": "afd930a49842b66ff01cdd6f06d8c3e48a657e94",
+      "run": 44451990508
+    }
+  ],
+  "duration_seconds": [
+    30,
+    120,
+    300
+  ],
+  "frame_rate_per_sender": 50,
+  "original_diagnostic_bundle": {
+    "file": "iosnext-v63-original-diagnostics-2026-11-19.zip",
+    "bytes": 24037978,
+    "sha256": "37ef8c0ab2fea68c92403d89c652d09f9666d4804dd4a0161f904a00fcd083dc",
+    "storage": "private user file library",
+    "archives": [
+      {
+        "run": 44450386899,
+        "artifact": 14494679449,
+        "sha256": "ecac6f8468e3ddd865a3b45a8be234424bef16c87a15f6231c8747a23defb29f"
+      },
+      {
+        "run": 44448442074,
+        "artifact": 14495322067,
+        "sha256": "ff3f8d7d055688619cdbd430b34b5db29c61e1259dfeb10fa26f8d355672b25d"
+      },
+      {
+        "run": 44449711419,
+        "artifact": 14495412064,
+        "sha256": "d5aece939b306fc76395927ea8d70ada7acde9d9c4cf338783572d75522394c3"
+      },
+      {
+        "run": 44450506052,
+        "artifact": 14496265136,
+        "sha256": "74978d86740f98f8804028dcd534d6e7f54afe9a02750e6637d5ce8bcc1698fe"
+      }
+    ],
+    "independently_compared_sha256": true,
+    "zip_crc_all_pass": true
+  },
+  "limitations": [
+    "Historical diagnostic failures are not passes. No native timed audio success yet.",
+    "Old 120/600/1800 stages skipped following 30-second boot failure; V6.3 active workflow removes 600/1800 stages.",
+    "3-core runner reported load 461.12 after first simulator boot; pressure is evidence, not proof of sole cause.",
+    "Swift proof checkpoint, sender integration and Factory UI tests pending. Ledger capacity, lifecycle, performance and complete runtime integration remain open.",
+    "Backend CI pass 44450591891 at 17d5625a; the three latest successful backend runs returned no uploaded artifacts. Full project evidence map incomplete.",
+    "G03/G04/G99 and release remain blocked."
+  ]
+}
