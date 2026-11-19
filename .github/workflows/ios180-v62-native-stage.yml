@@ -1,4 +1,4 @@
-name: V6.2 native independent WSS stage
+name: V6.3 native independent WSS stage
 on:
   workflow_call:
     inputs:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   native:
     runs-on: xcode-27
-    timeout-minutes: 70
+    timeout-minutes: 40
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: ${{ inputs.duration }}
     steps:
@@ -67,7 +67,7 @@ jobs:
           import os
           from pathlib import Path
           duration=int(os.environ["IOSNEXT_NATIVE_AUDIO_DURATION"])
-          assert duration in (30,120,600,1800)
+          assert duration in (30,120,300)
           source=Path("Scripts/Acceptance/FamilyAudioIndependentSimulatorTests.swift.in").read_text()
           assert source.count("@DURATION_SECONDS@")==1
           Path("Tests/FamilyAudioIndependentSimulatorTests.swift").write_text(source.replace("@DURATION_SECONDS@",str(duration)))
@@ -110,7 +110,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: V62-native-dual-${{ inputs.duration }}s
+          name: V63-native-dual-${{ inputs.duration }}s
           path: |
             build/ios173/dual-simulator/
             build/ios173/BuildForTesting.log

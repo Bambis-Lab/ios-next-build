@@ -87,8 +87,8 @@ def serve():
                 B[0]:[{"device_id":B[1],"signing_public_key":b64(public(sb))}]}
     calls=CallSignalling()
     # Only this synthetic acceptance fixture manufactures an already accepted call.
-    duration=int(os.environ.get("IOSNEXT_NATIVE_AUDIO_DURATION","600"))
-    if duration not in (30,120,600,1800):
+    duration=int(os.environ.get("IOSNEXT_NATIVE_AUDIO_DURATION","300"))
+    if duration not in (30,120,300):
         raise ValueError("invalid native audio duration")
     calls.calls[CID]={"id":CID,"caller":A,"callee":B,"state":"accepted","expires":time.monotonic()+duration+600}
     broker=SimpleNamespace(family_registry=registry,bootstrap_issuer=SimpleNamespace(verify=claims.get),

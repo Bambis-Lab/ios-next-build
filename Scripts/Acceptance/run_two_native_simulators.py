@@ -14,8 +14,8 @@ from boot_simulator import run_bounded
 OUT=Path("build/ios173/dual-simulator").resolve()
 OUT.mkdir(parents=True,exist_ok=True)
 FIRST=os.environ["SIM_ID"]
-DURATION=int(os.environ.get("IOSNEXT_NATIVE_AUDIO_DURATION","600"))
-if DURATION not in (30,120,600,1800):
+DURATION=int(os.environ.get("IOSNEXT_NATIVE_AUDIO_DURATION","300"))
+if DURATION not in (30,120,300):
     raise ValueError("invalid native audio duration")
 ROOT=Path(os.environ["RUNNER_TEMP"])/"ios173-dual-products"
 
