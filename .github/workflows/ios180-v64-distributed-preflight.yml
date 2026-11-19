@@ -1,7 +1,7 @@
 name: V6.4 distributed native prerequisite
 on:
   push:
-    branches: ['feature/ios180-v64-distributed-preflight', 'feature/ios180-v64-native-execution-preflight', 'feature/ios180-v64-native-role-contract', 'feature/ios180-v65-native-handoff-rehearsal']
+    branches: ['feature/ios180-v64-distributed-preflight', 'feature/ios180-v64-native-execution-preflight', 'feature/ios180-v64-native-role-contract', 'feature/ios180-v65-native-handoff-rehearsal', 'feature/ios180-v70-native-handoff-hardening']
   workflow_dispatch:
 permissions:
   contents: read
@@ -211,12 +211,13 @@ jobs:
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/ios173/boot.log
           python3 Scripts/Acceptance/distributed_preflight.py client
       - name: Rehearse private role file handoff inside the disposable native simulator
-        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal'
+        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening'
         env:
           IOSNEXT_PREFLIGHT_ROLE: ${{ matrix.role }}
         shell: bash
         run: |
           set -euo pipefail
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py self-test
           "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py
       - name: Preserve separate native prerequisite evidence
         if: always()
@@ -224,7 +225,17 @@ jobs:
         with:
           name: V64-preflight-${{ matrix.role }}
           path: |
-            build/ios173/dual-simulator/
+            build/ios173/dual-simulator/SHA256SUMS
+            build/ios173/dual-simulator/source-and-duration.txt
+            build/ios173/dual-simulator/xcode-version.txt
+            build/ios173/dual-simulator/architecture.txt
+            build/ios173/dual-simulator/guest-inventory-status.txt
+            build/ios173/dual-simulator/native-test.log
+            build/ios173/dual-simulator/native-summary.json
+            build/ios173/dual-simulator/preflight.json
+            build/ios173/dual-simulator/handoff-result-status.json
+            build/ios173/dual-simulator/handoff-evidence.json
+            build/ios173/dual-simulator/handoff-failure.json
             build/ios173/boot.log
             build/ios173/resolve.log
             build/ios173/selected-toolchain.log
@@ -244,12 +255,14 @@ jobs:
       - name: Verify prerequisite evidence from both independent machines
         run: python3 Scripts/Acceptance/distributed_preflight.py validate
       - name: Verify both native handoff rehearsals without network
-        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal'
+        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening'
         run: python3 Scripts/Acceptance/rehearse_native_role_handoff.py validate
       - name: Preserve independent validation
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: V64-preflight-validation
-          path: build/preflight/
+          path: |
+            build/preflight/validation.json
+            build/preflight/handoff-validation.json
           retention-days: 14
