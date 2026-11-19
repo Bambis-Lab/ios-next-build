@@ -209,15 +209,21 @@ struct ChatInboxView: View {
             ChatSettingsView(appModel: appModel, chatModel: chatModel)
         }
         .sheet(isPresented: $showingMemberTickets) {
-            MemberTicketInboxView(chatModel: chatModel)
+            if appModel.familyBrokerConfigured {
+                SecureTicketEntryView(appModel: appModel, chatModel: chatModel)
+            } else {
+                MemberTicketInboxView(chatModel: chatModel)
+            }
         }
         .sheet(isPresented: $showingNewTicket) {
-            NavigationStack {
-                MemberTicketCreationView(chatModel: chatModel)
+            if appModel.familyBrokerConfigured {
+                SecureTicketEntryView(appModel: appModel, chatModel: chatModel, startNew: true)
+            } else {
+                NavigationStack { MemberTicketCreationView(chatModel: chatModel) }
             }
         }
         .sheet(isPresented: $showingOwnerTickets) {
-            AdminAreaView(appModel: appModel, ticketsOnly: true)
+            SecureTicketEntryView(appModel: appModel, chatModel: chatModel)
         }
         .privacySensitive()
         .overlay {
@@ -235,7 +241,7 @@ struct ChatInboxView: View {
             await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel)
         }
         .onAppear {
-            if showMemberTickets { Task { await chatModel.loadMemberTickets() } }
+            if showMemberTickets && !appModel.familyBrokerConfigured { Task { await chatModel.loadMemberTickets() } }
         }
         .onDisappear {
             // Conversation detail owns its own lifecycle while pushed.

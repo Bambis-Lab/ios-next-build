@@ -933,7 +933,7 @@ final class ChatModel {
     }
 
     func loadMemberTickets() async {
-        guard let configuration, accessRole == .member else { return }
+        guard FamilyBootstrapClient.configuredURL() == nil, let configuration, accessRole == .member else { return }
         let generation = configurationGeneration
         do {
             let items = try await relay.memberTickets(configuration: configuration)
@@ -946,7 +946,7 @@ final class ChatModel {
     }
 
     func loadMemberTicket(_ id: String) async {
-        guard let configuration, accessRole == .member else { return }
+        guard FamilyBootstrapClient.configuredURL() == nil, let configuration, accessRole == .member else { return }
         let generation = configurationGeneration
         do {
             let item = try await relay.memberTicket(id, configuration: configuration)
@@ -959,7 +959,7 @@ final class ChatModel {
     }
 
     func replyMemberTicket(_ id: String, message: String) async -> Bool {
-        guard let configuration, accessRole == .member else { return false }
+        guard FamilyBootstrapClient.configuredURL() == nil, let configuration, accessRole == .member else { return false }
         let body = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, body.count <= 4000 else {
             lastError = "Die Antwort muss zwischen 1 und 4.000 Zeichen enthalten."
@@ -981,7 +981,7 @@ final class ChatModel {
 
     @discardableResult
     func createSupportTicket(message: String) async -> String? {
-        guard let configuration else { return nil }
+        guard FamilyBootstrapClient.configuredURL() == nil, let configuration else { return nil }
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty, normalized.count <= 4000 else {
             lastError = "Das Ticket muss zwischen 1 und 4.000 Zeichen enthalten."
@@ -1289,6 +1289,164 @@ final class ChatModel {
         let resized = renderer.image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
         guard let result = resized.jpegData(compressionQuality: 0.82) else { throw ChatError.unsupportedMedia }
         guard result.count <= (maximumBytes[.image] ?? 0) else { throw ChatError.contentTooLarge }
+        return result
+    }
+}
+
+@MainActor
+extension ChatModel {
+    func secureTicketScope(_ app: AppModel) -> TicketScreenScope? {
+        guard isFamilyCredentialActive, let config = configuration, let keys,
+              let family = app.familyChatContext(), let profile = app.registeredFamilyProfile,
+              config.userID == family.haUserID, config.deviceID == family.deviceID,
+              config.baseURL == family.endpoint,
+              app.homeAssistantCurrentUser?.id == config.userID
+        else { return nil }
+        return TicketScreenScope(endpoint: config.baseURL, user: config.userID,
+            device: config.deviceID, owner: profile == .nico, keyFingerprint: keys.safetyNumber)
+    }
+
+    private func checkTicketScope(_ scope: TicketScreenScope, _ app: AppModel) throws {
+        try Task.checkCancellation()
+        guard secureTicketScope(app) == scope else { throw ChatError.authenticationFailed }
+    }
+
+    private func ticketAuthorization(_ scope: TicketScreenScope, _ app: AppModel) async throws -> EncryptedTicketAuthorization {
+        try checkTicketScope(scope, app)
+        guard let configuration else { throw ChatError.authenticationFailed }
+        if scope.owner {
+            let approved = try await app.requestApprovedFamilyOwnerSession()
+            try checkTicketScope(scope, app)
+            guard approved.isValid(haUserID: scope.user, deviceID: scope.device)
+            else { throw ChatError.authenticationFailed }
+            return .owner(AdminControlConfiguration(baseURL: scope.endpoint,
+                ownerToken: approved.accessToken, ownerDeviceSession: approved.deviceSession),
+                userID: scope.user, deviceID: scope.device)
+        }
+        return .member(configuration)
+    }
+
+    func secureTicketList(_ scope: TicketScreenScope, app: AppModel) async throws -> [EncryptedTicketSummary] {
+        let auth = try await ticketAuthorization(scope, app)
+        let client = EncryptedTicketClient()
+        var result: [EncryptedTicketSummary] = []
+        var cursor: String?
+        for _ in 0..<21 {
+            let page = try await client.list(using: auth, after: cursor)
+            try checkTicketScope(scope, app)
+            guard page.tickets.allSatisfy({ cursor == nil || $0.ticketID > cursor! }),
+                  Set(result.map(\.id)).isDisjoint(with: Set(page.tickets.map(\.id)))
+            else { throw ChatError.invalidResponse }
+            result.append(contentsOf: page.tickets)
+            guard result.count <= 1000 else { throw ChatError.contentTooLarge }
+            guard let next = page.nextAfter else { return result }
+            guard cursor == nil || next > cursor! else { throw ChatError.invalidResponse }
+            cursor = next
+        }
+        throw ChatError.invalidResponse
+    }
+
+    func secureTicketOwnerDevices(_ scope: TicketScreenScope, app: AppModel) async throws -> [ChatIdentity] {
+        try checkTicketScope(scope, app)
+        guard !scope.owner, let configuration else { throw ChatError.authenticationFailed }
+        let roster = try await relay.familyGroup(configuration: configuration)
+        try checkTicketScope(scope, app)
+        let owners = roster.members.filter { $0.profile == "nico" && $0.chatRegistered }
+        guard roster.id == "family", owners.count == 1,
+              roster.members.contains(where: { $0.userID == scope.user && $0.profile != "nico" })
+        else { throw ChatError.invalidEnvelope }
+        let devices = try await relay.identities(for: owners[0].userID, configuration: configuration)
+        try checkTicketScope(scope, app)
+        guard devices.count <= 20, devices.allSatisfy({
+            $0.userID == owners[0].userID && EncryptedTicketMessage.validIdentity($0)
+        }), Set(devices.map(\.deviceID)).count == devices.count
+        else { throw ChatError.invalidResponse }
+        return devices.map(TicketIdentityBinding.canonical)
+    }
+
+    func secureTicketDetail(_ id: String, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
+        let auth = try await ticketAuthorization(scope, app)
+        let result = try await EncryptedTicketClient().detail(id, using: auth)
+        try checkTicketScope(scope, app)
+        guard let keys else { throw ChatError.authenticationFailed }
+        let local = keys.publicIdentity(userID: scope.user, deviceID: scope.device)
+        guard TicketIdentityBinding.matches(local, scope.owner ? result.owner : result.requester)
+        else { throw ChatError.identityChanged }
+        return result
+    }
+
+    func openSecureTicket(_ detail: EncryptedTicketDetail, number: String,
+                          scope: TicketScreenScope, app: AppModel) throws -> [TicketReadableMessage] {
+        try checkTicketScope(scope, app)
+        guard let keys else { throw ChatError.authenticationFailed }
+        let local = TicketIdentityBinding.canonical(keys.publicIdentity(userID: scope.user, deviceID: scope.device))
+        let requester = TicketIdentityBinding.canonical(detail.requester)
+        let owner = TicketIdentityBinding.canonical(detail.owner)
+        guard local == (scope.owner ? owner : requester) else { throw ChatError.identityChanged }
+        _ = try TicketIdentityBinding.confirmed(scope.owner ? requester : owner, number: number)
+        let confirmed = number.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return try detail.messages.map { message in
+            guard let first = message.copies.first else { throw ChatError.invalidEnvelope }
+            let actor = [first.senderUserID, first.senderDeviceID]
+            let author: ChatIdentity
+            let other: ChatIdentity
+            if actor == [requester.userID, requester.deviceID] { author = requester; other = owner }
+            else if actor == [owner.userID, owner.deviceID] { author = owner; other = requester }
+            else { throw ChatError.invalidEnvelope }
+            let plain = try message.open(expectedTicketID: detail.ticketID, author: author,
+                counterparty: other, confirmedSafetyNumber: confirmed, local: local, keys: keys)
+            return TicketReadableMessage(id: message.messageID, text: plain, own: author == local)
+        }
+    }
+
+    func prepareSecureTicket(text: String, detail: EncryptedTicketDetail?, peer: ChatIdentity,
+                             number: String, scope: TicketScreenScope, app: AppModel) async throws -> TicketPendingSend {
+        try checkTicketScope(scope, app)
+        guard let keys, let configuration, detail != nil || !scope.owner else { throw ChatError.authenticationFailed }
+        let peer = try TicketIdentityBinding.confirmed(peer, number: number)
+        let local = TicketIdentityBinding.canonical(keys.publicIdentity(userID: scope.user, deviceID: scope.device))
+        if let detail {
+            guard TicketIdentityBinding.matches(local, scope.owner ? detail.owner : detail.requester),
+                  TicketIdentityBinding.matches(peer, scope.owner ? detail.requester : detail.owner)
+            else { throw ChatError.identityChanged }
+        } else {
+            let devices = try await secureTicketOwnerDevices(scope, app: app)
+            guard devices.contains(where: { TicketIdentityBinding.matches($0, peer) }) else { throw ChatError.identityChanged }
+        }
+        let current = try await relay.identities(for: peer.userID, configuration: configuration)
+        try checkTicketScope(scope, app)
+        guard current.contains(where: { TicketIdentityBinding.matches($0, peer) }) else { throw ChatError.identityChanged }
+        let message = try EncryptedTicketMessage.seal(text: text,
+            ticketID: detail?.ticketID ?? UUID().uuidString.lowercased(),
+            author: local, counterparty: peer,
+            confirmedSafetyNumber: number.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(), keys: keys)
+        return TicketPendingSend(scope: scope, message: message, peer: peer, create: detail == nil)
+    }
+
+    func submitSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
+        guard pending.scope == scope, let configuration else { throw ChatError.authenticationFailed }
+        try checkTicketScope(scope, app)
+        let current = try await relay.identities(for: pending.peer.userID, configuration: configuration)
+        try checkTicketScope(scope, app)
+        guard current.contains(where: { TicketIdentityBinding.matches($0, pending.peer) }) else { throw ChatError.identityChanged }
+        let auth = try await ticketAuthorization(scope, app)
+        let client = EncryptedTicketClient()
+        let result: EncryptedTicketDetail
+        if pending.create {
+            result = try await client.create(pending.message, ownerDeviceID: pending.peer.deviceID, using: auth)
+        } else {
+            result = try await client.reply(pending.message, using: auth)
+        }
+        try checkTicketScope(scope, app)
+        return result
+    }
+
+    func secureTicketStatus(_ status: EncryptedTicketStatus, id: String,
+                            scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
+        guard scope.owner else { throw ChatError.authenticationFailed }
+        let auth = try await ticketAuthorization(scope, app)
+        let result = try await EncryptedTicketClient().status(status, ticketID: id, using: auth)
+        try checkTicketScope(scope, app)
         return result
     }
 }
