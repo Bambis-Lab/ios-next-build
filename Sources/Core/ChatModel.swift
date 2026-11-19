@@ -155,7 +155,8 @@ final class ChatModel {
     // automatically at login or by a background task.
     func canActivateHistoryV2(_ app:AppModel) -> Bool {
         guard isFamilyCredentialActive, state == .online, !historyMigrationInProgress,
-              !isSending, !callBusy, !audioPreparing, audioSession==nil,
+              !isSending, pendingChatSendID==nil, !chatOutboxBlocked,
+              !callBusy, !audioPreparing, audioSession==nil,
               startupTask==nil, historyArchive != nil, historyRecordCheckpoint==nil,
               let configuration,let family=app.familyChatContext(),
               family.haUserID==configuration.userID,family.deviceID==configuration.deviceID,
@@ -999,6 +1000,10 @@ final class ChatModel {
         isSending = true
         defer { isSending = false }
         let sendGeneration = configurationGeneration
+        // Capture the actual target before the first asynchronous preflight.
+        let selectedPeer = recipientUserID
+        let selectedGroup = showingFamilyGroup
+        let selectedMembers = familyGroup?.members.map(\.userID)
         if isFamilyCredentialActive {
             do {
                 let outbox=try openChatOutbox(configuration:configuration,keys:keys)
@@ -1006,15 +1011,14 @@ final class ChatModel {
                 chatOutboxBlocked=false
                 guard pendingChatSendID==nil else {throw ChatHistoryError.busy}
                 try await relay.requireIdempotentSender(configuration:configuration)
-                guard sendGeneration==configurationGeneration,self.configuration==configuration,!Task.isCancelled else {return false}
+                guard sendGeneration==configurationGeneration,self.configuration==configuration,!Task.isCancelled,
+                      selectedPeer==recipientUserID,selectedGroup==showingFamilyGroup else {return false}
             } catch {
                 guard sendGeneration==configurationGeneration else {return false}
                 lastError="Sicherer Versand nicht verfügbar oder ein früherer Versand ist noch offen."
                 return false
             }
         }
-        let selectedPeer = recipientUserID
-        let selectedGroup = showingFamilyGroup
         if selectedGroup {
             guard let familyGroup, familyGroup.isReady,
                   familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
@@ -1044,7 +1048,7 @@ final class ChatModel {
         }
         do {
             let targetUsers: [String] = selectedGroup
-                ? (familyGroup?.members.map(\.userID).filter { $0 != configuration.userID } ?? [])
+                ? (selectedMembers?.filter { $0 != configuration.userID } ?? [])
                 : [selectedPeer]
             guard !targetUsers.isEmpty else { throw ChatError.noRecipientDevice }
             var recipients: [ChatIdentity] = []
@@ -1112,7 +1116,10 @@ final class ChatModel {
             try? await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.failed) }
             guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
-            return false
+            // Once this exact group is durable, the composer has handed it
+            // off to the journal, even if the network outcome is uncertain.
+            // Do not invite the user to resend the same draft as a new ID.
+            return pendingChatSendID==groupID && isFamilyCredentialActive
         }
     }
 
