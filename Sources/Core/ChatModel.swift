@@ -1071,6 +1071,40 @@ final class ChatModel {
             showingFamilyGroup == selectedGroup && draft == originalDraft { draft = "" }
     }
 
+    /// A delayed media picker/recording must never retarget its content to a
+    /// different contact or account. No bearer or private key enters this value.
+    struct MediaTarget:Equatable,Sendable {
+        let generation:UInt64
+        let endpoint:URL
+        let user:String
+        let device:String
+        let peer:String
+        let family:Bool
+        let members:[String]
+    }
+
+    func mediaTarget() -> MediaTarget? {
+        guard let configuration, state == .online,
+              showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty else {return nil}
+        return MediaTarget(generation:configurationGeneration,endpoint:configuration.baseURL,
+            user:configuration.userID,device:configuration.deviceID,peer:recipientUserID,
+            family:showingFamilyGroup,members:showingFamilyGroup ? (familyGroup?.members.map(\.userID).sorted() ?? []) : [])
+    }
+
+    func acceptsMediaTarget(_ target:MediaTarget) -> Bool {
+        !Task.isCancelled && mediaTarget()==target
+    }
+
+    func sendCapturedMedia(_ data:Data,kind:ChatMessageKind,contentType:String,target:MediaTarget) async {
+        guard acceptsMediaTarget(target) else {return}
+        switch kind {
+        case .image: await sendImage(data)
+        case .video: await sendVideo(data,contentType:contentType)
+        case .voice: await sendVoice(data)
+        case .text: return
+        }
+    }
+
     func sendImage(_ originalData: Data) async {
         do {
             let data = try Self.preparedImageData(originalData)

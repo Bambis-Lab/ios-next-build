@@ -416,4 +416,20 @@ final class ChatDraftSafetyTests: XCTestCase {
         pending.entries=[]
         XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
     }
+
+    func testCapturedMediaScopeChangesOnRecipientRoleOrAccountSwitch() throws {
+        let endpoint=try XCTUnwrap(URL(string:"https://example.invalid"))
+        func target(generation:UInt64=1,user:String="a",device:String="ios-a",peer:String="b",
+                    family:Bool=false,members:[String]=[]) -> ChatModel.MediaTarget {
+            .init(generation:generation,endpoint:endpoint,user:user,device:device,peer:peer,family:family,members:members)
+        }
+        let original=target()
+        XCTAssertEqual(original,target())
+        XCTAssertNotEqual(original,target(generation:2))
+        XCTAssertNotEqual(original,target(user:"c"))
+        XCTAssertNotEqual(original,target(device:"ios-c"))
+        XCTAssertNotEqual(original,target(peer:"c"))
+        XCTAssertNotEqual(original,target(family:true,members:["a","b"]))
+        XCTAssertNotEqual(target(family:true,members:["a","b"]),target(family:true,members:["a","c"]))
+    }
 }
