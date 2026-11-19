@@ -16,6 +16,7 @@ struct ChatPersistentSnapshot: Codable, Equatable, Sendable {
     let messages: [ChatMessage]
     let partials: [String: ChatPersistentPartial]
     let seen: [String: Date]
+    var pendingRecipientProofs: [String:ChatPendingRecipientProof]? = nil
 }
 
 /// Rehearsal only. Never removes or promotes the original v1 archive.
@@ -26,17 +27,29 @@ enum ChatHistoryRecordMigration {
         let messages: [String]
         let partials: [String]
         let seen: [String]
+        var hasRecipientProofQueue:Bool? = nil
     }
     private struct Assembly: Codable {
         let metadata: ChatPersistentPartial
         let indexes: [Int]
     }
     private static let layoutKey = Store.Key(kind: .migration, id: "history-layout-v1")
+    private static let proofQueueKey = Store.Key(kind: .outbox, id: "recipient-proof-queue-v1")
     private static let limits: [ChatMessageKind: Int] = [.text: 16*1024,.image: 12*1024*1024,.voice:24*1024*1024,.video:30*1024*1024]
 
     private static func validate(_ s: ChatPersistentSnapshot) throws {
         guard s.version == 1, s.messages.count <= 200, s.partials.count <= 256, s.seen.count <= 20_000,
               Set(s.messages.map(\.id)).count == s.messages.count else { throw ChatHistoryError.invalidArchive }
+        let queue=s.pendingRecipientProofs ?? [:]
+        guard queue.count<=4096 else {throw ChatHistoryError.capacity}
+        for (id,entry) in queue {
+            guard id==entry.proof.id,!entry.keyFingerprint.isEmpty,
+                  entry.committedAt.timeIntervalSinceReferenceDate.isFinite,
+                  entry.proof.signature.isEmpty || (entry.proof.signature.utf8.count==88 &&
+                    Data(base64Encoded:entry.proof.signature)?.count==64)
+            else {throw ChatHistoryError.invalidArchive}
+            _ = try entry.proof.signingBytes()
+        }
         var complete = 0
         for m in s.messages {
             guard m.data.count <= (limits[m.kind] ?? 0), m.data.count <= 160*1024*1024-complete else { throw ChatHistoryError.capacity }
@@ -62,8 +75,12 @@ enum ChatHistoryRecordMigration {
         try validate(s)
         let e = JSONEncoder()
         e.outputFormatting = [.sortedKeys]
-        let layout = Layout(version:1,messages:s.messages.map(\.id),partials:s.partials.keys.sorted(),seen:s.seen.keys.sorted())
+        let layout = Layout(version:1,messages:s.messages.map(\.id),partials:s.partials.keys.sorted(),seen:s.seen.keys.sorted(),
+            hasRecipientProofQueue:s.pendingRecipientProofs == nil ? nil : true)
         var result = [Store.Record(key:layoutKey,bytes:try e.encode(layout))]
+        if let queue=s.pendingRecipientProofs {
+            result.append(.init(key:proofQueueKey,bytes:try e.encode(queue)))
+        }
         for m in s.messages {
             var content = m
             content.delivery = .received
@@ -108,8 +125,10 @@ enum ChatHistoryRecordMigration {
         }
         var seen: [String:Date] = [:]
         for id in layout.seen { seen[id] = try d.decode(Date.self,from:take(.init(kind:.replay,id:id))) }
+        let queue=layout.hasRecipientProofQueue == true
+            ? try d.decode([String:ChatPendingRecipientProof].self,from:take(proofQueueKey)) : nil
         guard values.isEmpty else { throw ChatHistoryError.invalidArchive }
-        let s = ChatPersistentSnapshot(version:1,messages:messages,partials:partials,seen:seen)
+        let s = ChatPersistentSnapshot(version:1,messages:messages,partials:partials,seen:seen,pendingRecipientProofs:queue)
         try validate(s)
         return s
     }

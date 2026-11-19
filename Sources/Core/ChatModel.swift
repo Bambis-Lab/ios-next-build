@@ -91,6 +91,7 @@ final class ChatModel {
     var historyUsesV2:Bool { historyRecordCheckpoint != nil }
     @ObservationIgnored private let historyMutationGate = ChatHistoryMutationGate()
     private var partialMessages: [String: PartialMessage] = [:]
+    private var pendingRecipientProofs:[String:ChatPendingRecipientProof]=[:]
 
     private func openChatOutbox(configuration:ChatConfiguration,keys:ChatDeviceKeys) throws -> DurableChatOutbox {
         let scope=ChatOutboxScope(endpoint:configuration.baseURL,user:configuration.userID,
@@ -176,7 +177,7 @@ final class ChatModel {
             try Task.checkCancellation()
             guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
             let normalized=HistorySnapshot(version:1,messages:try Self.recoverOutgoingHistory(original.messages,pending:pending),
-                partials:original.partials,seen:original.seen)
+                partials:original.partials,seen:original.seen,pendingRecipientProofs:original.pendingRecipientProofs)
             if normalized != original {
                 _ = try await active.commit(previous:original,next:normalized,verifiedEnvelopeIDs:[])
             }
@@ -195,11 +196,13 @@ final class ChatModel {
             messages = try Self.recoverOutgoingHistory(snapshot.messages,pending:pending)
             partialMessages = snapshot.partials
             seenEnvelopeIDs = snapshot.seen
+            pendingRecipientProofs = snapshot.pendingRecipientProofs ?? [:]
         } else {
             guard pending.isEmpty else {throw ChatHistoryError.invalidArchive}
             messages = []
             partialMessages = [:]
             seenEnvelopeIDs = [:]
+            pendingRecipientProofs = [:]
         }
         historyArchive = archive
     }
@@ -294,13 +297,15 @@ final class ChatModel {
     }
 
     private func historySnapshot() -> HistorySnapshot {
-        HistorySnapshot(version: 1, messages: messages, partials: partialMessages, seen: seenEnvelopeIDs)
+        HistorySnapshot(version: 1, messages: messages, partials: partialMessages, seen: seenEnvelopeIDs,
+            pendingRecipientProofs:pendingRecipientProofs.isEmpty ? nil : pendingRecipientProofs)
     }
 
     private func restoreCheckpoint(_ snapshot: HistorySnapshot) {
         messages = snapshot.messages
         partialMessages = snapshot.partials
         seenEnvelopeIDs = snapshot.seen
+        pendingRecipientProofs = snapshot.pendingRecipientProofs ?? [:]
     }
 
     private func commitHistoryMutation(generation:UInt64, verifiedEnvelopeIDs:[String]=[],
@@ -709,6 +714,7 @@ final class ChatModel {
             memberTicketDetails.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
+            pendingRecipientProofs.removeAll(keepingCapacity:false)
             ChatMediaThumbnailCache.shared.clear()
         }
         // Persist the credential first. A failed Keychain write must not leave
@@ -885,6 +891,7 @@ final class ChatModel {
         ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
+        pendingRecipientProofs.removeAll(keepingCapacity:false)
         configuration = nil
         isFamilyCredentialActive = false
         familyRenewalTask?.cancel()
@@ -1517,13 +1524,21 @@ final class ChatModel {
         while !Task.isCancelled, let configuration {
             do {
                 let ackMode = isFamilyCredentialActive
+                let generation=configurationGeneration
                 let envelopes = try await relay.receive(
                     configuration: configuration, requiresAcknowledgement: ackMode
                 )
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
+                var proofEnabled=false
+                if ackMode && (!envelopes.isEmpty || !pendingRecipientProofs.isEmpty) {
+                    // Legacy ack_v1 continues without claiming recipient proofs.
+                    proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+                    try Task.checkCancellation()
+                    guard generation==configurationGeneration,self.configuration==configuration else {return}
+                }
                 let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
-                    try await self.accept(envelope, configuration: configuration)
+                    try await self.accept(envelope, configuration: configuration,proofEnabled:proofEnabled)
                 }
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
@@ -1537,6 +1552,9 @@ final class ChatModel {
                     )
                     try Task.checkCancellation()
                     guard self.configuration == configuration else { return }
+                }
+                if proofEnabled {
+                    try await drainRecipientProofs(configuration:configuration,generation:generation)
                 }
                 if invalidCount > 0 {
                     // Do not report or persist attacker-controlled ciphertext,
@@ -1562,7 +1580,43 @@ final class ChatModel {
         receiveTask = nil
     }
 
-    private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws {
+    private func drainRecipientProofs(configuration:ChatConfiguration,generation:UInt64) async throws {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,
+                  isFamilyCredentialActive,!historyMigrationInProgress else {throw CancellationError()}
+        }
+        try requireCurrent()
+        guard let keys else {throw ChatHistoryError.missingKey}
+        // Bounded batches: never block message receive behind an unbounded queue.
+        let candidates=pendingRecipientProofs.values.sorted{$0.committedAt<$1.committedAt}
+            .filter{Date().timeIntervalSince($0.committedAt)<86400}.prefix(8)
+        for pending in candidates {
+            try requireCurrent()
+            let signed=try pending.signed(using:keys,configuration:configuration)
+            if signed != pending {
+                try await commitHistoryMutation(generation:generation) {
+                    guard pendingRecipientProofs[pending.proof.id]==pending else {throw ChatHistoryError.invalidArchive}
+                    pendingRecipientProofs[pending.proof.id]=signed
+                }
+            }
+            try requireCurrent()
+            do {
+                try await relay.submitRecipientProof(signed.proof,configuration:configuration)
+            } catch ChatError.rejected(let code) where [403,409,422,503].contains(code) {
+                // Sender revoked, missing old binding or capability withdrawn:
+                // retain the exact claim; never assert remote delivery.
+                continue
+            }
+            try requireCurrent()
+            try await commitHistoryMutation(generation:generation) {
+                guard pendingRecipientProofs[signed.proof.id]==signed else {throw ChatHistoryError.invalidArchive}
+                pendingRecipientProofs.removeValue(forKey:signed.proof.id)
+            }
+        }
+    }
+
+    private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration,proofEnabled:Bool=false) async throws {
         let generation=configurationGeneration
         let now = Date.now
         guard let envelopeDate = ISO8601DateFormatter().date(from: envelope.createdAt),
@@ -1605,8 +1659,25 @@ final class ChatModel {
             throw ChatError.invalidEnvelope
         }
         try await commitHistoryMutation(generation:generation,verifiedEnvelopeIDs:[envelope.id]) {
+            let alreadySeen=seenEnvelopeIDs[envelope.id] != nil
             try storeVerifiedFragment(envelope, plaintext: plaintext, configuration: configuration,
                                      envelopeDate: envelopeDate, now: now)
+            if proofEnabled && isFamilyCredentialActive && !alreadySeen {
+                guard seenEnvelopeIDs[envelope.id] != nil else {throw ChatHistoryError.invalidArchive}
+                let claim=try ChatRecipientProofV1.unsignedClaim(envelope)
+                if let old=pendingRecipientProofs[envelope.id] {
+                    guard old.proof.envelopeSHA256==claim.envelopeSHA256,
+                          old.keyFingerprint==keys.safetyNumber else {throw ChatHistoryError.invalidArchive}
+                } else {
+                    // Claims older than the server's retention cannot become
+                    // new delivery evidence. Prune only expired local metadata.
+                    pendingRecipientProofs=pendingRecipientProofs.filter{
+                        now.timeIntervalSince($0.value.committedAt)<86400}
+                    guard pendingRecipientProofs.count<4096 else {throw ChatHistoryError.capacity}
+                    pendingRecipientProofs[envelope.id]=ChatPendingRecipientProof(proof:claim,
+                        keyFingerprint:keys.safetyNumber,committedAt:now)
+                }
+            }
         }
     }
 

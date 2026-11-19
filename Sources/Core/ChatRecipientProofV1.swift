@@ -39,6 +39,16 @@ struct ChatRecipientProofV1: Codable, Equatable, Sendable {
         return Data("iosnext/chat/recipient-persisted-envelope/v1".utf8)+Data([0])+Data(canonical.utf8)
     }
 
+    /// Construct only a digest-bound unsigned claim. It becomes eligible for
+    /// signing after the history checkpoint containing the fragment commits.
+    static func unsignedClaim(_ envelope:ChatEnvelope) throws -> Self {
+        let result=Self(version:1,id:envelope.id,envelopeSHA256:try ChatSendReceiptV1.digest(envelope),
+            senderUserID:envelope.senderUserID,senderDeviceID:envelope.senderDeviceID,
+            recipientUserID:envelope.recipientUserID,recipientDeviceID:envelope.recipientDeviceID,signature:"")
+        _ = try result.signingBytes()
+        return result
+    }
+
     /// Caller must have durably committed the verified envelope first.
     static func signPersistedEnvelope(_ envelope:ChatEnvelope,local:ChatIdentity,keys:ChatDeviceKeys) throws -> Self {
         guard envelope.recipientUserID==local.userID,envelope.recipientDeviceID==local.deviceID,
@@ -61,5 +71,32 @@ struct ChatRecipientProofV1: Codable, Equatable, Sendable {
               sig.base64EncodedString()==signature else {throw ChatError.invalidResponse}
         let key=try Curve25519.Signing.PublicKey(rawRepresentation:publicKey)
         guard key.isValidSignature(sig,for:try signingBytes()) else {throw ChatError.invalidResponse}
+    }
+}
+
+/// Part of the encrypted history checkpoint, not a separate unbound replay
+/// marker. A signed entry is immutable across ambiguous HTTP outcomes.
+struct ChatPendingRecipientProof:Codable,Equatable,Sendable {
+    let proof:ChatRecipientProofV1
+    let keyFingerprint:String
+    let committedAt:Date
+
+    func signed(using keys:ChatDeviceKeys,configuration:ChatConfiguration) throws -> Self {
+        guard keys.safetyNumber==keyFingerprint,
+              proof.recipientUserID==configuration.userID,proof.recipientDeviceID==configuration.deviceID
+        else {throw ChatError.identityChanged}
+        let bytes=try proof.signingBytes()
+        if !proof.signature.isEmpty {
+            guard let sig=Data(base64Encoded:proof.signature),sig.count==64,
+                  sig.base64EncodedString()==proof.signature,
+                  keys.signing.publicKey.isValidSignature(sig,for:bytes)
+            else {throw ChatHistoryError.invalidArchive}
+            return self
+        }
+        let signature=try keys.signing.signature(for:bytes).base64EncodedString()
+        let value=ChatRecipientProofV1(version:proof.version,id:proof.id,envelopeSHA256:proof.envelopeSHA256,
+            senderUserID:proof.senderUserID,senderDeviceID:proof.senderDeviceID,recipientUserID:proof.recipientUserID,
+            recipientDeviceID:proof.recipientDeviceID,signature:signature)
+        return Self(proof:value,keyFingerprint:keyFingerprint,committedAt:committedAt)
     }
 }

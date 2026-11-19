@@ -316,10 +316,14 @@ actor ChatRelayClient {
         return receipt
     }
 
-    func requireRecipientProofContract(configuration:ChatConfiguration) async throws {
+    func supportsRecipientProofContract(configuration:ChatConfiguration) async throws -> Bool {
         let value:ChatRecipientProofCapability=try await request(path:"v1/chat/delivery-contract",
             method:"GET",body:Optional<String>.none,configuration:configuration)
-        guard value.version==1,value.scope=="persisted_envelope" else {throw ChatError.invalidResponse}
+        return value.version==1 && value.scope=="persisted_envelope"
+    }
+
+    func requireRecipientProofContract(configuration:ChatConfiguration) async throws {
+        guard try await supportsRecipientProofContract(configuration:configuration) else {throw ChatError.invalidResponse}
     }
 
     func submitRecipientProof(_ proof:ChatRecipientProofV1,configuration:ChatConfiguration) async throws {
