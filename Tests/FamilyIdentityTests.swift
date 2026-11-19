@@ -163,6 +163,85 @@ final class FamilyIdentityTests: XCTestCase {
         ))
     }
 
+    // V73: explicit five-profile matrix; no network, live credentials or writes.
+    func testV73FiveProfileRegistrationBindingMatrix() {
+        let profiles: [HomeProfile] = [.nico, .gabi, .timo, .mika, .juli]
+        for (index, profile) in profiles.enumerated() {
+            let user = "fixture-ha-\(index)"
+            let device = "fixture-ios-\(index)"
+            let role = profile == .nico ? "owner" : "member"
+            let approval = profile == .nico ? "separate_device_approval_required" : "not_available"
+            let registration = result(userID: user, profile: profile, role: role,
+                                      deviceID: device, approval: approval)
+            for i in profiles.indices {
+                for j in profiles.indices {
+                    XCTAssertEqual(registration.isValid(for: "fixture-ha-\(i)",
+                                                       expectedDeviceID: "fixture-ios-\(j)"),
+                                   i == index && j == index,
+                                   "Profile index \(index), account \(i), device \(j)")
+                }
+            }
+            let swappedRole = role == "owner" ? "member" : "owner"
+            XCTAssertFalse(result(userID: user, profile: profile, role: swappedRole,
+                                  deviceID: device,
+                                  approval: "separate_device_approval_required")
+                .isValid(for: user, expectedDeviceID: device))
+            XCTAssertFalse(result(userID: user, profile: profile, role: "admin",
+                                  deviceID: device, approval: approval)
+                .isValid(for: user, expectedDeviceID: device))
+        }
+    }
+
+    func testV73FiveProfileNavigationSelectionMatrix() {
+        let profiles: [HomeProfile] = [.nico, .gabi, .timo, .mika, .juli]
+        let registrations: [HomeProfile?] = profiles.map { Optional($0) } + [nil]
+        for registered in registrations {
+            for selected in profiles {
+                for hasIdentity in [false, true] {
+                    XCTAssertEqual(OwnerServiceNavigationPolicy.showServices(
+                        familyBrokerConfigured: true, registeredProfile: registered,
+                        selectedProfile: selected, hasHAIdentity: hasIdentity
+                    ), registered == .nico)
+                    XCTAssertEqual(OwnerServiceNavigationPolicy.showServices(
+                        familyBrokerConfigured: false, registeredProfile: registered,
+                        selectedProfile: selected, hasHAIdentity: hasIdentity
+                    ), hasIdentity && selected == .nico)
+                }
+            }
+            XCTAssertEqual(OwnerServiceNavigationPolicy.showRecovery(
+                familyBrokerConfigured: true, registeredProfile: registered
+            ), registered == nil)
+            XCTAssertFalse(OwnerServiceNavigationPolicy.showRecovery(
+                familyBrokerConfigured: false, registeredProfile: registered
+            ))
+        }
+    }
+
+    func testV73OwnerSessionCannotCrossAnyFamilyAccountOrDevice() {
+        let expiry = Int(Date().timeIntervalSince1970) + 900
+        let token = String(repeating: "t", count: 64)
+        let binding = String(repeating: "s", count: 64)
+        let owner = FamilyOwnerSession(accessToken: token, deviceSession: binding,
+                                       expiresAt: expiry, deviceID: "fixture-ios-0",
+                                       haUserID: "fixture-ha-0", role: "owner")
+        for i in 0..<5 {
+            for j in 0..<5 {
+                XCTAssertEqual(owner.isValid(haUserID: "fixture-ha-\(i)",
+                                             deviceID: "fixture-ios-\(j)"), i == 0 && j == 0)
+            }
+        }
+        for role in ["member", "admin", "unknown"] {
+            let denied = FamilyOwnerSession(accessToken: token, deviceSession: binding,
+                                            expiresAt: expiry, deviceID: owner.deviceID,
+                                            haUserID: owner.haUserID, role: role)
+            XCTAssertFalse(denied.isValid(haUserID: owner.haUserID, deviceID: owner.deviceID))
+        }
+        let malformed = FamilyOwnerSession(accessToken: token, deviceSession: "short",
+                                           expiresAt: expiry, deviceID: owner.deviceID,
+                                           haUserID: owner.haUserID, role: "owner")
+        XCTAssertFalse(malformed.isValid(haUserID: owner.haUserID, deviceID: owner.deviceID))
+    }
+
     func testFamilyDeviceProofPersistsForSameAppInstallation() throws {
         let first = try FamilyDeviceBinding.identity()
         let again = try FamilyDeviceBinding.identity()
