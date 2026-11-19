@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import re
 import sys
 from boot_simulator import run_bounded
 
@@ -14,6 +13,8 @@ _SAFE_REASONS=frozenset({
     "invalid_handoff_evidence","wrong_runner_pair","invalid_arguments",
     "sandbox_changed","invalid_container","unsafe_container_directory",
     "container_escape","invalid_expiry","invalid_grant_expiry",
+    "xcresult_missing","xcresult_wrong_test","xcresult_test_not_passed",
+    "native_command_failed","native_marker_missing","xcresult_invalid_schema",
 })
 
 class HandoffError(RuntimeError):
@@ -40,10 +41,49 @@ def safe_failure(error):
         else: reason="unexpected_failure"
     return reason
 
+def test_cases(node):
+    if isinstance(node,list):
+        for child in node:
+            yield from test_cases(child)
+    elif isinstance(node,dict):
+        if node.get("nodeType")=="Test Case":
+            yield node
+        else:
+            yield from test_cases(node.get("children",[]))
+
+def native_result_status(tree,role):
+    require(isinstance(tree,dict) and isinstance(tree.get("testNodes"),list),
+            "xcresult_invalid_schema")
+    cases=list(test_cases(tree["testNodes"]))
+    expected="FamilyAudioIndependentSimulatorTests/testOfflineRoleHandoff"+role
+    ids={expected,expected+"()","IOSNextTests/"+expected,"IOSNextTests/"+expected+"()"}
+    exact=[item for item in cases if item.get("nodeIdentifier") in ids]
+    if len(cases)!=1 or len(exact)!=1: return "WRONG_TEST"
+    return "PASS" if exact[0].get("result")=="Passed" else "NOT_PASSED"
+
+def inspect_result(result,out,role,uid):
+    stage("read_xcresult")
+    require(result.is_dir(),"xcresult_missing")
+    summary=run_bounded(["xcrun","xcresulttool","get","test-results","summary","--path",str(result)],
+        timeout=60,emit_output=False)
+    tree=run_bounded(["xcrun","xcresulttool","get","test-results","tests","--path",str(result)],
+        timeout=60,emit_output=False)
+    status=native_result_status(json.loads(tree),role)
+    destination=uid.lower() in summary.lower()
+    # Export only fixed status fields, not raw logs, exception text or JSON.
+    (out/"handoff-result-status.json").write_text(json.dumps({
+        "role":role,"test_status":status,"destination_matches":destination,
+        "run":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],
+        "source":os.environ["GITHUB_SHA"]},indent=2)+"\n")
+    require(destination,"wrong_result_destination")
+    require(status!="WRONG_TEST","xcresult_wrong_test")
+    require(status=="PASS","xcresult_test_not_passed")
+    return summary,tree
+
 def rehearse():
     stage("import_dependencies")
     from distributed_role_provisioning import generate
-    from native_role_handoff import install_role
+    from native_role_handoff import install_role, read_private
     stage("authorize_disposable_host")
     require(os.environ.get("GITHUB_ACTIONS")=="true" and
             os.environ.get("RUNNER_ENVIRONMENT")=="github-hosted","disposable_host_required")
@@ -70,33 +110,39 @@ def rehearse():
     result=out/("role-"+role+".xcresult")
     try:
         stage("run_native_xctest")
-        log=run_bounded(["xcodebuild","test-without-building","-collect-test-diagnostics","never",
+        command_failed=False
+        log=""
+        try:
+            log=run_bounded(["xcodebuild","test-without-building","-collect-test-diagnostics","never",
             "-xctestrun",str(Path(os.environ["XCTESTRUN_PATH"]).resolve()),"-destination","platform=iOS Simulator,id="+uid,
             "-parallel-testing-enabled","NO","-disable-concurrent-destination-testing",
             "-resultBundlePath",str(result.resolve()),
             "-only-testing:IOSNextTests/FamilyAudioIndependentSimulatorTests/testOfflineRoleHandoff"+role,
             "CODE_SIGNING_ALLOWED=YES","CODE_SIGNING_REQUIRED=YES","CODE_SIGN_IDENTITY=-"],
-            timeout=480,emit_output=False)
-        stage("verify_native_console")
-        require(log.count("V65_OFFLINE_NATIVE_ROLE_HANDOFF=PASS role="+role)==1
-            and re.search(r"Executed 1 test[s]?, with 0 failures",log)
-            and re.search(r"\*\* TEST (?:EXECUTE )?SUCCEEDED \*\*",log),"native_role_read_failed")
-        stage("read_xcresult_summary")
-        summary=run_bounded(["xcrun","xcresulttool","get","test-results","summary","--path",str(result)],
-            timeout=60,emit_output=False)
-        stage("verify_result_destination")
-        require(uid.lower() in summary.lower(),"wrong_result_destination")
+                timeout=480,emit_output=False)
+        except RuntimeError:
+            command_failed=True
+            print("V66_NATIVE_COMMAND=FAIL",flush=True)
+        # A failed xcodebuild may still produce an authoritative result bundle.
+        # Record its sanitized test status even when the command failed.
+        summary,tree=inspect_result(result,out,role,uid)
+        stage("verify_native_command")
+        require(not command_failed,"native_command_failed")
+        stage("verify_native_marker")
+        require(log.count("V65_OFFLINE_NATIVE_ROLE_HANDOFF=PASS role="+role)==1,
+                "native_marker_missing")
         stage("verify_sandbox_identity")
         current=Path(run_bounded(["xcrun","simctl","get_app_container",uid,
             "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip())
         require(current.resolve()==container.resolve(),"sandbox_changed")
         stage("verify_private_role_integrity")
-        require(target.is_file() and target.read_bytes()==raw,"role_file_changed")
+        require(target.is_file() and read_private(target)==raw,"role_file_changed")
         # Never publish a source role file or any bearer/key material.
         stage("verify_output_privacy")
-        require(all(x not in log and x not in summary for x in roles[role]["tokens"]+[roles[role]["signingSeed"]]),
+        require(all(x not in log and x not in summary and x not in tree
+                    for x in roles[role]["tokens"]+[roles[role]["signingSeed"]]),
                 "sensitive_output_detected")
-        (out/"handoff-summary.json").write_text(summary)
+        # The sanitized structured status is sufficient; do not duplicate raw summary.
     finally:
         # Keep the failing phase visible when cleanup succeeds.
         try:
@@ -113,6 +159,34 @@ def rehearse():
         "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
         "transient_file_removed":True,"network_used":False,"media_tested":False},indent=2)+"\n")
     print("V65_OFFLINE_ROLE_HANDOFF_COMPLETE role="+role)
+
+def self_test():
+    import unittest
+    class ResultValidation(unittest.TestCase):
+        def tree(self,role="A",status="Passed"):
+            return {"testNodes":[{"nodeType":"Test Suite","children":[
+                {"nodeType":"Test Case","nodeIdentifier":
+                 "FamilyAudioIndependentSimulatorTests/testOfflineRoleHandoff"+role+"()",
+                 "result":status}]}]}
+        def test_exact_role(self):
+            for role in ("A","B"):
+                self.assertEqual(native_result_status(self.tree(role),role),"PASS")
+        def test_wrong_role(self):
+            self.assertEqual(native_result_status(self.tree("B"),"A"),"WRONG_TEST")
+        def test_failed_skipped_expected_failure(self):
+            for status in ("Failed","Skipped","Expected Failure","Unknown"):
+                self.assertEqual(native_result_status(self.tree(status=status),"A"),"NOT_PASSED")
+        def test_empty_duplicate_or_extra_case(self):
+            tree=self.tree()
+            tree["testNodes"]*=2
+            self.assertEqual(native_result_status(tree,"A"),"WRONG_TEST")
+            self.assertEqual(native_result_status({"testNodes":[]},"A"),"WRONG_TEST")
+        def test_invalid_schema(self):
+            with self.assertRaises(HandoffError):
+                native_result_status({},"A")
+    suite=unittest.defaultTestLoader.loadTestsFromTestCase(ResultValidation)
+    if not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
+        raise SystemExit(1)
 
 def validate():
     stage("validate_pair")
@@ -136,6 +210,7 @@ def validate():
 if __name__=="__main__":
     try:
         if sys.argv[1:]==["validate"]: validate()
+        elif sys.argv[1:]==["self-test"]: self_test()
         elif not sys.argv[1:]: rehearse()
         else: raise RuntimeError("invalid_arguments")
     except Exception as error:
