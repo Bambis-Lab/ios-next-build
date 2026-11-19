@@ -27,15 +27,48 @@ final class ChatV2MigrationCoordinator {
     private let insertMarker: (Data) throws -> Bool
     private var busy = false
 
-    /// Production-compatible path/key factory. Calling this factory alone does
-    /// not migrate or activate any data. Callers must first verify family scope.
-    convenience init(configuration: ChatConfiguration, keyFingerprint: String) throws {
+    struct Binding: Equatable {
+        let scope: Data
+        let digest: String
+        let markerAccount: String
+    }
+
+    static func binding(configuration: ChatConfiguration, keyFingerprint: String) throws -> Binding {
         guard configuration.baseURL.scheme == "https",
               !configuration.userID.isEmpty, !configuration.deviceID.isEmpty,
               !keyFingerprint.isEmpty else { throw ChatHistoryError.invalidScope }
+        let stable = try JSONEncoder().encode([configuration.baseURL.absoluteString,
+            configuration.userID, configuration.deviceID])
         let scope = try JSONEncoder().encode([configuration.baseURL.absoluteString,
             configuration.userID, configuration.deviceID, keyFingerprint])
-        let digest = SHA256.hash(data:scope).map { String(format:"%02x",$0) }.joined()
+        func hex(_ value: Data) -> String {
+            SHA256.hash(data:value).map { String(format:"%02x",$0) }.joined()
+        }
+        // Never derive the *activation marker address* from the current chat
+        // key. A changed key must reach the existing marker and fail closed.
+        return Binding(scope:scope,digest:hex(scope),markerAccount:"chatHistory.v2.active."+hex(stable))
+    }
+
+    static func hasActiveMarker(configuration: ChatConfiguration, keyFingerprint: String) throws -> Bool {
+        let binding = try binding(configuration:configuration,keyFingerprint:keyFingerprint)
+        // Read-only lookup: unactivated accounts do not create any v2 material.
+        return try KeychainStore.data(account:binding.markerAccount) != nil
+    }
+
+    /// Production-compatible path/key factory. Calling this factory alone does
+    /// not migrate or activate any data. Callers must first verify family scope.
+    convenience init(configuration: ChatConfiguration, keyFingerprint: String) throws {
+        let binding = try Self.binding(configuration:configuration,keyFingerprint:keyFingerprint)
+        let scope=binding.scope, digest=binding.digest
+        let marker=binding.markerAccount
+        // Validate an existing marker before creating directories or keys.
+        if let existing = try KeychainStore.data(account:marker) {
+            guard existing.count <= 4096,
+                  let decoded=try? JSONDecoder().decode(Marker.self,from:existing),
+                  decoded.schema==2, decoded.scopeDigest==Data(SHA256.hash(data:scope)),
+                  decoded.sourceFingerprint == nil || decoded.sourceFingerprint?.count == 32
+            else { throw Failure.invalidMarker }
+        }
         let directory = try FileManager.default.url(for:.applicationSupportDirectory,
             in:.userDomainMask,appropriateFor:nil,create:true).appendingPathComponent("EncryptedChatHistoryV2",isDirectory:true)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,
@@ -48,7 +81,6 @@ final class ChatV2MigrationCoordinator {
         try excluded.setResourceValues(resource)
         let file = directory.appendingPathComponent(digest+".sqlite3")
         let account = "chatHistory.v2.key."+digest
-        let marker = "chatHistory.v2.active."+digest
         if try KeychainStore.data(account:account) == nil {
             guard !FileManager.default.fileExists(atPath:file.path),
                   try KeychainStore.data(account:marker) == nil else { throw ChatHistoryError.missingKey }

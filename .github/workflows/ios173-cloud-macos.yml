@@ -1,7 +1,7 @@
 name: iOS173 Cloud macOS target acceptance
 on:
   push:
-    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover']
+    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover', 'feature/ios173-v3-storage-binding']
   workflow_dispatch:
 permissions:
   contents: read
