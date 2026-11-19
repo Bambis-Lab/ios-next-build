@@ -77,6 +77,8 @@ final class ChatModel {
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
     private var ticketReadLease: TicketOfflineLease?
+    private var ticketReadRevision: UInt64 = 0
+    private var ticketReadRequestScope: TicketScreenScope?
     private var ticketCacheReady = false
     private var ticketReadOffline = false
     private typealias HistorySnapshot = ChatPersistentSnapshot
@@ -123,6 +125,29 @@ final class ChatModel {
         pendingChatAllConfirmed=pending?.entries.allSatisfy({$0.phase == .confirmed}) ?? false
     }
 
+    /// Recover only the exact authenticated outgoing groups. A journal that
+    /// references missing or mismatched history must not enter transport.
+    static func recoverOutgoingHistory(_ messages:[ChatMessage],pending:[DurableChatOutbox.Pending]) throws -> [ChatMessage] {
+        let ids=Set(pending.map(\.groupID))
+        for group in pending {
+            guard let first=group.entries.first?.envelope else {throw ChatHistoryError.invalidArchive}
+            let matches=messages.filter{$0.id==group.groupID && $0.direction == .outgoing}
+            guard matches.count==1,let message=matches.first,
+                  message.senderUserID==group.scope.user,
+                  message.recipientUserID==(first.conversationID=="family" ? "family" : first.recipientUserID),
+                  message.conversationID==first.conversationID,
+                  message.kind==first.messageType,message.contentType==first.contentType
+            else {throw ChatHistoryError.invalidArchive}
+        }
+        return messages.map { message in
+            var record=message
+            if record.direction == .outgoing && record.delivery == .sending && !ids.contains(record.id) {
+                record.delivery = .failed
+            }
+            return record
+        }
+    }
+
     private func loadFamilyHistory(configuration: ChatConfiguration) async throws {
         let generation=configurationGeneration
         try await historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
@@ -136,6 +161,8 @@ final class ChatModel {
         historyRecordCheckpoint=nil
         // Clear decrypted state before even the marker/key lookup can throw.
         restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
+        chatOutboxBlocked=true
+        let pending=try openChatOutbox(configuration:configuration,keys:keys).pendingGroups()
         // A marker, once published by the separately authorized migration,
         // is the authority. Missing/corrupt v2 must never reactivate v1.
         if try ChatV2MigrationCoordinator.hasActiveMarker(configuration:configuration,keyFingerprint:keys.safetyNumber) {
@@ -145,11 +172,8 @@ final class ChatModel {
             let original=try await active.load()
             try Task.checkCancellation()
             guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
-            let normalized=HistorySnapshot(version:1,messages:original.messages.map { message in
-                var record=message
-                if record.delivery == .sending { record.delivery = .failed }
-                return record
-            },partials:original.partials,seen:original.seen)
+            let normalized=HistorySnapshot(version:1,messages:try Self.recoverOutgoingHistory(original.messages,pending:pending),
+                partials:original.partials,seen:original.seen)
             if normalized != original {
                 _ = try await active.commit(previous:original,next:normalized,verifiedEnvelopeIDs:[])
             }
@@ -165,14 +189,11 @@ final class ChatModel {
                   snapshot.partials.count <= 256, snapshot.seen.count <= 20_000 else {
                 throw ChatHistoryError.invalidArchive
             }
-            messages = snapshot.messages.map { message in
-                var record = message
-                if record.delivery == .sending { record.delivery = .failed }
-                return record
-            }
+            messages = try Self.recoverOutgoingHistory(snapshot.messages,pending:pending)
             partialMessages = snapshot.partials
             seenEnvelopeIDs = snapshot.seen
         } else {
+            guard pending.isEmpty else {throw ChatHistoryError.invalidArchive}
             messages = []
             partialMessages = [:]
             seenEnvelopeIDs = [:]
@@ -1709,13 +1730,15 @@ extension ChatModel {
     }
 
     private func resetTicketReadAccess() {
+        ticketReadRevision &+= 1
+        ticketReadRequestScope=nil
         ticketReadLease=nil
         ticketCacheReady=false
         ticketReadOffline=false
     }
 
     func invalidateSecureTicketRead(_ scope:TicketScreenScope) {
-        if ticketReadLease?.scope==scope { resetTicketReadAccess() }
+        if ticketReadLease?.scope==scope || ticketReadRequestScope==scope { resetTicketReadAccess() }
     }
 
     func secureTicketCanRead(_ scope:TicketScreenScope,app:AppModel) -> Bool {
@@ -1757,11 +1780,15 @@ extension ChatModel {
     }
 
     func secureTicketList(_ scope:TicketScreenScope,app:AppModel) async throws -> [EncryptedTicketSummary] {
+        try checkTicketScope(scope,app)
         let generation=configurationGeneration
+        ticketReadRevision &+= 1
+        let revision=ticketReadRevision
+        ticketReadRequestScope=scope
         do {
             let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
             let result=try await fetchSecureTicketList(scope,app:app,auth:auth,generation:generation)
-            guard generation==configurationGeneration else {throw CancellationError()}
+            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
             let local=try ticketLocalIdentity(scope,app:app)
             let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
             ticketCacheReady=false
@@ -1773,7 +1800,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
-            guard generation==configurationGeneration,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
                 invalidateSecureTicketRead(scope)
@@ -1792,11 +1819,15 @@ extension ChatModel {
     }
 
     func readSecureTicketDetail(_ id:String,scope:TicketScreenScope,app:AppModel) async throws -> EncryptedTicketDetail {
+        try checkTicketScope(scope,app)
         let generation=configurationGeneration
+        ticketReadRevision &+= 1
+        let revision=ticketReadRevision
+        ticketReadRequestScope=scope
         do {
             let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
             let result=try await EncryptedTicketClient().detail(id,using:auth)
-            guard generation==configurationGeneration else {throw CancellationError()}
+            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
             let local=try ticketLocalIdentity(scope,app:app)
             guard TicketIdentityBinding.matches(local,scope.owner ? result.owner : result.requester)
             else {throw ChatError.identityChanged}
@@ -1809,7 +1840,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
-            guard generation==configurationGeneration,!Task.isCancelled else {throw CancellationError()}
+            guard generation==configurationGeneration,revision==ticketReadRevision,!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
                 invalidateSecureTicketRead(scope)

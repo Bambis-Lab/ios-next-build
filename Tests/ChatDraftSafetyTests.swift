@@ -369,4 +369,29 @@ final class ChatDraftSafetyTests: XCTestCase {
     }
 
 
+
+    func testRecoverOutgoingHistoryDoesNotMarkDurableSendAsFailed() throws {
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a")
+        let peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,
+            device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        let group=UUID().uuidString.lowercased(),now=Date()
+        let data=Data("synthetic recovery".utf8)
+        let envelope=try keys.encrypt(data,kind:.text,contentType:"text/plain",groupID:group,
+            chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:ISO8601DateFormatter().string(from:now))
+        let pending=DurableChatOutbox.Pending(scope:scope,groupID:group,recipients:[peer],
+            entries:[.init(envelope:envelope,phase:.uncertain)])
+        func message(_ id:String,_ recipient:String)->ChatMessage {
+            ChatMessage(id:id,senderUserID:local.userID,recipientUserID:recipient,kind:.text,contentType:"text/plain",
+                data:data,createdAt:now,direction:.outgoing,delivery:.sending)
+        }
+        let durable=message(group,peer.userID),orphan=message(UUID().uuidString.lowercased(),peer.userID)
+        let recovered=try ChatModel.recoverOutgoingHistory([durable,orphan],pending:[pending])
+        XCTAssertEqual(recovered.map(\.delivery),[.sending,.failed])
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([orphan],pending:[pending]))
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([message(group,"other")],pending:[pending]))
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([durable,durable],pending:[pending]))
+    }
 }
