@@ -71,11 +71,13 @@ struct ChatView: View {
         }
         .task { await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel) }
         .onDisappear {
+            AudioPlayback.shared.stop()
             cancelVoiceCapture()
             captureTarget=nil
             IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared()
         }
         .onChange(of:chatModel.mediaTarget()) { _,_ in
+            AudioPlayback.shared.stop()
             cancelVoiceCapture()
             captureTarget=nil
             isPresentingCamera=false
@@ -83,7 +85,7 @@ struct ChatView: View {
             isPresentingVideoPicker=false
         }
         .onChange(of:scenePhase) { _,phase in
-            if phase != .active {cancelVoiceCapture()}
+            if phase != .active {AudioPlayback.shared.stop();cancelVoiceCapture()}
         }
         .sheet(isPresented: $isPresentingConfiguration) {
             ChatSettingsView(appModel: appModel, chatModel: chatModel)

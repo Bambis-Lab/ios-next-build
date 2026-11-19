@@ -4,19 +4,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 @MainActor
-private final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
+final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
     static let shared = AudioPlayback()
     private var player: AVAudioPlayer?
     private var audioLease: UUID?
 
     func toggle(_ data: Data) {
         if player?.isPlaying == true {
-            player?.stop()
-            player = nil
-            AppAudioCoordinator.shared.end(audioLease)
-            audioLease = nil
+            stop()
             return
         }
+        // Retire a finished/interrupted player and its lease before replacing it.
+        stop()
         audioLease = AppAudioCoordinator.shared.begin(.chatVoicePlayback)
         player = try? AVAudioPlayer(data: data)
         guard let player else {
@@ -34,16 +33,23 @@ private final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         }
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        self.player = nil
+    func stop() {
+        let previous=player
+        player=nil
+        previous?.delegate=nil
+        previous?.stop()
         AppAudioCoordinator.shared.end(audioLease)
-        audioLease = nil
+        audioLease=nil
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        guard self.player === player else {return}
+        stop()
     }
 
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        self.player = nil
-        AppAudioCoordinator.shared.end(audioLease)
-        audioLease = nil
+        guard self.player === player else {return}
+        stop()
     }
 }
 
@@ -60,6 +66,29 @@ struct InMemoryAudioButton: View {
         }
         .buttonStyle(.borderedProminent)
         .buttonBorderShape(.circle)
+    }
+}
+
+/// Resolve AVFoundation's requested range without negative offsets, integer
+/// overflow, or sending an already-consumed prefix again. EOF is a valid
+/// empty range; malformed offsets fail closed.
+enum MemoryMediaByteRange {
+    static func resolve(byteCount:Int,requestedOffset:Int64,currentOffset:Int64,
+                        requestedLength:Int,allToEnd:Bool) throws -> Range<Int> {
+        guard byteCount>=0,requestedLength>=0,requestedOffset>=0,currentOffset>=0,
+              let start=Int(exactly:requestedOffset),start<=byteCount else {
+            throw ChatError.unsupportedMedia
+        }
+        let position=currentOffset==0 ? requestedOffset : currentOffset
+        guard let offset=Int(exactly:position),offset>=start,offset<=byteCount else {
+            throw ChatError.unsupportedMedia
+        }
+        let available=byteCount-offset
+        if allToEnd {return offset..<byteCount}
+        let consumed=offset-start
+        guard consumed<=requestedLength else {throw ChatError.unsupportedMedia}
+        let remaining=requestedLength-consumed
+        return offset..<(offset+min(remaining,available))
     }
 }
 
@@ -82,10 +111,17 @@ private final class MemoryAssetLoader: NSObject, AVAssetResourceLoaderDelegate, 
             information.isByteRangeAccessSupported = true
         }
         if let request = loadingRequest.dataRequest {
-            let offset = Int(request.currentOffset > 0 ? request.currentOffset : request.requestedOffset)
-            let available = max(0, data.count - offset)
-            let length = min(request.requestedLength, available)
-            if length > 0 { request.respond(with: data.subdata(in: offset..<(offset + length))) }
+            do {
+                let range=try MemoryMediaByteRange.resolve(byteCount:data.count,
+                    requestedOffset:request.requestedOffset,currentOffset:request.currentOffset,
+                    requestedLength:request.requestedLength,allToEnd:request.requestsAllDataToEndOfResource)
+                if !range.isEmpty {
+                    request.respond(with:data.subdata(in:(data.startIndex+range.lowerBound)..<(data.startIndex+range.upperBound)))
+                }
+            } catch {
+                loadingRequest.finishLoading(with:error)
+                return true
+            }
         }
         loadingRequest.finishLoading()
         return true
@@ -112,6 +148,7 @@ struct InMemoryVideoView: View {
     let data: Data
     let contentType: String
     @State private var controller: MemoryVideoController?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -123,7 +160,11 @@ struct InMemoryVideoView: View {
         }
         .frame(minHeight: 190)
         .task(id: id) {
+            controller?.player.pause()
             controller = MemoryVideoController(data: data, contentType: contentType)
+        }
+        .onChange(of:scenePhase) { _,phase in
+            if phase != .active {controller?.player.pause()}
         }
         .onDisappear {
             controller?.player.pause()
