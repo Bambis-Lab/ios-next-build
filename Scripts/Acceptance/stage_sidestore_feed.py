@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from verify_release_ipa import verify as verify_ipa
+from verify_device_ipa import verify as verify_ipa
 
 SOURCE = 'https://raw.githubusercontent.com/Bambis-Lab/ios-next-releases/main/source.json'
 ASSET = 'https://github.com/Bambis-Lab/ios-next-releases/releases/download/v1.8.0/IOSNext.ipa'
