@@ -19,6 +19,14 @@ struct TicketReadRequestFence {
     func accepts(_ candidate:UInt64,scope:TicketScreenScope)->Bool {
         revision==candidate && self.scope==scope
     }
+
+    func requireWrite(_ candidate:UInt64,scope:TicketScreenScope,generation:UInt64,currentGeneration:UInt64,
+                      lease:TicketOfflineLease?,now:Date = .now) throws {
+        guard generation==currentGeneration,accepts(candidate,scope:scope),let lease else {
+            throw CancellationError()
+        }
+        try lease.require(scope,generation:generation,now:now)
+    }
 }
 
 /// In-memory, scope-bound offline read window. Only construct following a

@@ -97,4 +97,21 @@ final class SecureTicketCacheTests: XCTestCase {
         fence.invalidate()
         XCTAssertFalse(fence.accepts(second,scope:a))
     }
+
+    func testWritePermitRejectsLateResponseAfterRevocationExpiryOrAccountChange() throws {
+        let url=try XCTUnwrap(URL(string:"https://example.invalid"))
+        let a=TicketScreenScope(endpoint:url,user:"a",device:"ios-a",owner:true,keyFingerprint:"fixture-a")
+        let b=TicketScreenScope(endpoint:url,user:"b",device:"ios-b",owner:false,keyFingerprint:"fixture-b")
+        let now=Date()
+        let lease=try TicketOfflineLease(scope:a,verifiedGrantExpiry:now.addingTimeInterval(300),generation:7,now:now)
+        var fence=TicketReadRequestFence()
+        let revision=fence.begin(a)
+        XCTAssertNoThrow(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:7,lease:lease,now:now))
+        XCTAssertThrowsError(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:8,lease:lease,now:now))
+        XCTAssertThrowsError(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:7,lease:nil,now:now))
+        XCTAssertThrowsError(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:7,lease:lease,now:now.addingTimeInterval(61)))
+        XCTAssertThrowsError(try fence.requireWrite(revision,scope:b,generation:7,currentGeneration:7,lease:lease,now:now))
+        fence.invalidate()
+        XCTAssertThrowsError(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:7,lease:lease,now:now))
+    }
 }
