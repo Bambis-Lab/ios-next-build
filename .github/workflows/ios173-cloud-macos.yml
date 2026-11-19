@@ -194,6 +194,7 @@ jobs:
             '-only-testing:IOSNextTests/EncryptedTicketClientTests' \
             '-only-testing:IOSNextTests/EncryptedTicketMessageTests' \
             '-only-testing:IOSNextTests/TicketIdentityBindingTests' \
+            '-only-testing:IOSNextTests/SecureTicketOutboxTests' \
             '-only-testing:IOSNextTests/EncryptedChatRecordStoreTests' \
             '-only-testing:IOSNextTests/ChatHistoryRecordMigrationTests' \
             '-only-testing:IOSNextTests/FactoryWorkspaceCollectionTests' \
@@ -203,7 +204,7 @@ jobs:
             '-only-testing:IOSNextTests/MasterPlatform140Tests' \
             CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
             2>&1 | tee build/ios173/OwnerNavigation.log
-          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests ProjectRegistryTests FamilyAudioCryptoTests FamilyAudioSessionTests FamilyAudioWireTests FamilyPCMTests ChatHistoryArchiveTests ChatMediaThumbnailCacheTests EncryptedTicketClientTests EncryptedTicketMessageTests TicketIdentityBindingTests EncryptedChatRecordStoreTests ChatHistoryRecordMigrationTests FactoryWorkspaceCollectionTests FactoryWorkspaceContractsTests FactoryWorkspaceCoordinatorTests FactoryWorkspaceEventsTests MasterPlatform140Tests; do
+          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ChatDraftSafetyTests ProjectRegistryTests FamilyAudioCryptoTests FamilyAudioSessionTests FamilyAudioWireTests FamilyPCMTests ChatHistoryArchiveTests ChatMediaThumbnailCacheTests EncryptedTicketClientTests EncryptedTicketMessageTests TicketIdentityBindingTests SecureTicketOutboxTests EncryptedChatRecordStoreTests ChatHistoryRecordMigrationTests FactoryWorkspaceCollectionTests FactoryWorkspaceContractsTests FactoryWorkspaceCoordinatorTests FactoryWorkspaceEventsTests MasterPlatform140Tests; do
             grep -Fq "Test Suite '$suite' passed" build/ios173/OwnerNavigation.log
           done
           grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/OwnerNavigation.log

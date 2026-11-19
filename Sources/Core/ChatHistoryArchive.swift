@@ -25,9 +25,18 @@ final class ChatHistoryArchive {
         }
         let scope = try JSONEncoder().encode([configuration.baseURL.absoluteString,
                                               configuration.userID, configuration.deviceID])
+        try self.init(scopedData: scope, namespace: "chatHistory.v1", folder: "EncryptedChatHistory")
+    }
+
+    /// Separate Keychain namespace and directory for each local protocol.
+    convenience init(scopedData scope: Data, namespace: String, folder: String) throws {
+        guard !scope.isEmpty, scope.count <= 8192,
+              ["chatHistory.v1", "ticketOutbox.v1"].contains(namespace),
+              ["EncryptedChatHistory", "EncryptedTicketOutbox"].contains(folder)
+        else { throw ChatHistoryError.invalidScope }
         let digest = SHA256.hash(data: scope).map { String(format: "%02x", $0) }.joined()
         let directory = try FileManager.default.url(for: .applicationSupportDirectory,
-            in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("EncryptedChatHistory", isDirectory: true)
+            in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent(folder, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.complete])
         var excluded = directory
@@ -35,7 +44,7 @@ final class ChatHistoryArchive {
         flags.isExcludedFromBackup = true
         try excluded.setResourceValues(flags)
         let path = directory.appendingPathComponent(digest + ".enc")
-        let account = "chatHistory.v1." + digest
+        let account = namespace + "." + digest
         let raw: Data
         if let existing = try KeychainStore.data(account: account) {
             raw = existing

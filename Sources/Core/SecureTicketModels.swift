@@ -23,7 +23,7 @@ enum TicketIdentityBinding {
     }
 }
 
-struct TicketScreenScope: Hashable {
+struct TicketScreenScope: Hashable, Codable, Sendable {
     let endpoint: URL
     let user: String
     let device: String
@@ -39,7 +39,7 @@ struct TicketReadableMessage: Identifiable {
 
 /// Retains the original signed ciphertext for a retry, never generates a second
 /// logical message after an ambiguous network failure.
-struct TicketPendingSend {
+struct TicketPendingSend: Codable, Equatable, Sendable {
     let scope: TicketScreenScope
     let message: EncryptedTicketMessage
     let peer: ChatIdentity

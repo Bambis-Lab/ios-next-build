@@ -1412,6 +1412,18 @@ extension ChatModel {
         return TicketPendingSend(scope: scope, message: message, peer: peer, create: detail == nil)
     }
 
+    func restoreSecureTicketPending(_ scope: TicketScreenScope, app: AppModel) async throws -> TicketPendingSend? {
+        _ = try await ticketAuthorization(scope, app)
+        try checkTicketScope(scope, app)
+        return try SecureTicketOutbox(scope: scope).pending()
+    }
+
+    func stageSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws {
+        _ = try await ticketAuthorization(scope, app)
+        try checkTicketScope(scope, app)
+        try SecureTicketOutbox(scope: scope).stage(pending)
+    }
+
     func submitSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
         guard pending.scope == scope, let configuration else { throw ChatError.authenticationFailed }
         try checkTicketScope(scope, app)
@@ -1419,6 +1431,13 @@ extension ChatModel {
         try checkTicketScope(scope, app)
         guard current.contains(where: { TicketIdentityBinding.matches($0, pending.peer) }) else { throw ChatError.identityChanged }
         let auth = try await ticketAuthorization(scope, app)
+        try checkTicketScope(scope, app)
+        // Reauthenticate the stored signed message against the current key.
+        guard let keys, try SecureTicketOutbox(scope: scope).pending() == pending,
+              let safety = ChatDeviceKeys.safetyNumber(for: pending.peer) else { throw ChatError.authenticationFailed }
+        let local = TicketIdentityBinding.canonical(keys.publicIdentity(userID: scope.user, deviceID: scope.device))
+        _ = try pending.message.open(expectedTicketID: pending.message.ticketID, author: local,
+            counterparty: pending.peer, confirmedSafetyNumber: safety, local: local, keys: keys)
         let client = EncryptedTicketClient()
         let result: EncryptedTicketDetail
         if pending.create {
@@ -1427,6 +1446,10 @@ extension ChatModel {
             result = try await client.reply(pending.message, using: auth)
         }
         try checkTicketScope(scope, app)
+        guard TicketIdentityBinding.matches(scope.owner ? result.owner : result.requester, local),
+              TicketIdentityBinding.matches(scope.owner ? result.requester : result.owner, pending.peer)
+        else { throw ChatError.identityChanged }
+        try SecureTicketOutbox(scope: scope).acknowledge(pending, receipt: result)
         return result
     }
 

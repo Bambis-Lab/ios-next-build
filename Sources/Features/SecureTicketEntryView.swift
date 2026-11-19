@@ -41,6 +41,7 @@ private struct SecureTicketScreen: View {
     @State private var number = ""
     @State private var draft = ""
     @State private var pending: TicketPendingSend?
+    @State private var restoredPending = false
     @State private var creating = false
     @State private var verified = false
     @State private var busy = false
@@ -59,7 +60,14 @@ private struct SecureTicketScreen: View {
         List {
             if let errorText { Text(errorText).foregroundStyle(.secondary).accessibilityIdentifier("secure-ticket-error") }
             if busy { ProgressView("Sicherer Zugriff …") }
-            if creating || detail != nil {
+            if restoredPending, let pending {
+                Section("Ausstehender verschlüsselter Auftrag") {
+                    Text("Ticket " + String(pending.message.ticketID.prefix(8)))
+                    Text("Die bereits signierte Nachricht ist lokal gesichert. Sende exakt diesen Auftrag erneut.")
+                    Button("Gesicherten Auftrag erneut senden") { send() }
+                        .disabled(busy).accessibilityIdentifier("secure-ticket-retry-persisted")
+                }
+            } else if creating || detail != nil {
                 editor
             } else {
                 Section("Ende-zu-Ende-verschlüsselt") {
@@ -94,7 +102,7 @@ private struct SecureTicketScreen: View {
         }
         .navigationTitle(scope.owner ? "Owner · sichere Tickets" : "Meine sicheren Tickets")
         .navigationBarTitleDisplayMode(.inline)
-        .task { if startNew && !scope.owner { newTicket() } else { load() } }
+        .task { restoreAndLoad() }
         .onDisappear {
             generation = UUID()
             work?.cancel()
@@ -160,7 +168,7 @@ private struct SecureTicketScreen: View {
                         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.utf8.count > 16000)))
                     .accessibilityIdentifier("secure-ticket-send")
                 if pending != nil {
-                    Text("Empfang noch nicht bestätigt. Wiederholung verwendet dieselbe signierte Nachricht. Beim Schließen geht dieser ausstehende Auftrag verloren.")
+                    Text("Empfang noch nicht bestätigt. Derselbe signierte Auftrag bleibt verschlüsselt gespeichert.")
                         .font(.caption)
                 }
             }
@@ -189,6 +197,28 @@ private struct SecureTicketScreen: View {
                 if generation == attempt && active && !Task.isCancelled {
                     errorText = "Sicherer Ticketzugriff fehlgeschlagen. Kein Klartext-Fallback."
                 }
+            }
+        }
+    }
+
+    private func restoreAndLoad() {
+        launch {
+            let saved = try await chat.restoreSecureTicketPending(scope, app: app)
+            try requireActive()
+            if let saved {
+                pending = saved
+                restoredPending = true
+                return
+            }
+            if startNew && !scope.owner {
+                let options = try await chat.secureTicketOwnerDevices(scope, app: app)
+                try requireActive()
+                devices = options
+                creating = true
+            } else {
+                let items = try await chat.secureTicketList(scope, app: app)
+                try requireActive()
+                tickets = items
             }
         }
     }
@@ -230,6 +260,8 @@ private struct SecureTicketScreen: View {
                 request = try await chat.prepareSecureTicket(text: draft, detail: detail, peer: peer,
                     number: number, scope: scope, app: app)
                 try requireActive()
+                try await chat.stageSecureTicket(request, scope: scope, app: app)
+                try requireActive()
                 pending = request
                 draft = ""
             }
@@ -242,12 +274,19 @@ private struct SecureTicketScreen: View {
             verified = false
             messages = []
             detail = result
-            try showDetail(result)
+            if restoredPending {
+                restoredPending = false
+                number = ""
+                // On reopening, require explicit peer verification before
+                // displaying plaintext even after the exact retry succeeds.
+            } else {
+                try showDetail(result)
+            }
         }
     }
 
     private func clearEditor() {
         detail = nil; messages = []; devices = []; selectedDevice = ""
-        number = ""; draft = ""; pending = nil; creating = false; verified = false
+        number = ""; draft = ""; pending = nil; creating = false; verified = false; restoredPending = false
     }
 }
