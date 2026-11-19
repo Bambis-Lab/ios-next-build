@@ -344,6 +344,10 @@ actor ChatRelayClient {
         baseURL: URL,
         bearerToken: String
     ) async throws -> Response {
+        guard LegacyTicketTransportPolicy.allows(path:path,
+            familyBrokerConfigured:FamilyBootstrapClient.configuredURL() != nil) else {
+            throw ChatError.authenticationFailed
+        }
         let transportBaseURL = Self.transportBaseURL(for: baseURL)
         guard let url = URL(string: path, relativeTo: transportBaseURL)?.absoluteURL else {
             throw ChatError.invalidConfiguration
