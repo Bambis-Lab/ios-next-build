@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "repository": "Bambis-Lab/ios-next-build",
+  "observed_date": "2026-11-19",
+  "runs": [
+    {
+      "run": 44444731897,
+      "commit": "d7cc4e8c516852dc144b57838d997bd5a55f14b5",
+      "conclusion": "success",
+      "artifact": 14492739625,
+      "sha256_reported_by_github": "fed63db05df67e9af545a07ecf57803dea92c1500888581fb03dd6842d637f80",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44444930052,
+      "commit": "7c2a31ba8128933ef1fee91969236a242e81b1eb",
+      "conclusion": "success",
+      "artifact": 14493845458,
+      "sha256_reported_by_github": "1bc87796a47c1a7548fe6e7dbf2310502e77643d11003536403690554add2167",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44445266777,
+      "commit": "fe750197a58dab0e37f308952b13b1cfd729c562",
+      "conclusion": "success",
+      "artifact": 14492689990,
+      "sha256_reported_by_github": "4bf9c607df69b73da585dfa1cf6673a291e520d7c5cb551d63f236881c955b26",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44445521671,
+      "commit": "c46f9035eaf209c5bc3761f9b4fea7c22fbda06f",
+      "conclusion": "success",
+      "artifact": 14493203141,
+      "sha256_reported_by_github": "fbac25c9ca4cd850c6b4396a7501f76896856d6db7b4ba32fdcec755ac201109",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44446060510,
+      "commit": "5679c6c09db6dd8e5be0e81fa11121dc82bc7c3f",
+      "conclusion": "success",
+      "artifact": 14493004372,
+      "sha256_reported_by_github": "08fe5d12feaf52630b1e98faf8230a04d66b64807d2f6aa8ff5163caea782f48",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44445969729,
+      "commit": "39771767c21c2f0e2e4ba2e718fffd53b85d8632",
+      "conclusion": "failure",
+      "artifact": 14494136285,
+      "sha256_reported_by_github": "fce24ace4628a4ae879e96a7e8fd495e80429379b21c2df4546efdd7fee5dad1",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44444008087,
+      "commit": "932645d3053727f1bb25fd1853a472940cbab17e",
+      "conclusion": "success",
+      "artifact": 14491848767,
+      "sha256_reported_by_github": "c285f6e4bafb88d2f92ba9a18e135963e2b2098443d6a554f9c798ea84dd44d9",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44443571417,
+      "commit": "cd5807f3f5be3f6343af27d5fbc4676c6bfb8c8f",
+      "conclusion": "success",
+      "artifact": 14492496901,
+      "sha256_reported_by_github": "c7dfa7ae3206a0e42dfcf307d7ad2935a2b33475f2ffbb5ae7fcad3f543aed90",
+      "expires_date": "2026-12-03"
+    },
+    {
+      "run": 44442952698,
+      "commit": "dd90ec2d816d26a2c4f705c7239c9c456b9e36dc",
+      "conclusion": "success",
+      "artifact": 14492971325,
+      "sha256_reported_by_github": "d6f3a737cb57ee419d7e3a69bcb084b77a5d1705d1a2146ec3ba55af732aec19",
+      "expires_date": "2026-12-03"
+    }
+  ],
+  "pending": [
+    {
+      "run": 44447281943,
+      "commit": "4dd0aba2434542d702a1ab9eff1214ec63d752e6"
+    },
+    {
+      "run": 44447375586,
+      "commit": "24436b34d2dce005e8ceb0ff1ac743b15e9b2d78"
+    },
+    {
+      "run": 44448442074,
+      "commit": "4a124f7ff0b6692c6f9a75aade59ffcda3dfc043"
+    },
+    {
+      "run": 44448499197,
+      "commit": "57afcadaa14b0813f8392b9e04ee611ebd998057"
+    }
+  ],
+  "limitations": [
+    "Digests are GitHub-reported ZIP digests; bytes have not been independently hashed or archived.",
+    "Historical PASS applies to exact tested commits only.",
+    "Backend HEAD and original 81-item mapping not verified.",
+    "G03 blocked; no release authorization."
+  ]
+}
