@@ -349,9 +349,11 @@ jobs:
       - name: Rehearse private role file handoff inside the disposable native simulator
         env:
           IOSNEXT_PREFLIGHT_ROLE: ${{ matrix.role }}
+          IOSNEXT_OFFLINE_RELOCATION_POLICY: sr22-disposable-offline-v1
         shell: bash
         run: |
           set -euo pipefail
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/test_offline_sandbox_receipt.py
           "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py self-test
           "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py
       - name: Preserve separate native prerequisite evidence
