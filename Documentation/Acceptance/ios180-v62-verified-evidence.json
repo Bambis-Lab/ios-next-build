@@ -1,0 +1,162 @@
+{
+  "schema": 2,
+  "date": "2026-11-19",
+  "repository": "Bambis-Lab/ios-next-build",
+  "scope": "Selected native original CI archives; no G99 or release certification",
+  "pack": {
+    "filename": "iosnext-v62-original-evidence-2026-11-19.zip",
+    "sha256": "72cb5f424be81579e4fde4bb1a31f98bf3db111e72bfaaccdb198a1a880c2ac8",
+    "bytes": 34963848,
+    "storage": "User's private ChatGPT file library; uploaded successfully",
+    "count": 12
+  },
+  "runs": [
+    {
+      "run": 44444731897,
+      "commit": "d7cc4e8c516852dc144b57838d997bd5a55f14b5",
+      "conclusion": "success",
+      "artifact": 14492739625,
+      "sha256": "fed63db05df67e9af545a07ecf57803dea92c1500888581fb03dd6842d637f80",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44444930052,
+      "commit": "7c2a31ba8128933ef1fee91969236a242e81b1eb",
+      "conclusion": "success",
+      "artifact": 14493845458,
+      "sha256": "1bc87796a47c1a7548fe6e7dbf2310502e77643d11003536403690554add2167",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44445266777,
+      "commit": "fe750197a58dab0e37f308952b13b1cfd729c562",
+      "conclusion": "success",
+      "artifact": 14492689990,
+      "sha256": "4bf9c607df69b73da585dfa1cf6673a291e520d7c5cb551d63f236881c955b26",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44445521671,
+      "commit": "c46f9035eaf209c5bc3761f9b4fea7c22fbda06f",
+      "conclusion": "success",
+      "artifact": 14493203141,
+      "sha256": "fbac25c9ca4cd850c6b4396a7501f76896856d6db7b4ba32fdcec755ac201109",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44446060510,
+      "commit": "5679c6c09db6dd8e5be0e81fa11121dc82bc7c3f",
+      "conclusion": "success",
+      "artifact": 14493004372,
+      "sha256": "08fe5d12feaf52630b1e98faf8230a04d66b64807d2f6aa8ff5163caea782f48",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44445969729,
+      "commit": "39771767c21c2f0e2e4ba2e718fffd53b85d8632",
+      "conclusion": "failure",
+      "artifact": 14494136285,
+      "sha256": "fce24ace4628a4ae879e96a7e8fd495e80429379b21c2df4546efdd7fee5dad1",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44444008087,
+      "commit": "932645d3053727f1bb25fd1853a472940cbab17e",
+      "conclusion": "success",
+      "artifact": 14491848767,
+      "sha256": "c285f6e4bafb88d2f92ba9a18e135963e2b2098443d6a554f9c798ea84dd44d9",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44443571417,
+      "commit": "cd5807f3f5be3f6343af27d5fbc4676c6bfb8c8f",
+      "conclusion": "success",
+      "artifact": 14492496901,
+      "sha256": "c7dfa7ae3206a0e42dfcf307d7ad2935a2b33475f2ffbb5ae7fcad3f543aed90",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44442952698,
+      "commit": "dd90ec2d816d26a2c4f705c7239c9c456b9e36dc",
+      "conclusion": "success",
+      "artifact": 14492971325,
+      "sha256": "d6f3a737cb57ee419d7e3a69bcb084b77a5d1705d1a2146ec3ba55af732aec19",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44447281943,
+      "commit": "4dd0aba2434542d702a1ab9eff1214ec63d752e6",
+      "conclusion": "success",
+      "artifact": 14493624033,
+      "sha256": "527f3c5dfc573a09312f00fde481ef577c65e3d333b12f1ae945e71a36b7be57",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44447375586,
+      "commit": "24436b34d2dce005e8ceb0ff1ac743b15e9b2d78",
+      "conclusion": "success",
+      "artifact": 14494781064,
+      "sha256": "650f11b4808784ef89aed76acd403906a9d70c8aa9ad60a58e983928ca39e7e1",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    },
+    {
+      "run": 44448499197,
+      "commit": "57afcadaa14b0813f8392b9e04ee611ebd998057",
+      "conclusion": "success",
+      "artifact": 14494328113,
+      "sha256": "952aa6ff22a2294fe95c2b67d5ad58a5a45b684751020cbe16a421ab3838269d",
+      "independently_verified": true,
+      "zip_crc_valid": true
+    }
+  ],
+  "backend_baselines": [
+    {
+      "repository": "Bambis-Lab/ios-next",
+      "run": 44449513931,
+      "commit": "50405e3dde299100ba33b5319432fd5f28a3d011",
+      "conclusion": "success"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next",
+      "run": 44449604684,
+      "commit": "902d9d41cee9178b26942bf1f6e888d200d8355d",
+      "conclusion": "success"
+    }
+  ],
+  "development_heads": [
+    {
+      "repo": "Bambis-Lab/ios-next-build",
+      "branch": "feature/ios180-v62-native-staged-call",
+      "sha": "098771bef9313fd44f99d3f10feaf99b987be3ea",
+      "run": 44450386899
+    },
+    {
+      "repo": "Bambis-Lab/ios-next-build",
+      "branch": "feature/ios180-v62-proof-ledger",
+      "sha": "4ab12c515d971f2e6d7a7a0e6510d6b2ec505722",
+      "run": 44450506052
+    },
+    {
+      "repo": "Bambis-Lab/ios-next",
+      "branch": "feature/ios180-v62-proof-retention",
+      "sha": "17d5625a376e94ceadf21bdb06e5f92b57862051",
+      "run": 44450591891
+    }
+  ],
+  "limitations": [
+    "Only listed archives were downloaded, independently SHA-256 compared and CRC tested.",
+    "Library archive is not a repository backup and must not be represented as release evidence.",
+    "All open tests, final G99, backend logs and full original 81 work-item mapping remain open."
+  ]
+}
