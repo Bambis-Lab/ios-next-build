@@ -1,0 +1,439 @@
+{
+  "schema": 1,
+  "scope": "V7-00 initial source lock; no release or new native acceptance",
+  "baseline": {
+    "repository": "Bambis-Lab/ios-next-build",
+    "branch": "feature/ios180-v65-native-handoff-rehearsal",
+    "sha": "d761cd8faa9c56bbfae3e2cd60f053cd7d932cd7",
+    "previous": "3925bfc9b72083f057db6532e113b3ec6bf1d07e"
+  },
+  "sources": [
+    {
+      "repository": "Bambis-Lab/ios-next",
+      "ref": "HEAD",
+      "sha": "5f5925037a5cfce280fec49960e5a1cd2c3ed8f9"
+    },
+    {
+      "repository": "Bambis-Lab/build-artifacts",
+      "ref": "HEAD",
+      "sha": "78c7f70b0c18faffe4669501df20d46841d8692d"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next",
+      "ref": "feature/ios180-v6-recipient-proof-core",
+      "sha": "50405e3dde299100ba33b5319432fd5f28a3d011"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "evidence/ios180-v6-source-lock",
+      "sha": "6b5a55754e15250f1339ea7400a30aeccecc88ff"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v65-five-role-ticket-matrix",
+      "sha": "fb30063924e781e44dfa2d6876d7e0a719e32d21"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v65-media-selection-revision",
+      "sha": "10070eb1e8bd80e27dd9fd979a42617439ffafc8"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v6-outbox-resume",
+      "sha": "4a124f7ff0b6692c6f9a75aade59ffcda3dfc043"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v52-ready-window",
+      "sha": "4dd0aba2434542d702a1ab9eff1214ec63d752e6"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v5-integrated-chat-ticket",
+      "sha": "7c2a31ba8128933ef1fee91969236a242e81b1eb"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v6-dual-infra-smoke",
+      "sha": "57afcadaa14b0813f8392b9e04ee611ebd998057"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v64-isolated-relay",
+      "sha": "b47ad8b6302ffaea7af021a6bcee2a60074a160d"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v64-role-provisioning",
+      "sha": "e6563fb870830786a8610a68352f00d8c965b837"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v64-wss-continuous-control",
+      "sha": "325e5f12412bdd1ff26645cffd97082177409bbf"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v64-relay-reconnect",
+      "sha": "48a4ee5a065489835882874da01d9ffa659a24a5"
+    },
+    {
+      "repository": "Bambis-Lab/ios-next-build",
+      "ref": "feature/ios180-v63-factory-accessibility",
+      "sha": "afd930a49842b66ff01cdd6f06d8c3e48a657e94"
+    }
+  ],
+  "historical_ci": [
+    {
+      "run": 44463085229,
+      "scope": "native prerequisite only",
+      "jobs": [
+        135354297118,
+        135355046303,
+        135355046390,
+        135358477849
+      ],
+      "all_jobs_success": true,
+      "native_media": false
+    },
+    {
+      "run": 44462109985,
+      "scope": "historical ticket CI",
+      "jobs": [
+        135351145487,
+        135351354104
+      ],
+      "all_jobs_success": true
+    },
+    {
+      "run": 44465634961,
+      "scope": "local WSS control",
+      "jobs": [
+        135362636964
+      ],
+      "all_jobs_success": true,
+      "native_media": false
+    }
+  ],
+  "historical_evidence": {
+    "ref": "6b5a55754e15250f1339ea7400a30aeccecc88ff",
+    "path": "Documentation/Acceptance/ios180-v64-wss-control-lock.json",
+    "local_wss_artifact": 14501613182,
+    "sha256": "1d80192607793ace9961d7bcdb48e93257c1fb22d9f2488c22a12bca9cbfb322",
+    "bytes_reverified_this_run": false
+  },
+  "v64": {
+    "blocks": {
+      "A": 13,
+      "B": 14,
+      "C": 12,
+      "D": 8,
+      "E": 15,
+      "F": 10,
+      "G": 15,
+      "H": 8
+    },
+    "total": 95,
+    "full_original_definitions_available": false
+  },
+  "v7": {
+    "V7-00": [
+      {
+        "id": "V7-00-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-00-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-01": [
+      {
+        "id": "V7-01-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-01-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-02": [
+      {
+        "id": "V7-02-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-02-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-03": [
+      {
+        "id": "V7-03-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-03-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-04": [
+      {
+        "id": "V7-04-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-04-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-05": [
+      {
+        "id": "V7-05-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-05-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-06": [
+      {
+        "id": "V7-06-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-06-08",
+        "status": "OPEN"
+      }
+    ],
+    "V7-07": [
+      {
+        "id": "V7-07-01",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-02",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-03",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-04",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-05",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-06",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-07",
+        "status": "OPEN"
+      },
+      {
+        "id": "V7-07-08",
+        "status": "OPEN"
+      }
+    ]
+  },
+  "gates": {
+    "G01": "NOT_ACCEPTED",
+    "G02": "NOT_ACCEPTED",
+    "G03": "NOT_ACCEPTED",
+    "G04": "NOT_ACCEPTED",
+    "G05": "NOT_ACCEPTED",
+    "G99": "NOT_ACCEPTED",
+    "RC": "NOT_ACCEPTED"
+  },
+  "blockers": [
+    "push run listing unavailable through connector; PR-only run query is not proof of no runs",
+    "factory host execution disabled",
+    "no independently verified authorized shared relay route",
+    "V6.5 failed handoff run id not recovered",
+    "historical V6.4 requirement text incomplete"
+  ],
+  "constraints": {
+    "durations_seconds": [
+      30,
+      120,
+      300
+    ],
+    "production_changes": false,
+    "release": false
+  }
+}
