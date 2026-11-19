@@ -18,7 +18,9 @@ SOURCE=Path(os.environ["XCTESTRUN_PATH"]).resolve()
 ROOT=Path(os.environ["RUNNER_TEMP"])/"ios173-dual-products"
 
 def devices():
-    data=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],timeout=20,emit_output=False))
+    # Hosted CoreSimulator inventory can stall during initial trust-store
+    # setup. Allow bounded infrastructure discovery, never skip verification.
+    data=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],timeout=120,emit_output=False))
     return [(runtime,d) for runtime,rows in data["devices"].items() for d in rows]
 
 def create():
@@ -47,7 +49,7 @@ def run(second):
             # Separate product directory per xcodebuild, so installation and
             # test-runner preparation cannot alter the other client's bundle.
             products=ROOT/role
-            run_bounded(["ditto",str(SOURCE.parent),str(products)],timeout=180)
+            run_bounded(["ditto",str(SOURCE.parent),str(products)],timeout=240)
         for role,uid in (("A",FIRST),("B",second)):
             test=f"IOSNextTests/FamilyAudioIndependentSimulatorTests/testSimulator{role}"
             log=OUT/f"{role}.log"

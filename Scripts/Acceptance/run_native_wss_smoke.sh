@@ -35,13 +35,23 @@ EOF
     -CAcreateserial -days 1 -extfile "$tls/$name.ext" -out "$tls/$name.crt" > /dev/null 2>&1
   openssl verify -CAfile "$tls/ca.crt" "$tls/$name.crt" > /dev/null
 done
-xcrun simctl keychain "$SIM_ID" add-root-cert "$tls/ca.der"
 second=""
 if [ "${1:-}" = dual ]; then
+  # Resolve/create and verify both booted devices BEFORE simulator keychain
+  # initialization; the prior 600s run timed out in inventory after root import.
   python3 Scripts/Acceptance/run_two_native_simulators.py create
   second="$(cat build/ios173/dual-simulator/created-udid.txt)"
-  xcrun simctl keychain "$second" add-root-cert "$tls/ca.der"
 fi
+install_test_root() {
+  python3 - "$1" "$tls/ca.der" <<'PY'
+import sys
+sys.path.insert(0, "Scripts/Acceptance")
+from boot_simulator import run_bounded
+run_bounded(["xcrun","simctl","keychain",sys.argv[1],"add-root-cert",sys.argv[2]],timeout=180)
+PY
+}
+install_test_root "$SIM_ID"
+if [ -n "$second" ]; then install_test_root "$second"; fi
 "$python" Scripts/Acceptance/audio_network_fixture.py serve > "$tls/server.log" 2>&1 &
 server_pid=$!
 "$python" Scripts/Acceptance/native_wss_proxy.py "$tls" > "$tls/proxy.log" 2>&1 &
