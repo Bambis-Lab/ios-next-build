@@ -1,7 +1,7 @@
 name: V6.4 isolated relay synthetic contract
 on:
   push:
-    branches: ['feature/ios180-v64-isolated-relay', 'feature/ios180-v64-relay-reconnect']
+    branches: ['feature/ios180-v64-isolated-relay', 'feature/ios180-v64-relay-reconnect', 'feature/ios180-v64-role-provisioning']
 permissions:
   contents: read
 jobs:
@@ -19,6 +19,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/v64
           "$RUNNER_TEMP/relay/bin/python" Scripts/Acceptance/test_distributed_audio_relay.py -v 2>&1 | tee build/v64/relay-tests.log
+          "$RUNNER_TEMP/relay/bin/python" Scripts/Acceptance/test_distributed_role_provisioning.py -v 2>&1 | tee build/v64/provisioning-tests.log
       - name: Preserve result
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
