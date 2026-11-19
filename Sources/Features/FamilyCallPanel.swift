@@ -9,7 +9,7 @@ struct FamilyCallPanel: View {
     @State private var selectedAudioCall: String?
 
     var body: some View {
-        if chatModel.canSignalCalls && scenePhase == .active {
+        if chatModel.canShowCallPanel && scenePhase == .active {
             VStack(alignment: .leading, spacing: 8) {
                 Label(chatModel.canStartAudio ? "Familienanrufe · Audio experimentell" : "Anrufsignalisierung · kein Audio", systemImage: "phone")
                     .font(.caption).foregroundStyle(.secondary)
@@ -17,12 +17,12 @@ struct FamilyCallPanel: View {
                     Button("Anrufanfrage senden", systemImage: "phone.arrow.up.right") {
                         Task { await chatModel.inviteSelectedContact() }
                     }
-                    .disabled(chatModel.callBusy || chatModel.recipientUserID.isEmpty)
+                    .disabled(!chatModel.canSignalCalls || chatModel.callBusy || chatModel.recipientUserID.isEmpty)
                 }
                 Button("Anrufstatus aktualisieren", systemImage: "arrow.clockwise") {
                     Task { await chatModel.refreshCalls() }
                 }
-                .disabled(chatModel.callBusy)
+                .disabled(!chatModel.canSignalCalls || chatModel.callBusy)
                 if let error = chatModel.callError {
                     Text(error).font(.caption).foregroundStyle(.secondary)
                 }
@@ -131,6 +131,6 @@ struct FamilyCallPanel: View {
             }
         }
         .buttonStyle(.bordered)
-        .disabled(chatModel.callBusy)
+        .disabled(!chatModel.canSignalCalls || chatModel.callBusy)
     }
 }

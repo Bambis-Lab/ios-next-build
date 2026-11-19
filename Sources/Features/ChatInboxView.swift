@@ -72,7 +72,7 @@ struct ChatInboxView: View {
 
     var body: some View {
         List {
-            if searchText.isEmpty && chatModel.canSignalCalls {
+            if searchText.isEmpty && chatModel.canShowCallPanel {
                 Section("Anrufe") { FamilyCallPanel(chatModel: chatModel) }
             }
             if searchText.isEmpty {

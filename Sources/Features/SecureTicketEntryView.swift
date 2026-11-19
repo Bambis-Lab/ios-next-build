@@ -212,6 +212,8 @@ private struct SecureTicketScreen: View {
     }
 
     private func showDetail(_ loaded: EncryptedTicketDetail) throws {
+        verified = false
+        messages = []
         let decoded = try chat.openSecureTicket(loaded, number: number, scope: scope, app: app)
         detail = loaded
         messages = decoded
@@ -236,6 +238,10 @@ private struct SecureTicketScreen: View {
             // Clear the pending request after the exact server receipt even
             // when a subsequently invalid history prevents decryption.
             pending = nil
+            creating = false
+            verified = false
+            messages = []
+            detail = result
             try showDetail(result)
         }
     }

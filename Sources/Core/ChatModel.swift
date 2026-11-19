@@ -21,16 +21,7 @@ final class ChatModel {
         case offline(String)
     }
 
-    private struct PartialMessage: Codable {
-        let senderUserID: String
-        let conversationID: String?
-        let kind: ChatMessageKind
-        let contentType: String
-        let createdAt: Date
-        let chunkCount: Int
-        var chunks: [Int: Data]
-        var lastUpdated: Date
-    }
+    private typealias PartialMessage = ChatPersistentPartial
 
     static let chunkSize = 384 * 1024
     static let maximumBytes: [ChatMessageKind: Int] = [
@@ -77,12 +68,7 @@ final class ChatModel {
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
-    private struct HistorySnapshot: Codable {
-        let version: Int
-        let messages: [ChatMessage]
-        let partials: [String: PartialMessage]
-        let seen: [String: Date]
-    }
+    private typealias HistorySnapshot = ChatPersistentSnapshot
     private var historyArchive: ChatHistoryArchive?
     private var partialMessages: [String: PartialMessage] = [:]
 
@@ -218,7 +204,7 @@ final class ChatModel {
             audioCallID = callID
             var sentToken = configuration.token
             try await session.run { [weak self] in
-                guard let self, self.audioAttempt == attempt, self.canSignalCalls,
+                guard let self, self.audioAttempt == attempt, self.isFamilyCredentialActive,
                       let current = self.configuration,
                       current.userID == configuration.userID, current.deviceID == configuration.deviceID,
                       current.baseURL == configuration.baseURL else { throw CancellationError() }
@@ -236,6 +222,7 @@ final class ChatModel {
         }
     }
     var canSignalCalls: Bool { isFamilyCredentialActive && state == .online }
+    var canShowCallPanel: Bool { canSignalCalls || (isFamilyCredentialActive && audioSession != nil) }
 
     private func resetCalls() {
         stopAudio()
@@ -249,8 +236,8 @@ final class ChatModel {
     // View-scoped polling only; cancellation never starts a new request.
     func pollCallsWhileVisible() async {
         let generation = callGeneration
-        while !Task.isCancelled && canSignalCalls && generation == callGeneration {
-            await refreshCalls()
+        while !Task.isCancelled && canShowCallPanel && generation == callGeneration {
+            if canSignalCalls { await refreshCalls() }
             do { try await Task.sleep(for: .seconds(3)) }
             catch { return }
         }
@@ -1097,7 +1084,9 @@ final class ChatModel {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
-                stopAudio()
+                if !familyAudioTransientNetworkError(error) || audioSession == nil {
+                    stopAudio()
+                }
                 state = .offline(error.localizedDescription)
                 try? await Task.sleep(nanoseconds: retryNanoseconds)
                 retryNanoseconds = min(retryNanoseconds * 2, 8_000_000_000)

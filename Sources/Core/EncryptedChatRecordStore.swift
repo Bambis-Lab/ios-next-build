@@ -162,6 +162,22 @@ actor EncryptedChatRecordStore {
     }
     private static func digest(_ bytes: Data) -> Data { Data(SHA256.hash(data: bytes)) }
 
+    // Avoid Base64 encoding a large payload a second time.
+    private static func pack(_ value: Record) throws -> Data {
+        let header = try JSONEncoder().encode(value.key)
+        guard (1...4096).contains(header.count),
+              value.bytes.count <= maxRecord - header.count - 32 else { throw Failure.capacity }
+        var length = UInt32(header.count).bigEndian
+        return withUnsafeBytes(of: &length) { Data($0) } + header + value.bytes
+    }
+    private static func unpack(_ data: Data) throws -> Record {
+        guard data.count >= 5 else { throw Failure.corrupt }
+        let length = data.prefix(4).reduce(0) { ($0 << 8) | Int($1) }
+        guard (1...4096).contains(length), length <= data.count - 4 else { throw Failure.corrupt }
+        let key = try JSONDecoder().decode(Key.self, from: Data(data.dropFirst(4).prefix(length)))
+        return Record(key: key, bytes: Data(data.dropFirst(4 + length)))
+    }
+
     private func opaqueID(_ value: Key) throws -> String {
         guard (1...512).contains(value.id.utf8.count) else { throw Failure.invalidScope }
         let bytes = Data(value.kind.rawValue.utf8) + Data([0]) + Data(value.id.utf8)
@@ -233,7 +249,7 @@ actor EncryptedChatRecordStore {
             let sealed = try Self.blob(stmt, at: 0, limit: Self.maxRecord)
             guard sealed.count == entry.bytes, Self.digest(sealed) == entry.digest else { throw Failure.corrupt }
             let plain = try Self.open(sealed, key: key, scope: scope, label: "record:" + id)
-            let value = try JSONDecoder().decode(Record.self, from: plain)
+            let value = try Self.unpack(plain)
             guard try opaqueID(value.key) == id else { throw Failure.corrupt }
             return value
         }
@@ -294,7 +310,7 @@ actor EncryptedChatRecordStore {
                 switch change {
                 case .put(let value):
                     guard value.bytes.count <= Self.maxRecord else { throw Failure.capacity }
-                    let plain = try JSONEncoder().encode(value)
+                    let plain = try Self.pack(value)
                     guard plain.count <= Self.maxRecord - 28 else { throw Failure.capacity }
                     let sealed = try Self.seal(plain, key: key, scope: scope, label: "record:" + id)
                     guard sealed.count <= capacity - total else { throw Failure.capacity }
