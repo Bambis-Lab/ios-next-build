@@ -218,7 +218,7 @@ final class ChatModel {
             audioCallID = callID
             var sentToken = configuration.token
             try await session.run { [weak self] in
-                guard let self, self.audioAttempt == attempt, self.canStartAudio,
+                guard let self, self.audioAttempt == attempt, self.canSignalCalls,
                       let current = self.configuration,
                       current.userID == configuration.userID, current.deviceID == configuration.deviceID,
                       current.baseURL == configuration.baseURL else { throw CancellationError() }
@@ -269,6 +269,14 @@ final class ChatModel {
             callError = nil
         } catch {
             guard generation == callGeneration, !Task.isCancelled else { return }
+            if familyAudioTransientNetworkError(error),
+               let session = audioSession,
+               session.state == .active || session.state == .reconnecting {
+                // Existing audio must reauthenticate against the relay; this
+                // grace path does not grant new calls or Owner privileges.
+                callError = "Anrufstatus vorübergehend nicht erreichbar."
+                return
+            }
             callListing = nil
             reconcileAudio(nil)
             callError = "Anrufsignalisierung nicht verfügbar."

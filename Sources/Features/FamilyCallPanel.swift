@@ -116,6 +116,7 @@ struct FamilyCallPanel: View {
         case .idle, .connecting: "Audioverbindung wird aufgebaut"
         case .verifying: "Schlüssel werden überprüft"
         case .active: "Verschlüsseltes Audiogespräch"
+        case .reconnecting: "Sichere Wiederverbindung wird aufgebaut"
         case .ended: "Audio beendet"
         case .failed: "Audioverbindung fehlgeschlagen"
         }

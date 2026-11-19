@@ -27,6 +27,10 @@ private final class SessionWireFixture: FamilyCallWire {
     var didRenew = false
     var received: Data?
     var corruptOffer = false
+    var interruptFirstPush = false
+    var reconnectPermitted = false
+    var receivedSequences: [UInt64] = []
+    private var originalOffer: FamilyAudioOffer?
     private var packets: [FamilyAudioPacket] = []
     private let handshake: FamilyAudioHandshake
     private let localIdentity: ChatIdentity
@@ -38,7 +42,7 @@ private final class SessionWireFixture: FamilyCallWire {
         signing = peerKeys.signing
         self.localIdentity = localIdentity
     }
-    func connect() async throws { isConnected = true }
+    func connect() async throws { isConnected = true; reconnectPermitted = false }
     func send(_ command: FamilyAudioCommand) async throws -> FamilyAudioResult {
         guard isConnected else { throw FamilyAudioWireError.transportClosed }
         func result(active: Bool? = nil, published: Bool? = nil, queued: Bool? = nil,
@@ -48,6 +52,11 @@ private final class SessionWireFixture: FamilyCallWire {
         }
         switch command {
         case .offer(let offer):
+            if let originalOffer {
+                guard originalOffer == offer else { throw FamilyAudioError.invalidOffer }
+                return result(published: true)
+            }
+            originalOffer = offer
             // Generate our offer before consuming our one-use handshake.
             ownOffer = try handshake.offer(signingKey: signing)
             codec = try handshake.establish(peerOffer: offer, verifiedPeer: localIdentity)
@@ -65,6 +74,13 @@ private final class SessionWireFixture: FamilyCallWire {
         case .push(let sequence, let ciphertext):
             let codec = try XCTUnwrap(codec)
             received = try codec.open(sequence: sequence, packet: ciphertext)
+            receivedSequences.append(sequence)
+            if interruptFirstPush {
+                interruptFirstPush = false
+                reconnectPermitted = true
+                isConnected = false
+                throw FamilyAudioWireError.transportClosed
+            }
             for i in 0..<3 {
                 let data = try codec.seal(sequence: UInt64(i), frame: Data(repeating: 2, count: FamilyPCM.bytes))
                 packets.append(.init(sequence: UInt64(i), ciphertext: data.base64EncodedString()))
@@ -77,7 +93,56 @@ private final class SessionWireFixture: FamilyCallWire {
     func close() { isConnected = false; didClose = true; packets.removeAll() }
 }
 
+@MainActor
+private final class ResumedSessionWireFixture: FamilyCallWire {
+    let peer: SessionWireFixture
+    init(peer: SessionWireFixture) { self.peer = peer }
+    var isConnected: Bool { peer.isConnected }
+    func connect() async throws { try await peer.connect() }
+    func send(_ command: FamilyAudioCommand) async throws -> FamilyAudioResult { try await peer.send(command) }
+    func takePackets() -> [FamilyAudioPacket] { peer.takePackets() }
+    func close() { peer.close() }
+}
+
 final class FamilyAudioSessionTests: XCTestCase {
+    @MainActor
+    func testReconnectRetainsCodecAndNeverRetriesAttemptedSequence() async throws {
+        let a = ["ha-gabi", "ios-a"], b = ["ha-timo", "ios-b"]
+        let id = String(repeating: "c", count: 32)
+        let ca = try FamilyAudioContext(callID: id, caller: a, callee: b, local: a)
+        let cb = try FamilyAudioContext(callID: id, caller: a, callee: b, local: b)
+        let ka = ChatDeviceKeys(agreement: .init(), signing: .init())
+        let kb = ChatDeviceKeys(agreement: .init(), signing: .init())
+        let wire = SessionWireFixture(peerContext: cb, peerKeys: kb,
+            localIdentity: ka.publicIdentity(userID: a[0], deviceID: a[1]))
+        wire.interruptFirstPush = true
+        let audio = SessionAudioFixture()
+        var reconnects = 0
+        let session = FamilyAudioCallSession(context: ca, keys: ka,
+            peer: kb.publicIdentity(userID: b[0], deviceID: b[1]), wire: wire, audio: audio,
+            reconnectWire: { _ in
+                reconnects += 1
+                return ResumedSessionWireFixture(peer: wire)
+            })
+        let run = Task { @MainActor in try await session.run() }
+        defer { session.stop(); run.cancel() }
+        for _ in 0..<200 {
+            if reconnects == 1 && session.state == .active { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(reconnects, 1)
+        XCTAssertEqual(session.state, .active)
+        audio.frame = Data(repeating: 3, count: FamilyPCM.bytes)
+        for _ in 0..<200 {
+            if wire.receivedSequences.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(wire.receivedSequences, [0, 1])
+        XCTAssertEqual(wire.received, Data(repeating: 3, count: FamilyPCM.bytes))
+        session.stop()
+        try await run.value
+    }
+
     @MainActor
     func testIntegratedEncryptedCaptureAndPlayoutWithAdapterFixtures() async throws {
         let a = ["ha-gabi", "ios-a"]

@@ -5,6 +5,14 @@ enum FamilyAudioWireError: Error, Equatable {
     case responseRejected, queueFull, transportClosed
 }
 
+// Only transport failures qualify for resume. TLS, protocol, policy, and
+// explicit cancellation errors are terminal.
+func familyAudioTransientNetworkError(_ error: Error) -> Bool {
+    guard let e = error as? URLError else { return false }
+    return [.networkConnectionLost, .notConnectedToInternet, .timedOut,
+            .cannotConnectToHost, .dnsLookupFailed].contains(e.code)
+}
+
 /// The audio endpoint is never discovered from an untrusted server response.
 /// Production WSS is restricted to the authenticated chat origin. The
 /// explicitly requested loopback test route is the only cleartext exception.
@@ -199,6 +207,7 @@ final class FamilyAudioWire {
     private let maxPackets = 50
 
     var isConnected: Bool { ready && !closed }
+    private(set) var reconnectPermitted = false
 
     init(configuration: ChatConfiguration, endpoint: URL, context: FamilyAudioContext,
          syntheticLoopback: Bool = false) throws {
@@ -254,7 +263,7 @@ final class FamilyAudioWire {
         mediaWriting = true
         writeDeadline = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
-            self?.close()
+            self?.close(recoverable: true)
         }
         defer {
             mediaWriting = false
@@ -271,7 +280,7 @@ final class FamilyAudioWire {
             guard isConnected else { throw FamilyAudioWireError.transportClosed }
             return true
         } catch {
-            close()
+            close(recoverable: isRecoverable(error))
             throw error
         }
     }
@@ -283,7 +292,7 @@ final class FamilyAudioWire {
         mediaDeadline = Task { @MainActor [weak self] in
             do { try await ContinuousClock().sleep(until: limit) } catch { return }
             guard let self, self.mediaWindow.oldest == limit else { return }
-            self.close()
+            self.close(recoverable: true)
         }
     }
 
@@ -304,12 +313,12 @@ final class FamilyAudioWire {
                 deadline = Task { @MainActor [weak self] in
                     do { try await Task.sleep(nanoseconds: 8_000_000_000) }
                     catch { return }
-                    self?.close()
+                    self?.close(recoverable: true)
                 }
                 Task { @MainActor [weak self] in
                     guard let self, !self.closed else { return }
                     do { try await self.task.send(.string(text)) }
-                    catch { self.close() }
+                    catch { self.close(recoverable: self.isRecoverable(error)) }
                 }
             }
         } onCancel: {
@@ -355,12 +364,22 @@ final class FamilyAudioWire {
                 }
             }
         } catch {
-            close()
+            close(recoverable: isRecoverable(error))
         }
     }
 
-    func close() {
+    private func isRecoverable(_ error: Error) -> Bool {
+        // A server policy close, valid protocol rejection, or TLS failure
+        // cannot be retried as though it were a transient network loss.
+        (task.closeCode == .invalid || task.closeCode == .abnormalClosure)
+            && familyAudioTransientNetworkError(error)
+    }
+
+    func close() { close(recoverable: false) }
+
+    private func close(recoverable: Bool) {
         guard !closed else { return }
+        reconnectPermitted = ready && recoverable
         closed = true
         ready = false
         binding = false

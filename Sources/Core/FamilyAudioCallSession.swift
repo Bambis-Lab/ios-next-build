@@ -4,6 +4,7 @@ import Observation
 @MainActor
 protocol FamilyCallWire: AnyObject {
     var isConnected: Bool { get }
+    var reconnectPermitted: Bool { get }
     func connect() async throws
     func send(_ command: FamilyAudioCommand) async throws -> FamilyAudioResult
     func sendMedia(sequence: UInt64, ciphertext: Data) async throws -> Bool
@@ -22,6 +23,7 @@ protocol FamilyCallAudio: AnyObject {
 }
 
 extension FamilyCallWire {
+    var reconnectPermitted: Bool { false }
     // Deterministic adapter fixtures may implement only the request path.
     func sendMedia(sequence: UInt64, ciphertext: Data) async throws -> Bool {
         _ = try await send(.push(sequence: sequence, ciphertext: ciphertext))
@@ -33,7 +35,7 @@ extension FamilyAudioWire: FamilyCallWire {}
 extension FamilyAudioDevice: FamilyCallAudio {}
 
 enum FamilyAudioSessionState: Equatable {
-    case idle, connecting, verifying, active, ended, failed
+    case idle, connecting, verifying, active, reconnecting, ended, failed
 }
 
 /// An explicitly initiated foreground single call. No automatic acceptance,
@@ -52,7 +54,8 @@ final class FamilyAudioCallSession {
     private let context: FamilyAudioContext
     private let keys: ChatDeviceKeys
     private let peer: ChatIdentity
-    private let wire: any FamilyCallWire
+    private var wire: any FamilyCallWire
+    private let reconnectWire: (@MainActor (String?) throws -> any FamilyCallWire)?
     private let audio: any FamilyCallAudio
     private var generation = UUID()
     private var playoutTask: Task<Void, Never>?
@@ -69,16 +72,24 @@ final class FamilyAudioCallSession {
         let wire = try FamilyAudioWire(configuration: configuration, endpoint: endpoint,
             context: context, syntheticLoopback: syntheticLoopback)
         self.init(context: context, keys: keys, peer: verifiedPeer,
-                  wire: wire, audio: FamilyAudioDevice())
+                  wire: wire, audio: FamilyAudioDevice(), reconnectWire: { token in
+            let next = ChatConfiguration(baseURL: configuration.baseURL,
+                token: token ?? configuration.token, userID: configuration.userID,
+                deviceID: configuration.deviceID)
+            return try FamilyAudioWire(configuration: next, endpoint: endpoint,
+                context: context, syntheticLoopback: syntheticLoopback)
+        })
     }
 
     // Injectable adapters used by native deterministic integration tests.
     init(context: FamilyAudioContext, keys: ChatDeviceKeys, peer: ChatIdentity,
-         wire: any FamilyCallWire, audio: any FamilyCallAudio) {
+         wire: any FamilyCallWire, audio: any FamilyCallAudio,
+         reconnectWire: (@MainActor (String?) throws -> any FamilyCallWire)? = nil) {
         self.context = context
         self.keys = keys
         self.peer = peer
         self.wire = wire
+        self.reconnectWire = reconnectWire
         self.audio = audio
     }
 
@@ -124,7 +135,8 @@ final class FamilyAudioCallSession {
             try requireCurrent(attempt)
             state = .verifying
             let handshake = FamilyAudioHandshake(context: context)
-            _ = try await wire.send(.offer(try handshake.offer(signingKey: keys.signing)))
+            let localOffer = try handshake.offer(signingKey: keys.signing)
+            _ = try await wire.send(.offer(localOffer))
             let offerDeadline = clock.now.advanced(by: .seconds(20))
             var peerOffer: FamilyAudioOffer?
             while peerOffer == nil {
@@ -144,14 +156,20 @@ final class FamilyAudioCallSession {
             var sequence: UInt64 = 0
             var heartbeatAt = clock.now.advanced(by: .seconds(3))
             var renewAt = clock.now
+            var latestToken: String?
+            var reconnectBudget = 3
             while true {
+                do {
                 try requireCurrent(attempt)
                 guard wire.isConnected, audio.isRunning else { throw FamilyAudioWireError.transportClosed }
                 let now = clock.now
                 if now >= renewAt {
                     let replacement = try await renewCredential()
                     try requireCurrent(attempt)
-                    if let replacement { _ = try await wire.send(.refresh(replacement)) }
+                    if let replacement {
+                        latestToken = replacement
+                        _ = try await wire.send(.refresh(replacement))
+                    }
                     renewAt = clock.now.advanced(by: .seconds(30))
                 }
                 if clock.now >= heartbeatAt {
@@ -169,6 +187,49 @@ final class FamilyAudioCallSession {
                     if submitted { sentFrames += 1 } else { droppedFrames += 1 }
                 }
                 try await Task.sleep(nanoseconds: 5_000_000)
+                } catch {
+                    try requireCurrent(attempt)
+                    guard wire.reconnectPermitted, let reconnectWire, audio.isRunning,
+                          reconnectBudget > 0 else { throw error }
+                    state = .reconnecting
+                    playoutTask?.cancel()
+                    playoutTask = nil
+                    wire.close()
+                    // Reuse exactly the established codec and sequence counters.
+                    // Never retransmit ciphertext of an attempted media send.
+                    while true {
+                        guard reconnectBudget > 0 else { throw FamilyAudioWireError.transportClosed }
+                        reconnectBudget -= 1
+                        try await Task.sleep(for: .milliseconds(300))
+                        try requireCurrent(attempt)
+                        if let replacement = try await renewCredential() { latestToken = replacement }
+                        try requireCurrent(attempt)
+                        let replacement = try reconnectWire(latestToken)
+                        wire = replacement
+                        do {
+                            try await replacement.connect()
+                            try requireCurrent(attempt)
+                            // The relay must still hold the original signed offer.
+                            // A missing/changed offer requires a completely new call.
+                            let persistedOffer = try await replacement.send(.peerOffer).offer
+                            guard persistedOffer == peerOffer else { throw FamilyAudioError.invalidOffer }
+                            _ = try await replacement.send(.offer(localOffer))
+                            _ = try await replacement.send(.heartbeat)
+                            try requireCurrent(attempt)
+                            break
+                        } catch {
+                            let retry = replacement.reconnectPermitted || familyAudioTransientNetworkError(error)
+                            replacement.close()
+                            guard retry else { throw error }
+                        }
+                    }
+                    // Discard stale captured PCM after an outage.
+                    for _ in 0..<128 { if audio.takeCapture() == nil { break } }
+                    state = .active
+                    startPlayout(codec: codec, attempt: attempt)
+                    heartbeatAt = clock.now.advanced(by: .seconds(3))
+                    renewAt = clock.now.advanced(by: .seconds(30))
+                }
             }
         } catch {
             if generation == attempt {
@@ -187,9 +248,14 @@ final class FamilyAudioCallSession {
             while !Task.isCancelled {
                 guard let self, self.generation == attempt else { return }
                 do {
-                    guard self.wire.isConnected, self.audio.isRunning else {
-                        throw FamilyAudioWireError.transportClosed
+                    guard self.audio.isRunning else { throw FamilyAudioWireError.transportClosed }
+                    if !self.wire.isConnected, self.wire.reconnectPermitted, self.reconnectWire != nil {
+                        // The send/control loop owns recovery. Never let playout
+                        // tear down the retained codec during a transient outage.
+                        try await Task.sleep(for: .milliseconds(20))
+                        continue
                     }
+                    guard self.wire.isConnected else { throw FamilyAudioWireError.transportClosed }
                     for packet in self.wire.takePackets() {
                         let frame = try codec.open(sequence: packet.sequence, packet: packet.validatedCiphertext())
                         try buffer.insert(sequence: packet.sequence, frame: frame)
