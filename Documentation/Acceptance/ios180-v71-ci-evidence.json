@@ -1,0 +1,176 @@
+{
+  "schema": 1,
+  "scope": "V71-00/01 evidence metadata, not final acceptance",
+  "previous_integration": "db103bb458875bfab41df8038a39b73034bd94eb",
+  "native_handoff_head": "9692d35f0c748239cdd89668b424959934970726",
+  "integration": "9ffcacea8b9562d1cb46cd0b4301c4ac22333452",
+  "workflow": ".github/workflows/ios180-v64-distributed-preflight.yml",
+  "workflow_blob": "701d770e85e6784d60c96c6b3a286929cc98c02c",
+  "native_handoff_integration_compare": {
+    "ahead_by": 39,
+    "behind_by": 0,
+    "at_previous_integration": true
+  },
+  "historical_ci": [
+    {
+      "run": 44463085229,
+      "scope": "historical native prerequisite only",
+      "jobs": [
+        {
+          "id": 135354297118,
+          "name": "build",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 135355046303,
+          "name": "client (A)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 135355046390,
+          "name": "client (B)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 135358477849,
+          "name": "validate",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14502055191,
+          "name": "V64-preflight-validation",
+          "expired": false,
+          "digest": "sha256:ccc6b9bccfcd2381add516817ea63e3025938ca1da8ee319220271514d079532",
+          "size_in_bytes": 84324,
+          "bytes_rehashed": false
+        },
+        {
+          "id": 14501855271,
+          "name": "V64-preflight-B",
+          "expired": false,
+          "digest": "sha256:525a9a75ea1b807508367ead8bee370a45f8f67ddebc0a563e078bc4d20b0dc9",
+          "size_in_bytes": 40545,
+          "bytes_rehashed": false
+        },
+        {
+          "id": 14501201268,
+          "name": "V64-distributed-build-30s",
+          "expired": false,
+          "digest": "sha256:99331f093b6f835017b32bb628036d75661aee180dda1d774efbb4facbe7ec5b",
+          "size_in_bytes": 25473,
+          "bytes_rehashed": false
+        },
+        {
+          "id": 14500757045,
+          "name": "V64-distributed-products-30s",
+          "expired": false,
+          "digest": "sha256:c639b669bd8ffba93380d1c50b52995b4b4d875772d9458bdc14d571355eb8bc",
+          "size_in_bytes": 11641067,
+          "bytes_rehashed": false
+        },
+        {
+          "id": 14500319812,
+          "name": "V64-preflight-A",
+          "expired": false,
+          "digest": "sha256:7c695874f0359c4cc4ac8b52a70cfd5e1c0b042ebb7ab7121841965f23351ca2",
+          "size_in_bytes": 40499,
+          "bytes_rehashed": false
+        }
+      ]
+    },
+    {
+      "run": 44462109985,
+      "scope": "historical ticket CI",
+      "jobs": [
+        {
+          "id": 135351145487,
+          "name": "source",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "id": 135351354104,
+          "name": "xcode27",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14501366461,
+          "name": "IOS173-Integration-Xcode27-Evidence",
+          "expired": false,
+          "digest": "sha256:e73573891c5ed73b153353d1dd059d0b3d9428a4ba0132db12821e3f57bf932e",
+          "size_in_bytes": 4892649,
+          "bytes_rehashed": false
+        }
+      ]
+    },
+    {
+      "run": 44465634961,
+      "scope": "historical local WSS control only",
+      "jobs": [
+        {
+          "id": 135362636964,
+          "name": "local",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": 14501613182,
+          "name": "V64-isolated-relay-local-evidence",
+          "expired": false,
+          "digest": "sha256:1d80192607793ace9961d7bcdb48e93257c1fb22d9f2488c22a12bca9cbfb322",
+          "size_in_bytes": 1733,
+          "bytes_rehashed": false
+        }
+      ]
+    }
+  ],
+  "work_packages": {
+    "V71-00-01": "HEADS_VERIFIED",
+    "V71-00-02": "NATIVE_HARDENING_ANCESTRY_VERIFIED",
+    "V71-00-03": "BLOCKED_PUSH_RUN_DISCOVERY",
+    "V71-00-04": "BLOCKED_PR_ONLY_CONNECTOR",
+    "V71-00-05": "ARTIFACT_METADATA_ONLY",
+    "V71-00-06": "FAILED_RUN_NOT_RECOVERED",
+    "V71-00-07": "ORIGINAL_REQUIREMENTS_INCOMPLETE",
+    "V71-00-08": "EVIDENCE_SNAPSHOT",
+    "V71-01-01": "INTEGRATION_HEAD_VERIFIED",
+    "V71-01-02": "WORKFLOW_BRANCH_TRIGGER_AND_BOTH_GUARDS_UPDATED",
+    "V71-01-03": "EXISTING_TARGETED_CHAT_TICKET_OWNER_CI_INSPECTED"
+  },
+  "blockers": [
+    "push runs not returned by PR-only connector; no new Run-ID confirmed",
+    "no original failed native role run ID",
+    "factory host execution disabled",
+    "no verified authorized shared relay route",
+    "full original V6.4 definitions not recovered",
+    "artifact bytes not independently rehashed"
+  ],
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "durations_seconds": [
+    30,
+    120,
+    300
+  ],
+  "new_native_tests": 0,
+  "production_changes": false,
+  "release": false
+}
