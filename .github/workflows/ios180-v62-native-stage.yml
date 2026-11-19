@@ -8,9 +8,9 @@ on:
 permissions:
   contents: read
 jobs:
-  native:
+  build:
     runs-on: xcode-27
-    timeout-minutes: 40
+    timeout-minutes: 20
     env:
       IOSNEXT_NATIVE_AUDIO_DURATION: ${{ inputs.duration }}
     steps:
@@ -76,13 +76,6 @@ jobs:
           mkdir -p build/ios173
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
           printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
-      - name: Reserve both cold iPhone simulators
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m py_compile Scripts/Acceptance/run_two_native_simulators.py
-          bash -n Scripts/Acceptance/run_native_wss_smoke.sh
-          python3 Scripts/Acceptance/run_two_native_simulators.py reserve 2>&1 | tee build/ios173/dual-reserve.log
       - name: Build targeted XCTest bundle before cold simulator startup
         shell: bash
         run: |
@@ -98,6 +91,118 @@ jobs:
           test -s "$XCTESTRUN_PATH"
           echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
           echo "IOS173_INTEGRATION_BUILD=PASS"
+      - name: Package compiled test products with original permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/handoff
+          cd build/ios173
+          ditto -c -k --sequesterRsrc --keepParent DerivedData/Build/Products handoff/products.zip
+          xcodebuild -version > handoff/xcode-version.txt
+          uname -m > handoff/architecture.txt
+          printf '%s\n%s\n' "$GITHUB_SHA" "$IOSNEXT_NATIVE_AUDIO_DURATION" > handoff/source-and-duration.txt
+          (cd handoff && shasum -a 256 products.zip > SHA256SUMS)
+      - name: Transfer immutable build products to dedicated test runner
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V63-native-products-${{ inputs.duration }}s
+          path: build/ios173/handoff/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Preserve original build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V63-native-build-${{ inputs.duration }}s
+          path: |
+            build/ios173/BuildForTesting.log
+            build/ios173/resolve.log
+            build/ios173/environment.txt
+            build/ios173/selected-toolchain.log
+          retention-days: 14
+          if-no-files-found: error
+  native:
+    needs: build
+    runs-on: xcode-27
+    timeout-minutes: 40
+    env:
+      IOSNEXT_NATIVE_AUDIO_DURATION: ${{ inputs.duration }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select identical toolchain without building on execution runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          # Stable Xcode 27.0 matches the selected iOS 27.0 simulator.
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
+            case "$candidate_version" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
+                selected="$app/Contents/Developer"
+                break ;;
+            esac
+          done
+          if test -z "$selected"; then
+            echo "::error::Required stable Xcode 27.0 toolchain not found"
+            exit 1
+          fi
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          {
+            xcodebuild -version
+            xcodebuild -showsdks
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+          } | tee build/ios173/selected-toolchain.log
+          selected_version="$(xcodebuild -version)"
+          printf '%s\n' "$selected_version"
+          case "${selected_version%%$'\n'*}" in
+            "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") ;;
+            *) exit 1 ;;
+          esac
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          python3 -m venv "$RUNNER_TEMP/ios173-wss-venv"
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
+          printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Restore only this run's verified build products
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdfc3d59b
+        with:
+          name: V63-native-products-${{ inputs.duration }}s
+          path: build/ios173/handoff
+      - name: Verify source, duration, toolchain and product checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/DerivedData/Build build/ios173/dual-simulator
+          (cd build/ios173/handoff && shasum -a 256 -c SHA256SUMS)
+          diff -u build/ios173/handoff/xcode-version.txt <(xcodebuild -version)
+          diff -u build/ios173/handoff/architecture.txt <(uname -m)
+          diff -u build/ios173/handoff/source-and-duration.txt <(printf '%s\n%s\n' "$GITHUB_SHA" "$IOSNEXT_NATIVE_AUDIO_DURATION")
+          ditto -x -k build/ios173/handoff/products.zip build/ios173/DerivedData/Build
+          XCTESTRUN_PATH="$(find build/ios173/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+          cp build/ios173/handoff/{SHA256SUMS,source-and-duration.txt,xcode-version.txt,architecture.txt} build/ios173/dual-simulator/
+      - name: Reserve both cold iPhone simulators
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile Scripts/Acceptance/run_two_native_simulators.py
+          bash -n Scripts/Acceptance/run_native_wss_smoke.sh
+          python3 Scripts/Acceptance/run_two_native_simulators.py reserve 2>&1 | tee build/ios173/dual-reserve.log
       - name: Boot both pre-reserved iPhones and verify exact destinations
         shell: bash
         run: |
