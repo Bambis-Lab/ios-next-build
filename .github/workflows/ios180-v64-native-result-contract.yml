@@ -1,7 +1,7 @@
 name: V6.4 native result contract regression
 on:
   push:
-    branches: ['feature/ios180-v64-native-result-gate']
+    branches: ['feature/ios180-v64-native-result-gate', 'feature/ios180-v64-native-role-handoff']
 permissions:
   contents: read
 jobs:
@@ -15,6 +15,7 @@ jobs:
           set -euo pipefail
           mkdir -p build/v64
           python3 Scripts/Acceptance/test_validate_distributed_media.py -v 2>&1 | tee build/v64/native-result-contract.log
+          python3 Scripts/Acceptance/test_native_role_handoff.py -v 2>&1 | tee build/v64/native-role-handoff.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
