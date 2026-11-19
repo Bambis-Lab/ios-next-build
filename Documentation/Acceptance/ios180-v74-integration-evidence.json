@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "scope": "V74-00/01 integration and local ticket policy smoke; not native acceptance",
+  "previous_integration": "9ffcacea8b9562d1cb46cd0b4301c4ac22333452",
+  "integration": "5ea57f20a970c2fadddcd8baf7639c560ffadb67",
+  "prior_evidence": "595b97ddacd2928028cd1564a5d4a80723f3ec23",
+  "integration_method": "non-force fast-forward, expected previous SHA supplied, readback confirmed",
+  "integrated_commits": [
+    "8e96af2db5f287d8cd62273302fd005c9bc3d4f1",
+    "5ea57f20a970c2fadddcd8baf7639c560ffadb67"
+  ],
+  "diff": {
+    "ahead": 2,
+    "behind": 0,
+    "files": [
+      {
+        "path": "Tests/FamilyIdentityTests.swift",
+        "added": 79
+      },
+      {
+        "path": "Tests/EncryptedTicketClientTests.swift",
+        "added": 55
+      }
+    ],
+    "production_source_changes": false
+  },
+  "local_tests": {
+    "toolchain": "Swift 6.2.1 Linux x86_64",
+    "methods": [
+      "testV73FiveProfileTicketVisibilityMatrix",
+      "testV73AllMemberTicketRoutesRefuseOwnerOperations"
+    ],
+    "passed": 2,
+    "failed": 0,
+    "assertions_in_test_design": 88,
+    "scope": "copied authorization and validation logic, substituted fixture keys, configuration types and transportBaseURL; no actual app module, CryptoKit, network or server execution",
+    "source_sha256": "9b0e4e698b8802f0efd6f8b9be4b2c19d5eb4551534b01457d4b43e87cb6f6e9",
+    "log_sha256": "16bac951ce8375fcaba17b298f552631336e5856d402584a6df9fa33c4766088"
+  },
+  "new_native_runs_confirmed": 0,
+  "push_workflow_query": "PR-only; empty response does not prove no push run",
+  "blockers": [
+    "current push run IDs unavailable",
+    "original V6.5 failure run not identified",
+    "complete original V6.4 work package text not retrieved",
+    "factory host execution disabled",
+    "authorized shared relay route absent"
+  ],
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "release": false,
+  "production_changes": false
+}
