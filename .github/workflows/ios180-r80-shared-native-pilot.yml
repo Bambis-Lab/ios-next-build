@@ -1,0 +1,766 @@
+name: R80 shared native acceptance pilot
+on:
+  pull_request:
+    branches: ['feature/ios180-v70-integration']
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: r80-native-pilot-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  source:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/ios180-accelerated-native'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Verify source lock, Chat settings route, OAuth and Live fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          ui = Path("Sources/Features/SystemView.swift").read_text()
+          admin = Path("Sources/Features/AdminAreaView.swift").read_text()
+          backend = Path("Sources/Core/FamilyBootstrapClient.swift").read_text()
+          model = Path("Sources/Core/AppModel.swift").read_text()
+          tests = Path("Tests/FamilyIdentityTests.swift").read_text()
+          assert "enum OwnerServiceNavigationPolicy" in ui
+          assert "if familyBrokerConfigured { return registeredProfile == .nico }" in ui
+          assert "return hasHAIdentity && selectedProfile == .nico" in ui
+          assert "system-factory-workspace" in ui and "system-runner-dashboard" in ui
+          assert "system-owner-control" in ui and "system-live-operations" in ui
+          assert "system-owner-recovery" in ui
+          assert "appModel?.registeredFamilyProfile != .nico" in admin
+          assert "model.clearFamilyOwnerSession()" in admin
+          assert "role == \"owner\" && self.haUserID == haUserID && self.deviceID == deviceID" in backend
+          assert 'role == "member" && profile != .nico' in backend
+          assert "selectedProfile = .nico" in model
+          for name in (
+              "testLegacyPersonalNavigationRestoresOwnerModulesAfterHALogin",
+              "testFamilyMemberNeverReceivesOwnerNavigationFromSelectedProfile",
+              "testVerifiedNicoNavigationIsIndependentOfRunnerOrFactoryConnectivity",
+              "testUnverifiedFamilyIdentityOnlyOffersOwnerRecovery",
+          ):
+              assert "func " + name in tests, name
+          chat = Path("Sources/Features/ChatInboxView.swift").read_text()
+          settings = Path("Sources/Features/ChatSettingsView.swift").read_text()
+          live = Path("Sources/Core/LiveOperationsClient.swift").read_text()
+          oauth = Path("Sources/Features/Owner/Factory/FactoryMCPService.swift").read_text()
+          ui_tests = Path("UITests/IndependentServicesUITests.swift").read_text()
+          assert "showingChatSettings = true" in chat
+          assert "ChatSettingsView(appModel: appModel, chatModel: chatModel)" in chat
+          assert "navigationDestination(item: $destination) { selected in" in chat
+          assert "Chat-Einstellungen" in settings and "chat-settings-offline-reason" in settings
+          assert 'app.navigationBars["Chat-Einstellungen"]' in ui_tests
+          assert 'XCTAttachment(screenshot: app.screenshot())' in ui_tests
+          assert "registrationRejected(Int)" in oauth
+          assert "class FactoryNoRedirects" in oauth and "completionHandler(nil)" in oauth
+          assert "configuration: .ephemeral," in oauth and "delegate: FactoryNoRedirects()" in oauth
+          assert "testOAuthTransportRefusesOffOriginRedirectsIncluding307TokenPost" in Path("Tests/FactoryMCPIntegrationTests.swift").read_text()
+          assert "incompatibleRunnerStream" in live
+          relay = Path("Sources/Core/ChatRelayClient.swift").read_text()
+          chatmodel = Path("Sources/Core/ChatModel.swift").read_text()
+          chattests = Path("Tests/ChatDraftSafetyTests.swift").read_text()
+          assert "class ChatRelayNoRedirects" in relay
+          assert "completionHandler(nil)" in relay
+          assert "delegate: ChatRelayNoRedirects()" in relay
+          assert "ChatContactDiscoveryPolicy.mayUseLegacyRecipient" in chatmodel
+          assert "testChatRelayAlwaysRefusesTokenBearingHTTPRedirects" in chattests
+          assert "testFamilyContactsAreNeverInventedWhenBrokerDiscoveryFails" in chattests
+          inbox = Path("Sources/Features/ChatInboxView.swift").read_text()
+          assert "ChatTicketVisibilityPolicy.ownerEntry" in inbox
+          assert "familyBrokerConfigured && verifiedProfile == .nico" in inbox
+          assert "Owner tickets use the *independently approved* Admin backend" in inbox
+          assert "testNicoOwnerTicketEntryUsesVerifiedIdentityNotElevatedChatToken" in chattests
+          assert "testMemberTicketsRequireVerifiedMemberWhenFamilyBrokerIsConfigured" in chattests
+          assert "enum ChatRelayPollingPolicy" in relay
+          assert "serverWaitSeconds = 25" in relay
+          assert "longPollRequestTimeout: TimeInterval = 42" in relay
+          assert "sessionResourceTimeout: TimeInterval = 55" in relay
+          assert "request.timeoutInterval = ChatRelayPollingPolicy.timeout" in relay
+          assert "testQuietFamilyChatLongPollDoesNotTimeoutBeforeBackendResponse" in chattests
+          assert "testOnlyAuthenticatedMessageReceiveLongPollGetsExtendedTimeout" in chattests
+          assert "static func processReceivedBatch(" in chatmodel
+          assert "try Task.checkCancellation()" in chatmodel
+          assert "case .invalidEnvelope, .invalidSignature, .identityChanged, .contentTooLarge:" in chatmodel
+          assert "testBadEncryptedEnvelopeDoesNotDropLaterValidMessagesFromDequeuedBatch" in chattests
+          assert "testBatchCancellationPropagatesInsteadOfBeingSwallowedAsInvalidMessage" in chattests
+          assert "testRelayAuthorizationFailureIsNotMisclassifiedAsCorruptCiphertext" in chattests
+          assert "testNetworkTimeoutIsNotMisclassifiedAsCorruptCiphertext" in chattests
+          assert "requireAcknowledgedDelivery(configuration: configuration)" in chatmodel
+          assert "requiresAcknowledgement: ackMode" in chatmodel
+          assert "try await relay.acknowledge(" in chatmodel
+          assert "v1/chat/delivery-contract" in relay
+          assert "v1/chat/messages/ack" in relay
+          assert 'batch.deliveryMode == "ack_v1"' in relay
+          assert "testFamilyDeliveryRequiresExplicitSupportedAckContractBeforeAnyRead" in chattests
+          assert "testAckV1BatchRequiresServerConfirmationAndLegacyRemainsOptional" in chattests
+          print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
+          PY
+
+      - name: Exercise fail-closed shared native evidence validator
+        run: python3 Scripts/Acceptance/verify_shared_native.py self-test
+
+  build:
+    needs: source
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      IOSNEXT_NATIVE_AUDIO_DURATION: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Identify exact Python download-cache context
+        id: pip_cache_context
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'PIP_CACHE_DIR=%s/r80-pip-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python_version="$(python3 -c 'import platform; print(platform.python_version())')"
+          os_build="$(sw_vers -buildVersion)"
+          printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Restore version-bound public Python package download cache
+        id: pip_cache
+        continue-on-error: true
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: r80-pip-xcode27-cryptography46.0.5-websockets15.0.1-${{ steps.pip_cache_context.outputs.context }}-${{ hashFiles('.github/workflows/ios180-r80-shared-native-pilot.yml') }}
+      - name: Resolve simulator and generate project without cold boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          # Stable Xcode 27.0 matches the selected iOS 27.0 simulator.
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
+            case "$candidate_version" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
+                selected="$app/Contents/Developer"
+                break ;;
+            esac
+          done
+          if test -z "$selected"; then
+            echo "::error::Required stable Xcode 27.0 toolchain not found"
+            exit 1
+          fi
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          {
+            xcodebuild -version
+            xcodebuild -showsdks
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+          } | tee build/ios173/selected-toolchain.log
+          selected_version="$(xcodebuild -version)"
+          printf '%s\n' "$selected_version"
+          case "${selected_version%%$'\n'*}" in
+            "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") ;;
+            *) exit 1 ;;
+          esac
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          python3 -m venv "$RUNNER_TEMP/ios173-wss-venv"
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/audio_network_fixture.py generate-wss Tests/FamilyAudioNetworkTests.swift
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          duration=int(os.environ["IOSNEXT_NATIVE_AUDIO_DURATION"])
+          assert duration in (30,120,300)
+          source=Path("Scripts/Acceptance/FamilyAudioIndependentSimulatorTests.swift.in").read_text()
+          assert source.count("@DURATION_SECONDS@")==1
+          Path("Tests/FamilyAudioIndependentSimulatorTests.swift").write_text(source.replace("@DURATION_SECONDS@",str(duration)))
+          PY
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/ios173
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
+          printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Save only public dependency downloads, never build products
+        if: steps.pip_cache.outcome == 'success' && steps.pip_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: ${{ steps.pip_cache.outputs.cache-primary-key }}
+      - name: Build targeted XCTest bundle before cold simulator startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/ios173/DerivedData \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/BuildForTesting.log
+          XCTESTRUN_PATH="$(find build/ios173/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+          echo "IOS173_INTEGRATION_BUILD=PASS"
+      - name: Package compiled test products with original permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/handoff
+          cd build/ios173
+          ditto -c -k --sequesterRsrc --keepParent DerivedData/Build/Products handoff/products.zip
+          xcodebuild -version > handoff/xcode-version.txt
+          uname -m > handoff/architecture.txt
+          printf '%s\n%s\n' "$GITHUB_SHA" "$IOSNEXT_NATIVE_AUDIO_DURATION" > handoff/source-and-duration.txt
+          printf '%s\n%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > handoff/run-and-attempt.txt
+          (cd handoff && shasum -a 256 products.zip > SHA256SUMS)
+      - name: Transfer immutable build products to dedicated test runner
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-distributed-products-30s
+          path: build/ios173/handoff/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Preserve original build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-distributed-build-30s
+          path: |
+            build/ios173/BuildForTesting.log
+            build/ios173/resolve.log
+            build/ios173/environment.txt
+            build/ios173/selected-toolchain.log
+          retention-days: 14
+          if-no-files-found: error
+  client:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [A, B]
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      IOSNEXT_NATIVE_AUDIO_DURATION: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Identify exact Python download-cache context
+        id: pip_cache_context
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'PIP_CACHE_DIR=%s/r80-pip-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python_version="$(python3 -c 'import platform; print(platform.python_version())')"
+          os_build="$(sw_vers -buildVersion)"
+          printf 'context=%s-%s-%s\n' "$python_version" "$os_build" "$(uname -m)" >> "$GITHUB_OUTPUT"
+      - name: Restore version-bound public Python package download cache
+        id: pip_cache
+        continue-on-error: true
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ${{ runner.temp }}/r80-pip-cache
+          key: r80-pip-xcode27-cryptography46.0.5-websockets15.0.1-${{ steps.pip_cache_context.outputs.context }}-${{ hashFiles('.github/workflows/ios180-r80-shared-native-pilot.yml') }}
+      - name: Select identical toolchain without building on execution runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          # Stable Xcode 27.0 matches the selected iOS 27.0 simulator.
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
+            case "$candidate_version" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
+                selected="$app/Contents/Developer"
+                break ;;
+            esac
+          done
+          if test -z "$selected"; then
+            echo "::error::Required stable Xcode 27.0 toolchain not found"
+            exit 1
+          fi
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          {
+            xcodebuild -version
+            xcodebuild -showsdks
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+          } | tee build/ios173/selected-toolchain.log
+          selected_version="$(xcodebuild -version)"
+          printf '%s\n' "$selected_version"
+          case "${selected_version%%$'\n'*}" in
+            "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") ;;
+            *) exit 1 ;;
+          esac
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          python3 -m venv "$RUNNER_TEMP/ios173-wss-venv"
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
+          printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Restore only this run's verified build products
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: V64-distributed-products-30s
+          path: build/ios173/handoff
+      - name: Verify source, duration, toolchain and product checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/DerivedData/Build build/ios173/dual-simulator
+          (cd build/ios173/handoff && shasum -a 256 -c SHA256SUMS)
+          diff -u build/ios173/handoff/xcode-version.txt <(xcodebuild -version)
+          diff -u build/ios173/handoff/architecture.txt <(uname -m)
+          diff -u build/ios173/handoff/source-and-duration.txt <(printf '%s\n%s\n' "$GITHUB_SHA" "$IOSNEXT_NATIVE_AUDIO_DURATION")
+          diff -u build/ios173/handoff/run-and-attempt.txt <(printf '%s\n%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")
+          ditto -x -k build/ios173/handoff/products.zip build/ios173/DerivedData/Build
+          XCTESTRUN_PATH="$(find build/ios173/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+          cp build/ios173/handoff/{SHA256SUMS,source-and-duration.txt,xcode-version.txt,architecture.txt} build/ios173/dual-simulator/
+      - name: Boot one exact iPhone on this execution runner
+        shell: bash
+        env:
+          IOSNEXT_PREFLIGHT_ROLE: ${{ matrix.role }}
+          IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS: 240
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/ios173/boot.log
+          python3 Scripts/Acceptance/distributed_preflight.py client
+      - name: Rehearse private role file handoff inside the disposable native simulator
+        env:
+          IOSNEXT_PREFLIGHT_ROLE: ${{ matrix.role }}
+          IOSNEXT_OFFLINE_RELOCATION_POLICY: sr22-disposable-offline-v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/test_offline_sandbox_receipt.py
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/test_container_lookup.py
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py self-test
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/rehearse_native_role_handoff.py
+      - name: Preserve separate native prerequisite evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-preflight-${{ matrix.role }}
+          path: |
+            build/ios173/dual-simulator/SHA256SUMS
+            build/ios173/dual-simulator/source-and-duration.txt
+            build/ios173/dual-simulator/xcode-version.txt
+            build/ios173/dual-simulator/architecture.txt
+            build/ios173/dual-simulator/guest-inventory-status.txt
+            build/ios173/dual-simulator/native-test.log
+            build/ios173/dual-simulator/native-summary.json
+            build/ios173/dual-simulator/preflight.json
+            build/ios173/dual-simulator/handoff-result-status.json
+            build/ios173/dual-simulator/handoff-evidence.json
+            build/ios173/dual-simulator/handoff-failure.json
+            build/ios173/boot.log
+            build/ios173/resolve.log
+            build/ios173/selected-toolchain.log
+          retention-days: 14
+          if-no-files-found: error
+  regression:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [AB, CF]
+    runs-on: xcode-27
+    timeout-minutes: 70
+    env:
+      IOSNEXT_NATIVE_AUDIO_DURATION: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Select identical toolchain without building on execution runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          # Stable Xcode 27.0 matches the selected iOS 27.0 simulator.
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
+            case "$candidate_version" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
+                selected="$app/Contents/Developer"
+                break ;;
+            esac
+          done
+          if test -z "$selected"; then
+            echo "::error::Required stable Xcode 27.0 toolchain not found"
+            exit 1
+          fi
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          {
+            xcodebuild -version
+            xcodebuild -showsdks
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+          } | tee build/ios173/selected-toolchain.log
+          selected_version="$(xcodebuild -version)"
+          printf '%s\n' "$selected_version"
+          case "${selected_version%%$'\n'*}" in
+            "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") ;;
+            *) exit 1 ;;
+          esac
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
+          printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Restore only this run's verified build products
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: V64-distributed-products-30s
+          path: build/ios173/handoff
+      - name: Verify source, duration, toolchain and product checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173/DerivedData/Build build/ios173/dual-simulator
+          (cd build/ios173/handoff && shasum -a 256 -c SHA256SUMS)
+          diff -u build/ios173/handoff/xcode-version.txt <(xcodebuild -version)
+          diff -u build/ios173/handoff/architecture.txt <(uname -m)
+          diff -u build/ios173/handoff/source-and-duration.txt <(printf '%s\n%s\n' "$GITHUB_SHA" "$IOSNEXT_NATIVE_AUDIO_DURATION")
+          diff -u build/ios173/handoff/run-and-attempt.txt <(printf '%s\n%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")
+          ditto -x -k build/ios173/handoff/products.zip build/ios173/DerivedData/Build
+          XCTESTRUN_PATH="$(find build/ios173/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+          cp build/ios173/handoff/{SHA256SUMS,source-and-duration.txt,xcode-version.txt,architecture.txt} build/ios173/dual-simulator/
+      - name: Reserve a pristine simulator for the 1.8.0 installation path
+        if: matrix.shard == 'CF'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          python3 - <<'PY'
+          import json, os, sys, uuid
+          sys.path.insert(0, "Scripts/Acceptance")
+          from boot_simulator import run_bounded
+          types = json.loads(run_bounded(["xcrun", "simctl", "list", "devicetypes", "-j"], timeout=20, emit_output=False))
+          matches = [x["identifier"] for x in types["devicetypes"] if x["name"] == "iPhone 18 Pro Max"]
+          if len(matches) != 1:
+              raise RuntimeError("Missing or ambiguous device type")
+          runtime = "com.apple.CoreSimulator.SimRuntime.iOS-27-0"
+          name = "R80-Clean-" + str(uuid.uuid4())
+          udid = run_bounded(["xcrun", "simctl", "create", name, matches[0], runtime], timeout=60, emit_output=False).strip()
+          uuid.UUID(udid)
+          devices = json.loads(run_bounded(["xcrun", "simctl", "list", "devices", "available", "-j"], timeout=20, emit_output=False))
+          selected = [d for d in devices["devices"][runtime] if d["udid"] == udid and d["name"] == name and d["state"] == "Shutdown"]
+          if len(selected) != 1:
+              raise RuntimeError("New simulator not verified")
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"SIM_ID={udid}\nIOSNEXT_CLEAN_SIM_NAME={name}\n")
+          with open("build/ios173/clean-install-destination.json", "w") as f:
+              json.dump({"source": os.environ["GITHUB_SHA"], "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "simulator": udid, "runtime": runtime, "device_type": matches[0], "newly_created": True}, f)
+          print("R80_PRISTINE_SIMULATOR_CREATED")
+          PY
+      - name: Confirm iPhone runtime is actually booted after build warmup
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Old flow started the cold iOS 27 simulator before compiling and
+          # timed out at 210 seconds. Warm up the Xcode build first; do not
+          # erase global simulator state or treat an unbooted device as a PASS.
+          if IOSNEXT_BOOTSTATUS_TIMEOUT_SECONDS=240 python3 Scripts/Acceptance/boot_simulator.py "${IOSNEXT_CLEAN_SIM_NAME:-iPhone 18 Pro Max}" "iOS-27-0" > build/ios173/boot.log 2>&1; then
+            cat build/ios173/boot.log
+            echo "IOS173_INTEGRATION_BOOT=PASS"
+          else
+            cat build/ios173/boot.log
+            xcrun simctl list devices available || true
+            echo "::error::iOS 27 Simulator did not boot; XCTest correctly blocked"
+            exit 1
+          fi
+      - name: Bind regression shard to verified product and boot session
+        shell: bash
+        env:
+          REGRESSION_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess, uuid
+          from pathlib import Path
+          root = Path("build/ios173")
+          boot = subprocess.check_output(["sysctl", "-n", "kern.bootsessionuuid"], timeout=10, text=True).strip()
+          uuid.UUID(boot)
+          uid = os.environ["SIM_ID"]
+          uuid.UUID(uid)
+          digest = (root / "handoff/SHA256SUMS").read_text().split()[0]
+          if not re.fullmatch("[0-9a-f]{64}", digest):
+              raise RuntimeError("Missing verified build digest")
+          record = {"source": os.environ["GITHUB_SHA"], "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "shard": os.environ["REGRESSION_SHARD"], "simulator": uid, "build_sha256": digest, "host_boot_sha256": hashlib.sha256(boot.encode()).hexdigest()}
+          (root / "regression-binding.json").write_text(json.dumps(record, indent=2) + "\n")
+          PY
+      - name: Test clean installation before any other app tests
+        id: clean_install
+        if: matrix.shard == 'CF'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${IOSNEXT_CLEAN_SIM_NAME:-}"
+          test -s build/ios173/clean-install-destination.json
+          # The newly created simulator must not already have the app installed.
+          if xcrun simctl get_app_container "$SIM_ID" de.nicofroeba16.iosnext app >/dev/null 2>&1; then
+            echo "::error::Clean-install destination already has an app container"
+            exit 1
+          fi
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/ios173/CleanInstall.xcresult \
+            '-only-testing:IOSNextUITests/CleanInstallUITests/testFreshLaunchAndInvalidHAAddressStayUnauthenticated' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/CleanInstall.log
+          grep -E 'testFreshLaunchAndInvalidHAAddressStayUnauthenticated.*passed' build/ios173/CleanInstall.log
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/CleanInstall.log
+          echo "R80_CLEAN_INSTALL_UI=PASS"
+      - name: Execute family authorization and navigation XCTest
+        if: matrix.shard == 'AB'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/ios173/OwnerNavigation.xcresult \
+                  '-only-testing:IOSNextTests/ChatDraftSafetyTests' \
+              '-only-testing:IOSNextTests/FamilyAudioCryptoTests' \
+            '-only-testing:IOSNextTests/FamilyAudioSessionTests' \
+            '-only-testing:IOSNextTests/FamilyAudioWireTests' \
+            '-only-testing:IOSNextTests/FamilyPCMTests' \
+            '-only-testing:IOSNextTests/ChatHistoryArchiveTests' \
+            '-only-testing:IOSNextTests/ChatMediaThumbnailCacheTests' \
+            '-only-testing:IOSNextTests/EncryptedTicketClientTests' \
+            '-only-testing:IOSNextTests/EncryptedTicketMessageTests' \
+            '-only-testing:IOSNextTests/TicketIdentityBindingTests' \
+            '-only-testing:IOSNextTests/SecureTicketOutboxTests' \
+            '-only-testing:IOSNextTests/EncryptedChatRecordStoreTests' \
+            '-only-testing:IOSNextTests/ChatHistoryRecordMigrationTests' \
+            '-only-testing:IOSNextTests/ChatRecordReceiveCheckpointTests' \
+            '-only-testing:IOSNextTests/ChatV2MigrationCoordinatorTests' \
+            '-only-testing:IOSNextTests/ChatHistoryMutationGateTests' \
+            '-only-testing:IOSNextTests/DurableChatOutboxTests' \
+            '-only-testing:IOSNextTests/ChatRecipientProofV1Tests' \
+            '-only-testing:IOSNextTests/ChatRecipientProofLedgerTests' \
+            '-only-testing:IOSNextTests/SecureTicketProjectStoreTests' \
+            '-only-testing:IOSNextTests/SecureTicketCacheTests' \
+            '-only-testing:IOSNextTests/LegacyTicketTransportPolicyTests' \
+                      CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/OwnerNavigation.log
+          for suite in ChatDraftSafetyTests FamilyAudioCryptoTests FamilyAudioSessionTests FamilyAudioWireTests FamilyPCMTests ChatHistoryArchiveTests ChatMediaThumbnailCacheTests EncryptedTicketClientTests EncryptedTicketMessageTests TicketIdentityBindingTests SecureTicketOutboxTests EncryptedChatRecordStoreTests ChatHistoryRecordMigrationTests ChatRecordReceiveCheckpointTests ChatV2MigrationCoordinatorTests ChatHistoryMutationGateTests DurableChatOutboxTests ChatRecipientProofV1Tests ChatRecipientProofLedgerTests SecureTicketProjectStoreTests SecureTicketCacheTests LegacyTicketTransportPolicyTests; do
+            grep -Fq "Test Suite '$suite' passed" build/ios173/OwnerNavigation.log
+          done
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/OwnerNavigation.log
+          echo "IOS173_INTEGRATION_XCTEST=PASS"
+      - name: Execute family authorization and navigation XCTest
+        if: matrix.shard == 'CF'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/ios173/OwnerNavigation.xcresult \
+            '-only-testing:IOSNextTests/FamilyIdentityTests' \
+            '-only-testing:IOSNextTests/FactoryMCPIntegrationTests' \
+            '-only-testing:IOSNextTests/LiveOperationsTests' \
+              '-only-testing:IOSNextTests/ProjectRegistryTests' \
+                                                      '-only-testing:IOSNextTests/FactoryWorkspaceCollectionTests' \
+            '-only-testing:IOSNextTests/FactoryWorkspaceContractsTests' \
+            '-only-testing:IOSNextTests/FactoryWorkspaceCoordinatorTests' \
+            '-only-testing:IOSNextTests/FactoryWorkspaceEventsTests' \
+            '-only-testing:IOSNextTests/MasterPlatform140Tests' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/OwnerNavigation.log
+          for suite in FamilyIdentityTests FactoryMCPIntegrationTests LiveOperationsTests ProjectRegistryTests FactoryWorkspaceCollectionTests FactoryWorkspaceContractsTests FactoryWorkspaceCoordinatorTests FactoryWorkspaceEventsTests MasterPlatform140Tests; do
+            grep -Fq "Test Suite '$suite' passed" build/ios173/OwnerNavigation.log
+          done
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/OwnerNavigation.log
+          echo "IOS173_INTEGRATION_XCTEST=PASS"
+      - name: Smoke-test existing Factory entry and family member UI guards
+        if: matrix.shard == 'CF'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -collect-test-diagnostics never \
+            -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -resultBundlePath build/ios173/IndependentServices.xcresult \
+            '-only-testing:IOSNextUITests/IndependentServicesUITests/testAllServiceEntriesWorkWithoutHomeAssistant' \
+            '-only-testing:IOSNextUITests/FamilyOnboardingUITests/testMikaFamilyPreview' \
+            '-only-testing:IOSNextUITests/FamilyOnboardingUITests/testJuliFamilyPreview' \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/IndependentServices.log
+          grep -Fq "testAllServiceEntriesWorkWithoutHomeAssistant" build/ios173/IndependentServices.log
+          grep -Fq "testMikaFamilyPreview" build/ios173/IndependentServices.log
+          grep -Fq "testJuliFamilyPreview" build/ios173/IndependentServices.log
+          grep -Eq '\*\* TEST (EXECUTE )?SUCCEEDED \*\*' build/ios173/IndependentServices.log
+          echo "IOS173_INTEGRATION_UI_SMOKE=PASS"
+      - name: Enforce clean-install result after independent regressions
+        if: always() && matrix.shard == 'CF'
+        shell: bash
+        run: |
+          test "${{ steps.clean_install.outcome }}" = success
+      - name: Preserve structured XCTest summaries bound to selected destination
+        if: always()
+        shell: bash
+        env:
+          REGRESSION_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path("build/ios173")
+          names = ["OwnerNavigation"]
+          if os.environ["REGRESSION_SHARD"] == "CF":
+              names += ["CleanInstall", "IndependentServices"]
+          failures = []
+          for name in names:
+              result = root / (name + ".xcresult")
+              if not result.is_dir():
+                  failures.append(name + ": missing bundle")
+                  continue
+              try:
+                  raw = subprocess.check_output(["xcrun", "xcresulttool", "get", "test-results", "summary", "--path", str(result)], timeout=60)
+                  data = json.loads(raw)
+                  (root / (name + "-summary.json")).write_bytes(raw)
+                  devices = {g["device"]["deviceId"].lower() for g in data["devicesAndConfigurations"]}
+                  if devices != {os.environ["SIM_ID"].lower()}:
+                      failures.append(name + ": destination mismatch")
+              except (subprocess.SubprocessError, ValueError, KeyError, TypeError):
+                  failures.append(name + ": summary unavailable")
+          if failures:
+              raise SystemExit("; ".join(failures))
+          PY
+      - name: Preserve regression evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: R80-regression-${{ matrix.shard }}
+          path: |
+            build/ios173/BuildForTesting.log
+            build/ios173/clean-install-destination.json
+            build/ios173/CleanInstall.log
+            build/ios173/CleanInstall.xcresult
+            build/ios173/OwnerNavigation.log
+            build/ios173/OwnerNavigation.xcresult
+            build/ios173/regression-binding.json
+            build/ios173/OwnerNavigation-summary.json
+            build/ios173/CleanInstall-summary.json
+            build/ios173/IndependentServices-summary.json
+            build/ios173/dual-simulator/SHA256SUMS
+            build/ios173/handoff/run-and-attempt.txt
+            build/ios173/IndependentServices.log
+            build/ios173/IndependentServices.xcresult
+            build/ios173/resolve.log
+            build/ios173/boot.log
+            build/ios173/environment.txt
+            build/ios173/xcode-inventory.log
+            build/ios173/selected-toolchain.log
+          retention-days: 14
+          if-no-files-found: error
+  validate:
+    needs: [client]
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/ios180-accelerated-native'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: V64-preflight-*
+          path: build/preflight
+      - name: Verify prerequisite evidence from both independent machines
+        run: python3 Scripts/Acceptance/distributed_preflight.py validate
+      - name: Verify both native handoff rehearsals without network
+        run: python3 Scripts/Acceptance/rehearse_native_role_handoff.py validate
+      - name: Preserve independent validation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V64-preflight-validation
+          path: |
+            build/preflight/validation.json
+            build/preflight/handoff-validation.json
+          retention-days: 14
+
+  aggregate:
+    needs: [source, build, client, regression, validate]
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/ios180-accelerated-native'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Record exact source and terminal prerequisite outcomes
+        env:
+          SOURCE_RESULT: ${{ needs.source.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          ROLE_RESULT: ${{ needs.client.result }}
+          REGRESSION_RESULT: ${{ needs.regression.result }}
+          VALIDATION_RESULT: ${{ needs.validate.result }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          jobs = {key: os.environ[key + "_RESULT"] for key in ("SOURCE", "BUILD", "ROLE", "REGRESSION", "VALIDATION")}
+          report = {"source": os.environ["GITHUB_SHA"], "pr_head": os.environ["PR_HEAD"], "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "jobs": jobs, "scope": "shared native regression and offline handoff prerequisite only", "G01": "OPEN", "G02": "OPEN", "G03": "BLOCKED", "G04": "BLOCKED", "G05": "OPEN", "G99": "OPEN", "release": False}
+          Path("r80-aggregate.json").write_text(json.dumps(report, indent=2) + "\n")
+          if any(v != "success" for v in jobs.values()):
+              raise SystemExit("Required prerequisite job unsuccessful")
+          PY
+      - name: Fetch independent offline role validation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: V64-preflight-validation
+          path: build/r80-evidence/V64-preflight-validation
+      - name: Fetch both regression shards from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: R80-regression-*
+          path: build/r80-evidence
+      - name: Enforce shared product, exact native results and four independent host identities
+        run: python3 Scripts/Acceptance/verify_shared_native.py build/r80-evidence r80-native-proof.json
+      - name: Preserve terminal outcomes
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: R80-aggregate
+          path: |
+            r80-aggregate.json
+            r80-native-proof.json
+          if-no-files-found: error
+          retention-days: 14

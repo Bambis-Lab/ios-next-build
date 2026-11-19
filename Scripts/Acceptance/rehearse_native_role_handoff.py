@@ -21,6 +21,7 @@ _SAFE_REASONS=frozenset({
     "invalid_simulator_id","invalid_role_result_directory",
     "invalid_pair_identity","invalid_pair_preflight","invalid_pair_result",
     "conflicting_failure_evidence","missing_pair_record",
+    "native_receipt_missing","native_receipt_invalid","invalid_offline_fixture",
 })
 
 class HandoffError(RuntimeError):
@@ -101,8 +102,8 @@ def inspect_result(result,out,role,uid):
     return summary,tree
 
 def resolve_container(uid):
-    raw=run_bounded(["xcrun","simctl","get_app_container",uid,
-        "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip()
+    from container_lookup import lookup_container
+    raw=lookup_container(run_bounded,uid)
     path=Path(raw)
     require(bool(raw) and path.is_absolute() and path.is_dir()
             and not path.is_symlink(),"invalid_container")
@@ -150,18 +151,21 @@ def rehearse():
     with tempfile.TemporaryDirectory(prefix="iosnext-v70-role-",dir=os.environ["RUNNER_TEMP"]) as private:
         result=Path(private)/("role-"+role+".xcresult")
         target=install_role(raw,container,role,30)
-        execute_handoff(target,result,out,role,uid,container,raw,roles[role])
+        receipt=execute_handoff(target,result,out,role,uid,container,raw,roles[role])
     stage("write_handoff_evidence")
     (out/"handoff-evidence.json").write_text(json.dumps({"role":role,"source":pre["source"],
         "run":pre["run"],"attempt":pre["attempt"],"simulator":uid,
         "build_sha256":pre["build_sha256"],"host_boot_sha256":pre["boot_session_sha256"],
         "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
-        "transient_file_removed":True,"network_used":False,"media_tested":False},indent=2)+"\n")
+        "transient_file_removed":True,"network_used":False,"media_tested":False,**receipt},indent=2)+"\n")
     print("V65_OFFLINE_ROLE_HANDOFF_COMPLETE role="+role)
 
 def execute_handoff(target,result,out,role,uid,container,raw,role_data):
     from native_role_handoff import read_private
+    from offline_sandbox_receipt import verify_receipt, cleanup_role_copies, POLICY
+    current=container
     try:
+        require(read_private(target)==raw,"role_file_changed")
         stage("run_native_xctest")
         command_failed=False
         log=""
@@ -186,9 +190,13 @@ def execute_handoff(target,result,out,role,uid,container,raw,role_data):
                 "native_marker_missing")
         stage("verify_sandbox_identity")
         current=resolve_container(uid)
-        require(current.resolve()==container.resolve(),"sandbox_changed")
+        # Rotation is never implicitly trusted: only the explicit offline
+        # disposable policy permits a verified original/current pair.
+        receipt=verify_receipt(log,raw,container,current,
+            os.environ.get("IOSNEXT_OFFLINE_RELOCATION_POLICY",""))
         stage("verify_private_role_integrity")
-        require(target.is_file() and read_private(target)==raw,"role_file_changed")
+        if current==container:
+            require(target.is_file() and read_private(target)==raw,"role_file_changed")
         # Never publish a source role file or any bearer/key material.
         stage("verify_output_privacy")
         require(all(x not in log and x not in summary and x not in tree
@@ -198,12 +206,18 @@ def execute_handoff(target,result,out,role,uid,container,raw,role_data):
     finally:
         # Keep the failing phase visible when cleanup succeeds.
         try:
-            target.unlink(missing_ok=True)
-            require(not target.exists(),"cleanup_failed")
+            try:
+                observed=resolve_container(uid)
+            except Exception:
+                cleanup_role_copies(container,current,raw)
+                raise
+            cleanup_role_copies(container,observed,raw)
+            require(observed==current and resolve_container(uid)==observed,"sandbox_changed")
         except Exception:
             print("V66_HANDOFF_CLEANUP=FAIL",file=sys.stderr,flush=True)
             raise
         print("V66_HANDOFF_CLEANUP=PASS",flush=True)
+    return receipt
 
 def self_test():
     import unittest
@@ -246,7 +260,8 @@ def self_test():
             result={**common,"test_status":"PASS","destination_matches":True}
             item={**common,"simulator":uid,"build_sha256":"b"*64,"host_boot_sha256":"c"*64,
                   "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
-                  "transient_file_removed":True,"network_used":False,"media_tested":False}
+                  "transient_file_removed":True,"network_used":False,"media_tested":False,
+                 "receipt_verified":True,"sandbox_lifecycle":"UNCHANGED","native_container_observed":"INITIAL"}
             return identity,pre,result,item
         def test_pair_consistent_and_projection(self):
             identity,pre,result,item=self.records()
@@ -284,7 +299,9 @@ def validate_client_records(role,identity,pre,result,item):
     require(result.get("test_status")=="PASS" and result.get("destination_matches") is True,
             "invalid_pair_result")
     require(all(item.get(k) is True for k in ("native_role_read","wrong_role_rejected",
-        "wrong_duration_rejected","transient_file_removed"))
+        "wrong_duration_rejected","transient_file_removed","receipt_verified"))
+        and item.get("sandbox_lifecycle") in ("UNCHANGED","VERIFIED_OFFLINE_ROTATION")
+        and item.get("native_container_observed") in ("INITIAL","CURRENT")
         and item.get("network_used") is False and item.get("media_tested") is False,
         "invalid_handoff_evidence")
     uid=item.get("simulator")
@@ -299,7 +316,9 @@ def validate_client_records(role,identity,pre,result,item):
     return {"role":role,**identity,"simulator":uid,
         "build_sha256":item["build_sha256"],"host_boot_sha256":item["host_boot_sha256"],
         "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
-        "transient_file_removed":True,"network_used":False,"media_tested":False}
+        "transient_file_removed":True,"network_used":False,"media_tested":False,
+        "receipt_verified":True,"sandbox_lifecycle":item["sandbox_lifecycle"],
+        "native_container_observed":item["native_container_observed"]}
 
 def validate():
     stage("validate_pair")
