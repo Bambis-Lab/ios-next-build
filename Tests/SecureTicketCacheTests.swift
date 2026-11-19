@@ -114,4 +114,105 @@ final class SecureTicketCacheTests: XCTestCase {
         fence.invalidate()
         XCTAssertThrowsError(try fence.requireWrite(revision,scope:a,generation:7,currentGeneration:7,lease:lease,now:now))
     }
+
+    /// Local native cryptographic and persistence matrix. The five roles
+    /// here are disposable fixtures, not live HA enrollments or UI sessions.
+    @MainActor
+    func testFiveRoleTicketMatrixExactReplyRecoveryAndCacheIsolation() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let profiles=["nico","gabi","timo","mika","juli"]
+        let endpoint=try XCTUnwrap(URL(string:"https://fixture.invalid"))
+        let now=Date()
+        let keys=profiles.map{_ in ChatDeviceKeys(agreement:.init(),signing:.init())}
+        let identities=zip(profiles,keys).map{profile,key in
+            key.publicIdentity(userID:"fixture-"+profile,deviceID:"ios-fixture-"+profile)
+        }
+        let scopes=profiles.indices.map{i in
+            TicketScreenScope(endpoint:endpoint,user:identities[i].userID,device:identities[i].deviceID,
+                owner:i==0,keyFingerprint:keys[i].safetyNumber)
+        }
+        let leases=try scopes.map{try TicketOfflineLease(scope:$0,verifiedGrantExpiry:now.addingTimeInterval(300),generation:7,now:now)}
+        let authorizations=profiles.indices.map{i -> EncryptedTicketAuthorization in
+            if i==0 {
+                return .owner(.init(baseURL:endpoint,ownerToken:"synthetic-owner",ownerDeviceSession:"synthetic-device-proof"),
+                    userID:identities[i].userID,deviceID:identities[i].deviceID)
+            }
+            return .member(.init(baseURL:endpoint,token:"synthetic-member-\(i)",
+                userID:identities[i].userID,deviceID:identities[i].deviceID))
+        }
+        func archive(_ index:Int,_ kind:String) throws -> ChatHistoryArchive {
+            try ChatHistoryArchive(file:root.appendingPathComponent("\(index)-\(kind).enc"),
+                scope:Data("\(index)-\(kind)-fixture".utf8),keyData:Data(repeating:UInt8(index+1),count:32))
+        }
+        func cache(_ i:Int) throws -> SecureTicketCache {
+            try SecureTicketCache(scope:scopes[i],local:identities[i],archive:archive(i,"cache"))
+        }
+        func outbox(_ i:Int) throws -> SecureTicketOutbox {
+            SecureTicketOutbox(scope:scopes[i],archive:try archive(i,"outbox"))
+        }
+        var details:[EncryptedTicketDetail]=[]
+        var pending:[TicketPendingSend]=[]
+        for i in 1..<5 {
+            let id=UUID().uuidString.lowercased()
+            let message=try EncryptedTicketMessage.seal(text:"Synthetic request \(i)",ticketID:id,
+                author:identities[i],counterparty:identities[0],confirmedSafetyNumber:keys[0].safetyNumber,keys:keys[i])
+            let request=TicketPendingSend(scope:scopes[i],message:message,peer:identities[0],create:true)
+            try outbox(i).stage(request)
+            pending.append(request)
+            details.append(.init(ticketID:id,requester:identities[i],owner:identities[0],status:.open,messages:[message]))
+        }
+        // All four member queues coexist. Reopen each from storage before
+        // acknowledging its own request. No foreign receipt can clear it.
+        for i in 1..<5 {
+            let detail=details[i-1],request=pending[i-1]
+            XCTAssertEqual(try outbox(i).pending(),request)
+            XCTAssertThrowsError(try outbox(i).acknowledge(request,receipt:details[i%4]))
+            XCTAssertEqual(try outbox(i).pending(),request)
+            for role in 0..<5 {
+                XCTAssertEqual(authorizations[role].allows(requester:detail.requester,owner:detail.owner),role==0 || role==i)
+                if role != 0 && role != i {
+                    XCTAssertThrowsError(try cache(role).putDetail(detail,lease:leases[role]))
+                    XCTAssertThrowsError(try detail.messages[0].open(expectedTicketID:detail.ticketID,
+                        author:identities[i],counterparty:identities[0],confirmedSafetyNumber:keys[i].safetyNumber,
+                        local:identities[role],keys:keys[role]))
+                }
+            }
+            try outbox(i).acknowledge(request,receipt:detail)
+            XCTAssertNil(try outbox(i).pending())
+            try cache(i).putDetail(detail,lease:leases[i])
+            try cache(0).putDetail(detail,lease:leases[0])
+            let reply=try EncryptedTicketMessage.seal(text:"Synthetic reply \(i)",ticketID:detail.ticketID,
+                author:identities[0],counterparty:identities[i],confirmedSafetyNumber:keys[i].safetyNumber,keys:keys[0])
+            let outgoing=TicketPendingSend(scope:scopes[0],message:reply,peer:identities[i],create:false)
+            try outbox(0).stage(outgoing)
+            // A lost HTTP reply must leave the exact original request intact.
+            try outbox(0).stage(outgoing)
+            XCTAssertEqual(try outbox(0).pending(),outgoing)
+            let complete=EncryptedTicketDetail(ticketID:detail.ticketID,requester:detail.requester,owner:detail.owner,
+                status:.open,messages:detail.messages+[reply])
+            try outbox(0).acknowledge(outgoing,receipt:complete)
+            XCTAssertNil(try outbox(0).pending())
+            XCTAssertEqual(try reply.open(expectedTicketID:detail.ticketID,author:identities[0],counterparty:identities[i],
+                confirmedSafetyNumber:keys[0].safetyNumber,local:identities[i],keys:keys[i]),"Synthetic reply \(i)")
+            try cache(i).putDetail(complete,lease:leases[i])
+            try cache(0).putDetail(complete,lease:leases[0])
+            XCTAssertEqual(try cache(i).detail(detail.ticketID,lease:leases[i])?.messages,complete.messages)
+            XCTAssertEqual(try cache(i).list(lease:leases[i]).map(\.ticketID),[detail.ticketID])
+            for role in 0..<5 where role != i {
+                XCTAssertThrowsError(try cache(i).list(lease:leases[role]))
+            }
+            XCTAssertThrowsError(try leases[i].require(scopes[i],generation:8,now:now))
+            XCTAssertThrowsError(try leases[i].require(scopes[i],now:now.addingTimeInterval(121)))
+        }
+        XCTAssertEqual(Set(try cache(0).list(lease:leases[0]).map(\.ticketID)),Set(details.map(\.ticketID)))
+        XCTAssertThrowsError(try leases[0].require(scopes[0],now:now.addingTimeInterval(61)))
+        // Invalidating one member's view cannot clear another role's data.
+        try cache(1).invalidate()
+        XCTAssertTrue(try cache(1).list(lease:leases[1]).isEmpty)
+        XCTAssertEqual(try cache(0).list(lease:leases[0]).count,4)
+        for i in 2..<5 {XCTAssertEqual(try cache(i).list(lease:leases[i]).count,1)}
+        print("V65_TICKET_LOCAL_ROLE_MATRIX=PASS roles=5 requests=4 replies=4 live_backend=false")
+    }
 }
