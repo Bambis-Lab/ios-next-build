@@ -3,7 +3,7 @@ import Foundation
 import Security
 
 enum ChatHistoryError: LocalizedError {
-    case invalidScope, missingKey, invalidArchive, capacity
+    case invalidScope, missingKey, invalidArchive, capacity, busy
     var errorDescription: String? { "Der verschlüsselte Chatverlauf konnte nicht sicher gespeichert oder geöffnet werden." }
 }
 

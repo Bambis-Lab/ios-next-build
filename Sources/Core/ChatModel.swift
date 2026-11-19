@@ -70,9 +70,39 @@ final class ChatModel {
     private var configurationGeneration: UInt64 = 0
     private typealias HistorySnapshot = ChatPersistentSnapshot
     private var historyArchive: ChatHistoryArchive?
+    private var historyRecordCheckpoint: ChatRecordReceiveCheckpoint?
+    @ObservationIgnored private let historyMutationGate = ChatHistoryMutationGate()
     private var partialMessages: [String: PartialMessage] = [:]
 
-    private func loadFamilyHistory(configuration: ChatConfiguration) throws {
+    private func loadFamilyHistory(configuration: ChatConfiguration) async throws {
+        let generation=configurationGeneration
+        try await historyMutationGate.waitUntilIdle { generation == self.configurationGeneration }
+        guard self.configuration == configuration, let keys else { throw CancellationError() }
+        historyArchive=nil
+        historyRecordCheckpoint=nil
+        // A marker, once published by the separately authorized migration,
+        // is the authority. Missing/corrupt v2 must never reactivate v1.
+        if try ChatV2MigrationCoordinator.hasActiveMarker(configuration:configuration,keyFingerprint:keys.safetyNumber) {
+            restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
+            let coordinator=try ChatV2MigrationCoordinator(configuration:configuration,keyFingerprint:keys.safetyNumber)
+            guard let active=try await coordinator.openActive() else { throw ChatHistoryError.invalidArchive }
+            let original=try await active.load()
+            try Task.checkCancellation()
+            guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
+            let normalized=HistorySnapshot(version:1,messages:original.messages.map { message in
+                var record=message
+                if record.delivery == .sending { record.delivery = .failed }
+                return record
+            },partials:original.partials,seen:original.seen)
+            if normalized != original {
+                _ = try await active.commit(previous:original,next:normalized,verifiedEnvelopeIDs:[])
+            }
+            try Task.checkCancellation()
+            guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
+            restoreCheckpoint(normalized)
+            historyRecordCheckpoint=active
+            return
+        }
         let archive = try ChatHistoryArchive(configuration: configuration)
         if let snapshot = try archive.load(HistorySnapshot.self) {
             guard snapshot.version == 1, snapshot.messages.count <= 200,
@@ -104,18 +134,24 @@ final class ChatModel {
         seenEnvelopeIDs = snapshot.seen
     }
 
-    private func persistFamilyHistory() throws {
-        guard isFamilyCredentialActive else { return }
-        guard let historyArchive else { throw ChatHistoryError.missingKey }
-        try historyArchive.save(historySnapshot())
-    }
-
-    // Mutations and persistence are synchronous on the main actor. A failed
-    // write must not leave replay IDs or message buffers claiming durability.
-    private func commitVerifiedReceive(_ mutation: () throws -> Void) throws {
-        try ChatHistoryCheckpoint.commit(previous: historySnapshot(),
-            mutate: mutation, persist: { try persistFamilyHistory() },
-            restore: { restoreCheckpoint($0) })
+    private func commitHistoryMutation(generation:UInt64, verifiedEnvelopeIDs:[String]=[],
+                                       _ mutation: () throws -> Void) async throws {
+        guard generation == configurationGeneration else { throw CancellationError() }
+        if !isFamilyCredentialActive {
+            try mutation()
+            return
+        }
+        try await historyMutationGate.commit(isCurrent:{ generation == self.configurationGeneration },
+            read:{ historySnapshot() }, apply:{ restoreCheckpoint($0) }, mutate:mutation,
+            persist:{ previous,next in
+                if let checkpoint=historyRecordCheckpoint {
+                    let receipt=try await checkpoint.commit(previous:previous,next:next,verifiedEnvelopeIDs:verifiedEnvelopeIDs)
+                    guard receipt.envelopeIDs == verifiedEnvelopeIDs else { throw ChatHistoryError.invalidArchive }
+                } else {
+                    guard let historyArchive else { throw ChatHistoryError.missingKey }
+                    try historyArchive.save(next)
+                }
+            })
     }
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
@@ -484,6 +520,7 @@ final class ChatModel {
         configurationGeneration &+= 1
         resetCalls()
         historyArchive = nil
+        historyRecordCheckpoint = nil
         if replacesIdentity {
             draft = ""
             showingFamilyGroup = false
@@ -560,7 +597,8 @@ final class ChatModel {
                 try await relay.requireAcknowledgedDelivery(configuration: configuration)
             }
             guard epoch == startupEpoch, !Task.isCancelled, self.configuration == configuration else { return }
-            if isFamilyCredentialActive { try loadFamilyHistory(configuration: configuration) }
+            if isFamilyCredentialActive { try await loadFamilyHistory(configuration: configuration) }
+            guard epoch == startupEpoch, !Task.isCancelled, self.configuration == configuration else { return }
             accessRole = session.role
             do {
                 let loadedContacts = try await relay.contacts(configuration: configuration)
@@ -617,6 +655,7 @@ final class ChatModel {
         resetCalls()
         configurationGeneration &+= 1
         historyArchive = nil
+        historyRecordCheckpoint = nil
         startupEpoch &+= 1
         startupTask?.cancel()
         startupTask = nil
@@ -632,6 +671,7 @@ final class ChatModel {
 
     func forgetConfiguration(preservingStartup: Bool = false) {
         historyArchive = nil
+        historyRecordCheckpoint = nil
         configurationGeneration &+= 1
         resetCalls()
         draft = ""
@@ -772,6 +812,8 @@ final class ChatModel {
                 do {
                     try KeychainStore.save(family.grant.accessToken, account: self.tokenAccount)
                     self.receiveTask?.cancel()
+                    try await self.historyMutationGate.waitUntilIdle { generation == self.configurationGeneration }
+                    guard generation == self.configurationGeneration else { return }
                     self.configurationGeneration &+= 1
                     self.configuration = ChatConfiguration(baseURL: current.baseURL,
                         token: family.grant.accessToken, userID: current.userID, deviceID: current.deviceID)
@@ -822,7 +864,7 @@ final class ChatModel {
     func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys, state == .online,
+        guard let configuration, let keys, state == .online, !isSending,
               showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
@@ -856,11 +898,10 @@ final class ChatModel {
             delivery: .sending
         )
         localMessage.conversationID = selectedGroup ? "family" : nil
-        let previousMessages = messages
-        appendMessage(localMessage)
-        do { try persistFamilyHistory() }
-        catch {
-            messages = previousMessages
+        do {
+            try await commitHistoryMutation(generation:sendGeneration) { appendMessage(localMessage) }
+        } catch {
+            guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
             return false
         }
@@ -906,14 +947,17 @@ final class ChatModel {
                 }
             }
             guard sendGeneration == configurationGeneration else { return false }
-            updateDelivery(id: groupID, to: .queued)
-            do { try persistFamilyHistory() }
-            catch { lastError = "Nachricht übertragen, lokaler Versandstatus konnte nicht gespeichert werden." }
+            do {
+                try await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.queued) }
+            } catch {
+                guard sendGeneration == configurationGeneration else { return false }
+                lastError = "Nachricht übertragen, lokaler Versandstatus konnte nicht gespeichert werden."
+            }
             return true
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
-            updateDelivery(id: groupID, to: .failed)
-            try? persistFamilyHistory()
+            try? await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.failed) }
+            guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
             return false
         }
@@ -1066,7 +1110,7 @@ final class ChatModel {
                     // Verified envelopes are individually checkpointed before
                     // returning from accept(). Previously committed replays
                     // and explicitly rejected ciphertext need no new write.
-                    guard historyArchive != nil else { throw ChatHistoryError.missingKey }
+                    guard historyArchive != nil || historyRecordCheckpoint != nil else { throw ChatHistoryError.missingKey }
                     try await relay.acknowledge(
                         envelopes.map(\.id), configuration: configuration
                     )
@@ -1096,6 +1140,7 @@ final class ChatModel {
     }
 
     private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws {
+        let generation=configurationGeneration
         let now = Date.now
         guard let envelopeDate = ISO8601DateFormatter().date(from: envelope.createdAt),
               abs(now.timeIntervalSince(envelopeDate)) < 600 else {
@@ -1136,7 +1181,7 @@ final class ChatModel {
             // relay availability failures.
             throw ChatError.invalidEnvelope
         }
-        try commitVerifiedReceive {
+        try await commitHistoryMutation(generation:generation,verifiedEnvelopeIDs:[envelope.id]) {
             try storeVerifiedFragment(envelope, plaintext: plaintext, configuration: configuration,
                                      envelopeDate: envelopeDate, now: now)
         }

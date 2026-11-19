@@ -31,7 +31,9 @@ actor ChatRecordReceiveCheckpoint {
         let after = try ChatHistoryRecordMigration.split(next)
         let changes = try ChatHistoryRecordMigration.delta(from: before, to: after)
         try await store.commitCheckpoint(expected: before, changes: changes)
-        try Task.checkCancellation()
+        // Once SQLite has committed, return the durable result even if the
+        // caller was cancelled during completion. The caller suppresses ACK
+        // on cancellation, but must not roll back a committed local snapshot.
         return Receipt(envelopeIDs: verifiedEnvelopeIDs)
     }
 }
