@@ -36,11 +36,22 @@ EOF
   openssl verify -CAfile "$tls/ca.crt" "$tls/$name.crt" > /dev/null
 done
 xcrun simctl keychain "$SIM_ID" add-root-cert "$tls/ca.der"
+second=""
+if [ "${1:-}" = dual ]; then
+  python3 Scripts/Acceptance/run_two_native_simulators.py create
+  second="$(cat build/ios173/dual-simulator/created-udid.txt)"
+  xcrun simctl keychain "$second" add-root-cert "$tls/ca.der"
+fi
 "$python" Scripts/Acceptance/audio_network_fixture.py serve > "$tls/server.log" 2>&1 &
 server_pid=$!
 "$python" Scripts/Acceptance/native_wss_proxy.py "$tls" > "$tls/proxy.log" 2>&1 &
 proxy_pid=$!
-trap 'kill "$server_pid" "$proxy_pid" 2>/dev/null || true; wait "$server_pid" "$proxy_pid" 2>/dev/null || true' EXIT
+cleanup() {
+  kill "$server_pid" "$proxy_pid" 2>/dev/null || true
+  wait "$server_pid" "$proxy_pid" 2>/dev/null || true
+  if [ -n "$second" ]; then xcrun simctl shutdown "$second" || true; fi
+}
+trap cleanup EXIT
 for _ in $(seq 1 30); do
   kill -0 "$server_pid" "$proxy_pid"
   if grep -q SYNTHETIC_AUDIO_READY "$tls/server.log" && grep -q SYNTHETIC_WSS_READY "$tls/proxy.log"; then break; fi
@@ -48,6 +59,10 @@ for _ in $(seq 1 30); do
 done
 grep -q SYNTHETIC_AUDIO_READY "$tls/server.log"
 grep -q SYNTHETIC_WSS_READY "$tls/proxy.log"
+if [ "${1:-}" = dual ]; then
+  python3 Scripts/Acceptance/run_two_native_simulators.py run "$second"
+  exit 0
+fi
 xcodebuild test-without-building -collect-test-diagnostics never \
   -xctestrun "$XCTESTRUN_PATH" -destination "platform=iOS Simulator,id=$SIM_ID" \
   -parallel-testing-enabled NO -disable-concurrent-destination-testing \

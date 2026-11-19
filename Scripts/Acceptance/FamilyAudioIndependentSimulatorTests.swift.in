@@ -1,0 +1,108 @@
+import CryptoKit
+import Foundation
+import XCTest
+@testable import IOSNext
+
+// Only copied into a disposable hosted-runner checkout. Each test is executed
+// in a distinct booted simulator, with independent ephemeral keys and socket.
+final class FamilyAudioIndependentSimulatorTests: XCTestCase {
+    @MainActor
+    func testSimulatorA() async throws { try await exercise(roleA:true) }
+
+    @MainActor
+    func testSimulatorB() async throws { try await exercise(roleA:false) }
+
+    private func frame(sequence:UInt64,marker:UInt8) -> Data {
+        var seq=sequence.bigEndian
+        return withUnsafeBytes(of:&seq) {Data($0)} + Data(repeating:marker,count:632)
+    }
+
+    @MainActor
+    private func exercise(roleA:Bool) async throws {
+        let a=["ha-fixture-a","ios-a"], b=["ha-fixture-b","ios-b"]
+        let local=roleA ? a : b
+        let peer=roleA ? b : a
+        let role=roleA ? "A" : "B"
+        let marker:UInt8=roleA ? 31 : 73
+        let peerMarker:UInt8=roleA ? 73 : 31
+        let context=try FamilyAudioContext(callID:String(repeating:"a",count:32),caller:a,callee:b,local:local)
+        let keys=ChatDeviceKeys(agreement:.init(),signing:try .init(rawRepresentation:Data(repeating:roleA ? 11 : 12,count:32)))
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:try .init(rawRepresentation:Data(repeating:roleA ? 12 : 11,count:32)))
+        let config=ChatConfiguration(baseURL:try XCTUnwrap(URL(string:"https://127.0.0.1:18767/")),
+            token:roleA ? "fixture-a" : "fixture-b",userID:local[0],deviceID:local[1])
+        let wire=try FamilyAudioWire(configuration:config,endpoint:try XCTUnwrap(URL(string:"wss://127.0.0.1:18767/v1/audio")),context:context)
+        defer {wire.close()}
+        let clock=ContinuousClock()
+        try await wire.connect()
+        let handshake=FamilyAudioHandshake(context:context)
+        _ = try await wire.send(.offer(handshake.offer(signingKey:keys.signing)))
+        let offerLimit=clock.now.advanced(by:.seconds(180))
+        var peerOffer:FamilyAudioOffer?
+        while peerOffer==nil && clock.now<offerLimit {
+            peerOffer=try await wire.send(.peerOffer).offer
+            if peerOffer==nil {try await Task.sleep(for:.milliseconds(250))}
+        }
+        let codec=try handshake.establish(peerOffer:XCTUnwrap(peerOffer),
+            verifiedPeer:peerKeys.publicIdentity(userID:peer[0],deviceID:peer[1]))
+        var received:UInt64=0
+        func drain() throws {
+            for packet in wire.takePackets() {
+                guard packet.sequence==received else {
+                    XCTFail("Sequence discontinuity: expected \(received), received \(packet.sequence)")
+                    throw FamilyAudioError.invalidSequence
+                }
+                let plain=try codec.open(sequence:packet.sequence,packet:packet.validatedCiphertext())
+                guard plain==frame(sequence:received,marker:peerMarker) else {
+                    XCTFail("Peer payload mismatch")
+                    throw FamilyAudioError.invalidFrame
+                }
+                received += 1
+            }
+        }
+        // Bidirectional authenticated frame zero is the rendezvous: neither
+        // process starts its timed media interval until it has decrypted it.
+        _ = try await wire.send(.push(sequence:0,ciphertext:codec.seal(sequence:0,frame:frame(sequence:0,marker:marker))))
+        let readyLimit=clock.now.advanced(by:.seconds(10))
+        while received==0 && clock.now<readyLimit {
+            try drain()
+            if received==0 {try await Task.sleep(for:.milliseconds(5))}
+        }
+        XCTAssertGreaterThanOrEqual(received,1)
+        guard received>=1 else {throw FamilyAudioWireError.transportClosed}
+        let start=clock.now
+        let target:UInt64=500
+        var sent:UInt64=0
+        for sequence in UInt64(1)...target {
+            try await clock.sleep(until:start.advanced(by:.milliseconds(Int64(sequence)*20)))
+            if sequence==250 {
+                let renewal=try await wire.send(.refresh(roleA ? "fixture-a-renewed" : "fixture-b-renewed"))
+                XCTAssertEqual(renewal.expiresAt,200)
+            }
+            let encrypted=try codec.seal(sequence:sequence,frame:frame(sequence:sequence,marker:marker))
+            guard try await wire.sendMedia(sequence:sequence,ciphertext:encrypted) else {
+                XCTFail("Media send-window saturated")
+                throw FamilyAudioWireError.queueFull
+            }
+            sent += 1
+            try drain()
+        }
+        _ = try await wire.send(.heartbeat) // ordered media acknowledgement barrier
+        let finalLimit=clock.now.advanced(by:.seconds(8))
+        while received<target+1 && clock.now<finalLimit {
+            try drain()
+            if received<target+1 {try await Task.sleep(for:.milliseconds(5))}
+        }
+        XCTAssertEqual(sent,target)
+        XCTAssertEqual(received,target+1)
+        XCTAssertTrue(wire.isConnected)
+        // Stay alive while the peer finishes its barrier. No extra audio,
+        // no new nonce, no retry; heartbeat prevents idle disconnection.
+        try await Task.sleep(for:.seconds(2))
+        try drain()
+        XCTAssertEqual(received,target+1)
+        let elapsed=start.duration(to:clock.now)
+        XCTAssertGreaterThanOrEqual(elapsed,.seconds(10))
+        let udid=ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "unavailable"
+        print("IOS173_DUAL_RESULT role=\(role) udid=\(udid) pid=\(ProcessInfo.processInfo.processIdentifier) sent=\(sent) received=\(received-1) elapsed=\(elapsed.components.seconds)")
+    }
+}

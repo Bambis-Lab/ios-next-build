@@ -1,7 +1,7 @@
-name: iOS173 native synthetic WSS and target regression
+name: iOS173 two independent native iPhone simulators WSS
 on:
   push:
-    branches: ['feature/ios173-v3-native-wss']
+    branches: ['feature/ios173-v3-two-simulators']
   workflow_dispatch:
 permissions:
   contents: read
@@ -148,6 +148,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/ios173-wss-venv"
           "$RUNNER_TEMP/ios173-wss-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
           "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/audio_network_fixture.py generate-wss Tests/FamilyAudioNetworkTests.swift
+          cp Scripts/Acceptance/FamilyAudioIndependentSimulatorTests.swift.in Tests/FamilyAudioIndependentSimulatorTests.swift
           xcodegen generate --spec project.yml --project .
           mkdir -p build/ios173
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
@@ -183,9 +184,9 @@ jobs:
             echo "::error::iOS 27 Simulator did not boot; XCTest correctly blocked"
             exit 1
           fi
-      - name: Native WSS synthetic two-client short acceptance
+      - name: Two independently booted native iPhone simulators WSS (10 seconds)
         shell: bash
-        run: bash Scripts/Acceptance/run_native_wss_smoke.sh
+        run: bash Scripts/Acceptance/run_native_wss_smoke.sh dual
       - name: Execute family authorization and navigation XCTest
         shell: bash
         run: |
@@ -247,10 +248,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: IOS173-Integration-Xcode27-Evidence
+          name: IOS173-Two-Independent-Simulators-Evidence
           path: |
-            build/ios173/NativeWSS.log
-            build/ios173/NativeWSS.xcresult
+            build/ios173/dual-simulator/
             build/ios173/BuildForTesting.log
             build/ios173/OwnerNavigation.log
             build/ios173/OwnerNavigation.xcresult

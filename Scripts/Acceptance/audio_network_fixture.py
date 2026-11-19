@@ -78,6 +78,7 @@ def serve():
     claims={"fixture-a":SimpleNamespace(user_id=A[0],device_id=A[1],family_device=True,expires_at=100),
             "fixture-b":SimpleNamespace(user_id=B[0],device_id=B[1],family_device=True,expires_at=100),
             "fixture-a-renewed":SimpleNamespace(user_id=A[0],device_id=A[1],family_device=True,expires_at=200),
+            "fixture-b-renewed":SimpleNamespace(user_id=B[0],device_id=B[1],family_device=True,expires_at=200),
             "fixture-foreign":SimpleNamespace(user_id="foreign",device_id="ios-foreign",family_device=True,expires_at=100)}
     registry=SimpleNamespace(is_active=lambda u,d:(u,d) in (A,B))
     identities={A[0]:[{"device_id":A[1],"signing_public_key":b64(public(sa))}],
