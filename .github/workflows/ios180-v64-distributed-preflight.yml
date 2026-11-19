@@ -1,7 +1,7 @@
 name: V6.4 distributed native prerequisite
 on:
   push:
-    branches: ['feature/ios180-v64-distributed-preflight']
+    branches: ['feature/ios180-v64-distributed-preflight', 'feature/ios180-v64-native-execution-preflight']
   workflow_dispatch:
 permissions:
   contents: read

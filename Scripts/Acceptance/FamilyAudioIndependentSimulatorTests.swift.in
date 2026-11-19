@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import XCTest
+import UIKit
 @testable import IOSNext
 
 // Only copied into a disposable hosted-runner checkout. Each test is executed
@@ -11,6 +12,22 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
 
     @MainActor
     func testSimulatorB() async throws { try await exercise(roleA:false) }
+
+    /// Real execution inside the exact simulator; no network or credentials.
+    @MainActor
+    func testNativeExecutionPrerequisite() throws {
+        #if targetEnvironment(simulator)
+        XCTAssertEqual(ProcessInfo.processInfo.operatingSystemVersion.majorVersion,27)
+        XCTAssertEqual(UIDevice.current.userInterfaceIdiom,.phone)
+        let signing=Curve25519.Signing.PrivateKey()
+        let challenge=Data("iosnext-v64-native-preflight".utf8)
+        let signature=try signing.signature(for:challenge)
+        XCTAssertTrue(signing.publicKey.isValidSignature(signature,for:challenge))
+        print("V64_NATIVE_EXECUTION_PREREQUISITE=PASS")
+        #else
+        XCTFail("Simulator prerequisite requires an iOS simulator")
+        #endif
+    }
 
     private func frame(sequence:UInt64,marker:UInt8) -> Data {
         var seq=sequence.bigEndian
