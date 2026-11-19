@@ -1,7 +1,7 @@
 name: V6.4 distributed native prerequisite
 on:
   push:
-    branches: ['feature/ios180-v64-distributed-preflight', 'feature/ios180-v64-native-execution-preflight', 'feature/ios180-v64-native-role-contract', 'feature/ios180-v65-native-handoff-rehearsal', 'feature/ios180-v70-native-handoff-hardening']
+    branches: ['feature/ios180-v64-distributed-preflight', 'feature/ios180-v64-native-execution-preflight', 'feature/ios180-v64-native-role-contract', 'feature/ios180-v65-native-handoff-rehearsal', 'feature/ios180-v70-native-handoff-hardening', 'feature/ios180-v70-integration']
   workflow_dispatch:
 permissions:
   contents: read
@@ -211,7 +211,7 @@ jobs:
           python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" 2>&1 | tee build/ios173/boot.log
           python3 Scripts/Acceptance/distributed_preflight.py client
       - name: Rehearse private role file handoff inside the disposable native simulator
-        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening'
+        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening' || github.ref_name == 'feature/ios180-v70-integration'
         env:
           IOSNEXT_PREFLIGHT_ROLE: ${{ matrix.role }}
         shell: bash
@@ -255,7 +255,7 @@ jobs:
       - name: Verify prerequisite evidence from both independent machines
         run: python3 Scripts/Acceptance/distributed_preflight.py validate
       - name: Verify both native handoff rehearsals without network
-        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening'
+        if: github.ref_name == 'feature/ios180-v65-native-handoff-rehearsal' || github.ref_name == 'feature/ios180-v70-native-handoff-hardening' || github.ref_name == 'feature/ios180-v70-integration'
         run: python3 Scripts/Acceptance/rehearse_native_role_handoff.py validate
       - name: Preserve independent validation
         if: always()
