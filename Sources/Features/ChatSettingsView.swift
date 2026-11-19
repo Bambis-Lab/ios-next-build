@@ -10,6 +10,7 @@ struct ChatSettingsView: View {
     @State private var showingTechnicalConfiguration = false
     @State private var confirmV2=false
     @State private var confirmExpired=false
+    @State private var expiredGroupID:String?
 
     private var connectionTitle: String {
         switch chatModel.state {
@@ -62,13 +63,15 @@ struct ChatSettingsView: View {
                     Section("Ausstehender Versand") {
                         if chatModel.chatOutboxBlocked {
                             Text("Versandjournal nicht lesbar. Kein automatischer Versand.").foregroundStyle(.secondary)
-                        } else if chatModel.pendingChatSendID != nil {
-                            Text("Eine Nachricht ist noch nicht vollständig bestätigt.").font(.footnote)
+                        } else if let headID=chatModel.pendingChatSendID {
+                            LabeledContent("Gesicherte Aufträge",value:"\(chatModel.pendingChatCount) / \(chatModel.chatOutboxCapacity)")
+                                .accessibilityIdentifier("chat-settings-pending-count")
+                            Text("Der erste Auftrag wird einzeln bearbeitet. Weitere bleiben gesichert; kein automatischer erneuter Versand.").font(.footnote)
                             TimelineView(.periodic(from:.now,by:1)) { context in
                                 let expired = !chatModel.pendingChatAllConfirmed &&
                                     (chatModel.pendingChatExpiresAt.map{$0<=context.date} ?? false)
                                 if expired {
-                                    Button("Abgelaufenen Versand abschließen",systemImage:"archivebox") {confirmExpired=true}
+                                    Button("Abgelaufenen Versand abschließen",systemImage:"archivebox") {expiredGroupID=headID;confirmExpired=true}
                                         .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
                                         .accessibilityIdentifier("chat-settings-close-expired-send")
                                     Text("Es ist unklar, ob bereits Teile zugestellt wurden. Kein erneuter Versand.")
@@ -76,7 +79,7 @@ struct ChatSettingsView: View {
                                 } else {
                                     Button(chatModel.pendingChatAllConfirmed ? "Versandstatus speichern" : "Identische Nachricht erneut prüfen und übertragen",
                                            systemImage:"arrow.clockwise") {
-                                        Task {await chatModel.retryPendingChatSend()}
+                                        Task {await chatModel.retryPendingChatSend(expectedGroupID:headID)}
                                     }
                                     .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
                                     .accessibilityIdentifier("chat-settings-retry-pending-send")
@@ -126,7 +129,10 @@ struct ChatSettingsView: View {
                 Text("Empfang und Versand werden während der Prüfung pausiert. Das Originalarchiv wird nicht gelöscht. Die Aktivierung ist nicht automatisch rückgängig zu machen.")
             }
             .alert("Abgelaufenen Versand abschließen?",isPresented:$confirmExpired) {
-                Button("Lokal abschließen",role:.destructive) {Task {await chatModel.closeExpiredChatSend()}}
+                Button("Lokal abschließen",role:.destructive) {
+                    if let id=expiredGroupID {Task {await chatModel.closeExpiredChatSend(expectedGroupID:id)}}
+                    expiredGroupID=nil
+                }
                 Button("Abbrechen",role:.cancel) {}
             } message: {
                 Text("Der Verlauf bleibt erhalten. Bereits zugestellte Teile können nicht zurückgerufen werden. Es wird nichts erneut gesendet.")

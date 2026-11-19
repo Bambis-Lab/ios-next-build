@@ -225,7 +225,7 @@ struct ChatView: View {
                         .padding(.top, 60)
                     }
                     ForEach(chatModel.visibleMessages) { message in
-                        ChatBubble(message: message)
+                        ChatBubble(message: message,locallyPending:message.direction == .outgoing && chatModel.pendingChatGroupIDs.contains(message.id))
                             .id(message.id)
                     }
                 }
@@ -438,6 +438,7 @@ private struct InMemoryCameraPicker: UIViewControllerRepresentable {
 
 private struct ChatBubble: View {
     let message: ChatMessage
+    let locallyPending:Bool
 
     var body: some View {
         HStack {
@@ -448,7 +449,7 @@ private struct ChatBubble: View {
                     Text(message.createdAt, format: .dateTime.hour().minute())
                     if message.direction == .outgoing {
                         Image(systemName: deliverySymbol)
-                            .foregroundStyle(message.delivery == .failed || message.delivery == .unconfirmedExpired ? .red : .secondary)
+                            .foregroundStyle(!locallyPending && (message.delivery == .failed || message.delivery == .unconfirmedExpired) ? .red : .secondary)
                             .accessibilityLabel(deliveryLabel)
                     }
                 }
@@ -496,7 +497,8 @@ private struct ChatBubble: View {
     }
 
     private var deliverySymbol: String {
-        switch message.delivery {
+        if locallyPending {return "clock"}
+        return switch message.delivery {
         case .sending: "clock"
         case .queued: "checkmark"
         case .received: "checkmark"
@@ -505,7 +507,8 @@ private struct ChatBubble: View {
     }
 
     private var deliveryLabel:String {
-        switch message.delivery {
+        if locallyPending {return "Lokal gesichert, Versand ausstehend"}
+        return switch message.delivery {
         case .sending: "Versand läuft"
         case .queued: "Vom Relay angenommen, Zustellung nicht bestätigt"
         case .received: "Empfangen"

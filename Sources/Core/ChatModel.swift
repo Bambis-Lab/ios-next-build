@@ -54,6 +54,10 @@ final class ChatModel {
     var recipientSafetyNumbers: [String] = []
     var isSending = false
     private(set) var pendingChatSendID:String?
+    private(set) var pendingChatGroupIDs=Set<String>()
+    private var stagingChatID:String?
+    var pendingChatCount:Int {pendingChatGroupIDs.count}
+    var chatOutboxCapacity:Int {DurableChatOutbox.maximumPendingGroups}
     private(set) var chatOutboxBlocked=false
     private(set) var pendingChatExpiresAt:Date?
     private(set) var pendingChatAllConfirmed=false
@@ -92,19 +96,26 @@ final class ChatModel {
     }
 
     private func refreshChatOutboxState(configuration:ChatConfiguration,keys:ChatDeviceKeys) {
-        pendingChatSendID=nil
-        pendingChatExpiresAt=nil
-        pendingChatAllConfirmed=false
-        chatOutboxBlocked=false
         do {
-            let pending=try openChatOutbox(configuration:configuration,keys:keys).pending()
-            applyPendingChatState(pending)
+            try reloadChatOutboxState(openChatOutbox(configuration:configuration,keys:keys))
         } catch {
             chatOutboxBlocked=true
         }
     }
 
-    private func applyPendingChatState(_ pending:DurableChatOutbox.Pending?) {
+    private func reloadChatOutboxState(_ outbox:DurableChatOutbox) throws {
+        do {
+            applyPendingChatState(try outbox.pendingGroups())
+            chatOutboxBlocked=false
+        } catch {
+            chatOutboxBlocked=true
+            throw error
+        }
+    }
+
+    private func applyPendingChatState(_ groups:[DurableChatOutbox.Pending]) {
+        pendingChatGroupIDs=Set(groups.map(\.groupID))
+        let pending=groups.first
         pendingChatSendID=pending?.groupID
         pendingChatExpiresAt=pending?.entries.first.flatMap {
             ISO8601DateFormatter().date(from:$0.envelope.createdAt)?.addingTimeInterval(90)
@@ -492,7 +503,8 @@ final class ChatModel {
     }
 
     var canSend: Bool {
-        state == .online && (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
+        state == .online && (!isFamilyCredentialActive || (!chatOutboxBlocked && pendingChatCount < chatOutboxCapacity)) &&
+            (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
     }
 
     func start(using appModel: AppModel) async {
@@ -657,6 +669,10 @@ final class ChatModel {
         resetCalls()
         historyArchive = nil
         historyRecordCheckpoint = nil
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
+        chatOutboxBlocked=isFamilyCredentialActive
         if replacesIdentity {
             draft = ""
             showingFamilyGroup = false
@@ -790,7 +806,9 @@ final class ChatModel {
     }
 
     func stop() {
-        applyPendingChatState(nil)
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
         chatOutboxBlocked=false
         resetCalls()
         configurationGeneration &+= 1
@@ -811,7 +829,9 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
-        applyPendingChatState(nil)
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
         chatOutboxBlocked=false
         historyArchive = nil
         historyRecordCheckpoint = nil
@@ -1021,8 +1041,13 @@ final class ChatModel {
             return false
         }
         isSending = true
-        defer { isSending = false }
         let sendGeneration = configurationGeneration
+        defer {
+            if sendGeneration==configurationGeneration {
+                stagingChatID=nil
+                isSending=false
+            }
+        }
         // Capture the actual target before the first asynchronous preflight.
         let selectedPeer = recipientUserID
         let selectedGroup = showingFamilyGroup
@@ -1030,15 +1055,14 @@ final class ChatModel {
         if isFamilyCredentialActive {
             do {
                 let outbox=try openChatOutbox(configuration:configuration,keys:keys)
-                pendingChatSendID=try outbox.pending()?.groupID
-                chatOutboxBlocked=false
-                guard pendingChatSendID==nil else {throw ChatHistoryError.busy}
+                try reloadChatOutboxState(outbox)
+                guard pendingChatCount < chatOutboxCapacity else {throw ChatHistoryError.capacity}
                 try await relay.requireIdempotentSender(configuration:configuration)
                 guard sendGeneration==configurationGeneration,self.configuration==configuration,!Task.isCancelled,
                       selectedPeer==recipientUserID,selectedGroup==showingFamilyGroup else {return false}
             } catch {
                 guard sendGeneration==configurationGeneration else {return false}
-                lastError="Sicherer Versand nicht verfügbar oder ein früherer Versand ist noch offen."
+                lastError="Sicherer Versand nicht verfügbar oder Versandwarteschlange voll."
                 return false
             }
         }
@@ -1050,6 +1074,8 @@ final class ChatModel {
             }
         }
         let groupID = UUID().uuidString.lowercased()
+        if isFamilyCredentialActive {stagingChatID=groupID}
+        var handedOff=false
         var localMessage = ChatMessage(
             id: groupID,
             senderUserID: configuration.userID,
@@ -1063,7 +1089,7 @@ final class ChatModel {
         )
         localMessage.conversationID = selectedGroup ? "family" : nil
         do {
-            try await commitHistoryMutation(generation:sendGeneration) { appendMessage(localMessage) }
+            try await commitHistoryMutation(generation:sendGeneration) { try appendMessage(localMessage) }
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
@@ -1122,9 +1148,19 @@ final class ChatModel {
                 guard messages.contains(where:{$0.id==groupID && $0.direction == .outgoing}) else {
                     throw ChatHistoryError.invalidArchive
                 }
-                try outbox.stage(groupID:groupID,recipients:recipients,envelopes:staged)
-                applyPendingChatState(try outbox.pending())
-                try await flushChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
+                try outbox.enqueue(groupID:groupID,recipients:recipients,envelopes:staged)
+                // The journal owns the exact signed group now, even if a
+                // subsequent read or network call fails. Never offer a new ID.
+                handedOff=true
+                pendingChatGroupIDs.insert(groupID)
+                try reloadChatOutboxState(outbox)
+                if pendingChatSendID==groupID {
+                    try await flushChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
+                } else {
+                    // A new send is not authorization to replay an older
+                    // ambiguous head. Explicit action is required in settings.
+                    lastError=nil
+                }
                 return true
             }
             do {
@@ -1136,13 +1172,17 @@ final class ChatModel {
             return true
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
-            try? await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.failed) }
+            if !handedOff {
+                try? await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.failed) }
+            } else if let outbox=try? openChatOutbox(configuration:configuration,keys:keys) {
+                try? reloadChatOutboxState(outbox)
+            }
             guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
             // Once this exact group is durable, the composer has handed it
             // off to the journal, even if the network outcome is uncertain.
             // Do not invite the user to resend the same draft as a new ID.
-            return pendingChatSendID==groupID && isFamilyCredentialActive
+            return handedOff && isFamilyCredentialActive
         }
     }
 
@@ -1150,15 +1190,16 @@ final class ChatModel {
     // restart. The same signed envelopes are reused, never encrypted again.
     /// Explicit, local-only closure of an expired uncertain send. A queued
     /// fragment may already have arrived: never claim non-delivery or resend.
-    func closeExpiredChatSend() async {
+    func closeExpiredChatSend(expectedGroupID:String) async {
         guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
               let configuration,let keys else {return}
         let generation=configurationGeneration
         isSending=true
-        defer {isSending=false}
+        defer {if generation==configurationGeneration {isSending=false}}
         do {
             let outbox=try openChatOutbox(configuration:configuration,keys:keys)
-            guard let pending=try outbox.expiredPending() else {throw ChatHistoryError.busy}
+            try reloadChatOutboxState(outbox)
+            guard let pending=try outbox.expiredPending(),pending.groupID==expectedGroupID else {throw ChatHistoryError.busy}
             try await commitHistoryMutation(generation:generation) {
                 guard messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing &&
                     $0.senderUserID==configuration.userID}) else {throw ChatHistoryError.invalidArchive}
@@ -1167,7 +1208,7 @@ final class ChatModel {
             try Task.checkCancellation()
             guard generation==configurationGeneration,self.configuration==configuration else {return}
             try outbox.closeExpiredAfterHistoryCommit(groupID:pending.groupID)
-            applyPendingChatState(nil)
+            try reloadChatOutboxState(outbox)
             lastError="Versandauftrag abgeschlossen. Eine frühere Zustellung kann nicht ausgeschlossen werden."
         } catch {
             guard generation==configurationGeneration else {return}
@@ -1175,16 +1216,16 @@ final class ChatModel {
         }
     }
 
-    func retryPendingChatSend() async {
+    func retryPendingChatSend(expectedGroupID:String) async {
         guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
               let configuration,let keys else {return}
         let generation=configurationGeneration
         isSending=true
-        defer {isSending=false}
+        defer {if generation==configurationGeneration {isSending=false}}
         do {
             let outbox=try openChatOutbox(configuration:configuration,keys:keys)
-            applyPendingChatState(try outbox.pending())
-            guard pendingChatSendID != nil else {return}
+            try reloadChatOutboxState(outbox)
+            guard pendingChatSendID==expectedGroupID else {throw ChatHistoryError.busy}
             try await flushChatOutbox(outbox,configuration:configuration,generation:generation)
             if generation==configurationGeneration {lastError=nil}
         } catch {
@@ -1238,7 +1279,7 @@ final class ChatModel {
                 let receipt=try await relay.sendWithReceipt(envelope,configuration:configuration)
                 try requireCurrent()
                 try outbox.confirm(envelope,receipt:receipt)
-                applyPendingChatState(try outbox.pending())
+                try reloadChatOutboxState(outbox)
             }
         }
         try await commitHistoryMutation(generation:generation) {
@@ -1249,7 +1290,7 @@ final class ChatModel {
         }
         try requireCurrent()
         try outbox.finishAfterHistoryCommit(groupID:pending.groupID)
-        applyPendingChatState(nil)
+        try reloadChatOutboxState(outbox)
     }
 
     func loadMemberTickets() async {
@@ -1550,23 +1591,32 @@ final class ChatModel {
             delivery: .received
         )
         receivedMessage.conversationID = partial.conversationID
-        appendMessage(receivedMessage)
+        try appendMessage(receivedMessage)
         seenEnvelopeIDs[envelope.id] = now
     }
 
     private func updateDelivery(id: String, to delivery: ChatMessage.Delivery) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = messages.firstIndex(where: { $0.id == id && $0.direction == .outgoing }) else { return }
         messages[index].delivery = delivery
     }
 
-    private func appendMessage(_ message: ChatMessage) {
-        messages.append(message)
-        var totalBytes = messages.reduce(0) { $0 + $1.data.count }
-        while messages.count > 200 || totalBytes > 160 * 1024 * 1024 {
-            guard !messages.isEmpty else { break }
-            guard let evict=messages.firstIndex(where:{$0.id != pendingChatSendID}) else {break}
-            totalBytes -= messages.remove(at:evict).data.count
+    private func appendMessage(_ message: ChatMessage) throws {
+        // If the encrypted outbox cannot be read, its protected history IDs
+        // are unknown. Do not mutate/acknowledge history in that condition.
+        if isFamilyCredentialActive && chatOutboxBlocked {throw ChatHistoryError.invalidArchive}
+        var next=messages
+        next.append(message)
+        var protected=pendingChatGroupIDs
+        if let stagingChatID {protected.insert(stagingChatID)}
+        if isFamilyCredentialActive {protected.insert(message.id)}
+        var totalBytes=next.reduce(0) {$0+$1.data.count}
+        while next.count > 200 || totalBytes > 160 * 1024 * 1024 {
+            guard let evict=next.firstIndex(where:{!protected.contains($0.id)}) else {
+                throw ChatHistoryError.capacity
+            }
+            totalBytes -= next.remove(at:evict).data.count
         }
+        messages=next
     }
 
     private func restoreConfiguration() {
