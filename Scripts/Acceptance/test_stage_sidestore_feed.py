@@ -3,20 +3,36 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import unittest
+import zipfile
+import plistlib
 from stage_sidestore_feed import stage, SOURCE, ASSET
-from verify_release_ipa import Checks
+from verify_release_ipa import Checks as MetadataFixture
+from verify_device_ipa import DeviceChecks as DeviceFixture
 
 class StageChecks(unittest.TestCase):
     def setUp(self):
-        self.fixture = Checks()
+        self.fixture = MetadataFixture()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
-        self.fixture.make()
         self.ipa = self.fixture.path
+        self.make_device_fixture(DeviceFixture.image())
         self.digest = hashlib.sha256(self.ipa.read_bytes()).hexdigest()
         self.feed = {'identifier':'de.nicofroeba16.iosnext.source','sourceURL':SOURCE,'apps':[{'bundleIdentifier':'de.nicofroeba16.iosnext','versions':[{'version':'1.7.3','buildVersion':'31','other':'preserve'}]}]}
         self.release = {'tag_name':'v1.8.0','draft':False,'prerelease':False,'published_at':'2026-11-19T00:00:00Z','assets':[{'name':'IOSNext.ipa','state':'uploaded','browser_download_url':ASSET,'size':self.ipa.stat().st_size,'digest':'sha256:'+self.digest}]}
         self.now = datetime(2026,11,19,12,tzinfo=timezone.utc)
+    def make_device_fixture(self, binary):
+        with zipfile.ZipFile(self.ipa, 'w') as archive:
+            archive.writestr('Payload/IOSNext.app/Info.plist', plistlib.dumps(self.fixture.info))
+            entry = zipfile.ZipInfo('Payload/IOSNext.app/IOSNext')
+            entry.create_system = 3
+            entry.external_attr = 0o100755 << 16
+            archive.writestr(entry, binary)
+    def test_reject_metadata_only_executable(self):
+        self.make_device_fixture(b'not a native executable')
+        with self.assertRaises(ValueError): self.call()
+    def test_reject_simulator_executable(self):
+        self.make_device_fixture(DeviceFixture.image(platform=7))
+        with self.assertRaises(ValueError): self.call()
     def call(self, **changes):
         raw = json.dumps(self.feed).encode()
         args = dict(raw=raw,expected_feed_sha=hashlib.sha256(raw).hexdigest(),ipa=self.ipa,build='42',broker=self.fixture.broker,approved_digest=self.digest,release=self.release,notes='- Fixture only',now=self.now)
