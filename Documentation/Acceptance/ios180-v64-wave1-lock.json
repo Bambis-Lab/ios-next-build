@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "scope": "V6.4 first development wave; not a release or a full gate attestation",
+  "source_heads": [
+    {
+      "branch": "feature/ios180-v64-bounded-cleanup",
+      "commit": "96a562fcb8c88d2d302bd7aef5c5c9373e9959ce",
+      "run": 44461930456,
+      "conclusion": "success",
+      "tests": 4
+    },
+    {
+      "branch": "feature/ios180-v64-distributed-preflight",
+      "commit": "e8f1c28a85723ace2922c7ceb186ab245d36ccc5",
+      "run": 44462007789,
+      "conclusion": "pending"
+    },
+    {
+      "branch": "feature/ios180-v64-isolated-relay",
+      "commit": "b47ad8b6302ffaea7af021a6bcee2a60074a160d",
+      "run": 44462307602,
+      "conclusion": "pending"
+    },
+    {
+      "branch": "feature/ios180-v64-write-fence",
+      "commit": "4fbdb1bd6e04c5c57331e3bbc8d2d5d527b80dc2",
+      "run": 44462109985,
+      "conclusion": "pending"
+    },
+    {
+      "branch": "feature/ios180-v63-proof-batch-checkpoint",
+      "commit": "1876de7a9f5f7a22a5d8f5e7a9c91f026ebd9990",
+      "run": 44461332280,
+      "conclusion": "pending"
+    }
+  ],
+  "audio_duration_seconds": [
+    30,
+    120,
+    300
+  ],
+  "diagnostics": {
+    "run": 44459508398,
+    "commit": "6d5a53058cc9fa2a988ff9991daeeadd83383a77",
+    "conclusion": "failure",
+    "bundle": "iosnext-v64-original-diagnostics-2026-11-19.zip",
+    "bundle_bytes": 11642171,
+    "bundle_sha256": "0daf14d699be8888d568be440ccc4c2b812aea83bde543539d700a606a8832d0",
+    "storage": "private user file library",
+    "originals": [
+      {
+        "artifact": 14500565729,
+        "sha256": "02031d80cdb1d1511e1bbb3b04bfe0a6cfaa80ac7d43434f69c4c661137f4ea4"
+      },
+      {
+        "artifact": 14500095165,
+        "sha256": "39a2af21f22d640b82118a9df507b60b1c58cfab653508678be6eaf3a947c99a"
+      },
+      {
+        "artifact": 14499137189,
+        "sha256": "2a33984b9e3fc80ef5f035d134ade22d3597c051e59eaeea433f1eb478a1bef5"
+      }
+    ],
+    "independent_hash_comparison": true,
+    "zip_crc_all_pass": true
+  },
+  "network": {
+    "github_runner_inventory": "connector endpoint denied",
+    "factory_host_control": false,
+    "authorized_distributed_relay_route": "not verified",
+    "native_media_tested": false
+  },
+  "limitations": [
+    "No external service was deployed. Relay contract intentionally binds only loopback.",
+    "Two separate macOS jobs are a prerequisite, not an accepted call. Result validation requires different host boot sessions.",
+    "New per-run relay is synthetic, not production authentication. Real relay provisioning, native role credential handoff, TLS tunnel and remote rendezvous pending.",
+    "G01/G02/G03/G04/G05/G99 and release remain open. No main merge."
+  ]
+}
