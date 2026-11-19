@@ -100,3 +100,31 @@ struct ChatPendingRecipientProof:Codable,Equatable,Sendable {
         return Self(proof:value,keyFingerprint:keyFingerprint,committedAt:committedAt)
     }
 }
+
+/// Pure batch transformations. The signed snapshot must be durably committed
+/// before HTTP, and a confirmed batch must be committed before forgetting it.
+enum ChatRecipientProofBatch {
+    static func prepare(_ candidates:[ChatPendingRecipientProof],in queue:[String:ChatPendingRecipientProof],
+                        keys:ChatDeviceKeys,configuration:ChatConfiguration) throws -> [String:ChatPendingRecipientProof] {
+        guard candidates.count<=8,Set(candidates.map{$0.proof.id}).count==candidates.count
+        else {throw ChatHistoryError.invalidArchive}
+        var updated=queue
+        for candidate in candidates {
+            guard queue[candidate.proof.id]==candidate else {throw ChatHistoryError.invalidArchive}
+            updated[candidate.proof.id]=try candidate.signed(using:keys,configuration:configuration)
+        }
+        return updated
+    }
+
+    static func completing(_ confirmed:[ChatPendingRecipientProof],in queue:[String:ChatPendingRecipientProof]) throws -> [String:ChatPendingRecipientProof] {
+        guard confirmed.count<=8,Set(confirmed.map{$0.proof.id}).count==confirmed.count
+        else {throw ChatHistoryError.invalidArchive}
+        var updated=queue
+        for item in confirmed {
+            guard !item.proof.signature.isEmpty,queue[item.proof.id]==item
+            else {throw ChatHistoryError.invalidArchive}
+            updated.removeValue(forKey:item.proof.id)
+        }
+        return updated
+    }
+}

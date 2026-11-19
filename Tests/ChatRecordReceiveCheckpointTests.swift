@@ -88,4 +88,42 @@ final class ChatRecordReceiveCheckpointTests: XCTestCase {
         try persisted.proof.verify(expectedID:e.id,expectedDigest:ChatSendReceiptV1.digest(e),
             senderUser:a.userID,senderDevice:a.deviceID,recipient:b)
     }
+
+    @MainActor
+    func testProofBatchCrashAfterPartialRemoteSuccessPreservesExactSignatures() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let file=root.appendingPathComponent("batch.enc"),scope=Data("batch-fixture".utf8),key=Data(repeating:18,count:32)
+        let sender=ChatDeviceKeys(agreement:.init(),signing:.init()),receiver=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let a=sender.publicIdentity(userID:"fixture-a",deviceID:"ios-a"),b=receiver.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let config=ChatConfiguration(baseURL:try XCTUnwrap(URL(string:"https://example.invalid")),token:"synthetic",userID:b.userID,deviceID:b.deviceID)
+        let now=Date(),stamp=ISO8601DateFormatter().string(from:now)
+        var claims:[ChatPendingRecipientProof]=[]
+        for i in 0..<8 {
+            let e=try sender.encrypt(Data("fragment-\(i)".utf8),kind:.text,contentType:"text/plain",groupID:"fixture-batch",
+                chunkIndex:i,chunkCount:8,sender:a,recipient:b,createdAt:stamp)
+            claims.append(ChatPendingRecipientProof(proof:try ChatRecipientProofV1.unsignedClaim(e),keyFingerprint:receiver.safetyNumber,committedAt:now))
+        }
+        func open() throws -> ChatHistoryArchive {try ChatHistoryArchive(file:file,scope:scope,keyData:key)}
+        let initial=Dictionary(uniqueKeysWithValues:claims.map{($0.proof.id,$0)})
+        try open().save(initial)
+        XCTAssertThrowsError(try ChatRecipientProofBatch.prepare(claims,in:initial,keys:sender,configuration:config))
+        XCTAssertThrowsError(try ChatRecipientProofBatch.prepare(claims+[claims[0]],in:initial,keys:receiver,configuration:config))
+        XCTAssertEqual(try open().load([String:ChatPendingRecipientProof].self),initial)
+        let prepared=try ChatRecipientProofBatch.prepare(claims,in:initial,keys:receiver,configuration:config)
+        try open().save(prepared)
+        let restored=try XCTUnwrap(open().load([String:ChatPendingRecipientProof].self))
+        let signed=try claims.map{try XCTUnwrap(restored[$0.proof.id])}
+        XCTAssertTrue(signed.allSatisfy{!$0.proof.signature.isEmpty})
+        // Simulated crash after the first four HTTP successes: no removal yet.
+        XCTAssertEqual(try ChatRecipientProofBatch.prepare(signed,in:restored,keys:receiver,configuration:config),prepared)
+        XCTAssertThrowsError(try ChatRecipientProofBatch.completing([claims[0]],in:restored))
+        let next=try ChatRecipientProofBatch.completing(Array(signed.prefix(4)),in:restored)
+        try open().save(next)
+        XCTAssertEqual(try open().load([String:ChatPendingRecipientProof].self),next)
+        XCTAssertEqual(next.count,4)
+        for item in signed.suffix(4) {XCTAssertEqual(next[item.proof.id],item)}
+        XCTAssertThrowsError(try ChatRecipientProofBatch.completing([signed[0]],in:next))
+    }
 }

@@ -1642,28 +1642,43 @@ final class ChatModel {
         if let cursor=recipientProofSubmitCursor {
             ordered=sorted.filter{$0.proof.id>cursor}+sorted.filter{$0.proof.id<=cursor}
         } else {ordered=sorted}
-        for pending in ordered.prefix(8) {
-            recipientProofSubmitCursor=pending.proof.id
-            try requireCurrent()
-            let signed=try pending.signed(using:keys,configuration:configuration)
-            if signed != pending {
-                try await commitHistoryMutation(generation:generation) {
-                    guard pendingRecipientProofs[pending.proof.id]==pending else {throw ChatHistoryError.invalidArchive}
-                    pendingRecipientProofs[pending.proof.id]=signed
-                }
+        let candidates=Array(ordered.prefix(8))
+        guard !candidates.isEmpty else {return}
+        try requireCurrent()
+        if candidates.contains(where:{$0.proof.signature.isEmpty}) {
+            try await commitHistoryMutation(generation:generation) {
+                // The gate may have waited behind another history mutation.
+                pendingRecipientProofs=try ChatRecipientProofBatch.prepare(candidates,
+                    in:pendingRecipientProofs,keys:keys,configuration:configuration)
             }
+        }
+        // Reload the exact persisted signatures (CryptoKit need not generate
+        // identical signature bytes for the same message on successive calls).
+        try requireCurrent()
+        let batch=try candidates.map { candidate -> ChatPendingRecipientProof in
+            guard let signed=pendingRecipientProofs[candidate.proof.id],!signed.proof.signature.isEmpty,
+                  signed.proof.envelopeSHA256==candidate.proof.envelopeSHA256
+            else {throw ChatHistoryError.invalidArchive}
+            return try signed.signed(using:keys,configuration:configuration)
+        }
+        var confirmed:[ChatPendingRecipientProof]=[]
+        for signed in batch {
             try requireCurrent()
+            recipientProofSubmitCursor=signed.proof.id
             do {
                 try await relay.submitRecipientProof(signed.proof,configuration:configuration)
             } catch ChatError.rejected(let code) where [403,409,422,503].contains(code) {
-                // Sender revoked, missing old binding or capability withdrawn:
-                // retain the exact claim; never assert remote delivery.
+                // Retain ambiguous or unavailable claims exactly as signed.
                 continue
             }
             try requireCurrent()
+            confirmed.append(signed)
+        }
+        // If a connection fails halfway through, all signed claims remain
+        // durable. Earlier successful submissions can be replayed exactly.
+        if !confirmed.isEmpty {
             try await commitHistoryMutation(generation:generation) {
-                guard pendingRecipientProofs[signed.proof.id]==signed else {throw ChatHistoryError.invalidArchive}
-                pendingRecipientProofs.removeValue(forKey:signed.proof.id)
+                pendingRecipientProofs=try ChatRecipientProofBatch.completing(confirmed,in:pendingRecipientProofs)
             }
         }
     }
