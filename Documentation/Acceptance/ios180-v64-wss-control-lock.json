@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "scope": "V6.4 local WSS control and independent native preflight; no G03 claim",
+  "native_role": {
+    "commit": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+    "run": 44463085229,
+    "conclusion": "success",
+    "independent_host_boot_sessions": true,
+    "identical_build_checksums": true,
+    "preflight_overlap": true,
+    "media_tested": false
+  },
+  "ticket": {
+    "commit": "4fbdb1bd6e04c5c57331e3bbc8d2d5d527b80dc2",
+    "run": 44462109985,
+    "conclusion": "success",
+    "swift": 135,
+    "ui": 3
+  },
+  "tls": {
+    "failed_run": 44465405075,
+    "failed_commit": "818b9d61f34e01429dc6d6d1a0ed9e9bcf14f10e",
+    "reason": "missing authority key identifier",
+    "fixed_commit": "f8bc03ccb618040425571a922b28026aa286adf8",
+    "run": 44465527658,
+    "conclusion": "success"
+  },
+  "control": {
+    "commit": "325e5f12412bdd1ff26645cffd97082177409bbf",
+    "run": 44465634961,
+    "conclusion": "success",
+    "native": false,
+    "transport": "isolated loopback WSS",
+    "duration_seconds": 30,
+    "clients": [
+      {
+        "role": "A",
+        "sent": 1500,
+        "received": 1500,
+        "elapsed_seconds": 30.0028,
+        "renewals": 2
+      },
+      {
+        "role": "B",
+        "sent": 1500,
+        "received": 1500,
+        "elapsed_seconds": 30.003,
+        "renewals": 2
+      }
+    ],
+    "artifact": 14501613182,
+    "sha256": "1d80192607793ace9961d7bcdb48e93257c1fb22d9f2488c22a12bca9cbfb322",
+    "zip_crc_verified": true,
+    "independent_hash_verified": true
+  },
+  "bundle": {
+    "file": "iosnext-v64-wss-and-role-evidence-2026-11-19.zip",
+    "sha256": "dca0270a61b5cae287ec458a38d18e564405744a34bbea6dd62a3d757d5f7d07",
+    "bytes": 11840875,
+    "original_archives": 8,
+    "independent_hash_verified": true,
+    "zip_crc_verified": true
+  },
+  "limitations": [
+    "No authorized runner-spanning relay route has been verified. WSS gateway binds loopback only.",
+    "The Python local control does not prove native media, microphone routing, or audio quality.",
+    "G01 G02 G03 G04 G05 G99 and release remain unaccepted. No production changes."
+  ]
+}
