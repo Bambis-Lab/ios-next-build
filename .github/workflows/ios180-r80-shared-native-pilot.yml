@@ -100,6 +100,9 @@ jobs:
           print("IOS173_INTEGRATION_SOURCE=PASS; CHAT_ROUTING_FIXED; OWNER_BYPASS=DENIED; LIVE_E2E=UNVERIFIED")
           PY
 
+      - name: Exercise fail-closed shared native evidence validator
+        run: python3 Scripts/Acceptance/verify_shared_native.py self-test
+
   build:
     needs: source
     runs-on: xcode-27
@@ -495,6 +498,27 @@ jobs:
             echo "::error::iOS 27 Simulator did not boot; XCTest correctly blocked"
             exit 1
           fi
+      - name: Bind regression shard to verified product and boot session
+        shell: bash
+        env:
+          REGRESSION_SHARD: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess, uuid
+          from pathlib import Path
+          root = Path("build/ios173")
+          boot = subprocess.check_output(["sysctl", "-n", "kern.bootsessionuuid"], timeout=10, text=True).strip()
+          uuid.UUID(boot)
+          uid = os.environ["SIM_ID"]
+          uuid.UUID(uid)
+          digest = (root / "handoff/SHA256SUMS").read_text().split()[0]
+          if not re.fullmatch("[0-9a-f]{64}", digest):
+              raise RuntimeError("Missing verified build digest")
+          record = {"source": os.environ["GITHUB_SHA"], "run": os.environ["GITHUB_RUN_ID"], "attempt": os.environ["GITHUB_RUN_ATTEMPT"], "shard": os.environ["REGRESSION_SHARD"], "simulator": uid, "build_sha256": digest, "host_boot_sha256": hashlib.sha256(boot.encode()).hexdigest()}
+          (root / "regression-binding.json").write_text(json.dumps(record, indent=2) + "\n")
+          PY
       - name: Test clean installation before any other app tests
         id: clean_install
         if: matrix.shard == 'CF'
@@ -650,6 +674,7 @@ jobs:
             build/ios173/CleanInstall.xcresult
             build/ios173/OwnerNavigation.log
             build/ios173/OwnerNavigation.xcresult
+            build/ios173/regression-binding.json
             build/ios173/OwnerNavigation-summary.json
             build/ios173/CleanInstall-summary.json
             build/ios173/IndependentServices-summary.json
@@ -695,6 +720,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Record exact source and terminal prerequisite outcomes
         env:
           SOURCE_RESULT: ${{ needs.source.result }}
@@ -713,11 +739,25 @@ jobs:
           if any(v != "success" for v in jobs.values()):
               raise SystemExit("Required prerequisite job unsuccessful")
           PY
+      - name: Fetch independent offline role validation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: V64-preflight-validation
+          path: build/r80-evidence/V64-preflight-validation
+      - name: Fetch both regression shards from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: R80-regression-*
+          path: build/r80-evidence
+      - name: Enforce shared product, exact native results and four independent host identities
+        run: python3 Scripts/Acceptance/verify_shared_native.py build/r80-evidence r80-native-proof.json
       - name: Preserve terminal outcomes
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: R80-aggregate
-          path: r80-aggregate.json
+          path: |
+            r80-aggregate.json
+            r80-native-proof.json
           if-no-files-found: error
           retention-days: 14
