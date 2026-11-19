@@ -23,7 +23,7 @@ final class ChatRecipientProofLedger {
     }
     struct Group:Codable,Equatable {
         let id:String
-        let fragments:[Fragment]
+        var fragments:[Fragment]
     }
     private struct Snapshot:Codable {
         let version:Int
@@ -89,6 +89,22 @@ final class ChatRecipientProofLedger {
         try archive.save(snapshot)
     }
 
+    /// Reserve metadata budget before any new group is submitted, including
+    /// all already queued groups. This is a read-only preflight; the caller
+    /// serializes sends and retains the authenticated outbox as the reservation.
+    func requireCapacity(groupSizes:[String:Int],retaining retainedGroupIDs:Set<String>) throws {
+        guard groupSizes.keys.allSatisfy({retainedGroupIDs.contains($0) && EncryptedTicketMessage.validID($0)}),
+              groupSizes.values.allSatisfy({(1...1024).contains($0)}) else {throw ChatHistoryError.invalidArchive}
+        var counts=Dictionary(uniqueKeysWithValues:try load().groups
+            .filter{retainedGroupIDs.contains($0.id)}.map{($0.id,$0.fragments.count)})
+        for (id,count) in groupSizes {
+            if let existing=counts[id],existing != count {throw ChatHistoryError.invalidArchive}
+            counts[id]=count
+        }
+        guard counts.count<=Self.maximumGroups,
+              counts.values.reduce(0,+)<=Self.maximumFragments else {throw ChatHistoryError.capacity}
+    }
+
     /// Caller passes an authenticated outbox snapshot; incomplete or uncertain
     /// heads must remain in the outbox and cannot become delivery expectations.
     func registerConfirmed(_ pending:DurableChatOutbox.Pending, retaining retainedGroupIDs:Set<String>?=nil) throws {
@@ -126,32 +142,46 @@ final class ChatRecipientProofLedger {
     }
 
     /// Batch processing is atomic: one unknown or invalid proof changes nothing.
+    private func updating(_ proofs:[ChatRecipientProofV1],snapshot:Snapshot) throws -> Snapshot {
+        var updated=snapshot
+        var locations:[String:(Int,Int)]=[:]
+        for i in snapshot.groups.indices {
+            for j in snapshot.groups[i].fragments.indices {
+                locations[snapshot.groups[i].fragments[j].id]=(i,j)
+            }
+        }
+        for proof in proofs {
+            guard let (i,j)=locations[proof.id] else {throw ChatHistoryError.invalidArchive}
+            let fragment=updated.groups[i].fragments[j]
+            try verify(proof,fragment:fragment)
+            if let old=fragment.proof,old != proof {throw ChatHistoryError.invalidArchive}
+            updated.groups[i].fragments[j].proof=proof
+        }
+        return updated
+    }
+
     func apply(_ proofs:[ChatRecipientProofV1]) throws {
         guard (1...256).contains(proofs.count),Set(proofs.map(\.id)).count==proofs.count
         else {throw ChatHistoryError.invalidArchive}
-        var snapshot=try load()
-        for proof in proofs {
-            guard let i=snapshot.groups.firstIndex(where:{$0.fragments.contains(where:{$0.id==proof.id})}),
-                  let j=snapshot.groups[i].fragments.firstIndex(where:{$0.id==proof.id})
-            else {throw ChatHistoryError.invalidArchive}
-            var entries=snapshot.groups[i].fragments
-            try verify(proof,fragment:entries[j])
-            if let old=entries[j].proof,old != proof {throw ChatHistoryError.invalidArchive}
-            entries[j].proof=proof
-            snapshot.groups[i]=Group(id:snapshot.groups[i].id,fragments:entries)
-        }
-        try save(snapshot)
+        let next=try updating(proofs,snapshot:load())
+        try save(next)
     }
 
-    /// A query can be in flight while the history retires an old group.
-    /// Reject unsolicited IDs; ignore only requested IDs no longer retained.
-    func applyQuery(_ proofs:[ChatRecipientProofV1],requested:[String]) throws {
+    /// A query can be in flight while history retires an old group. Only
+    /// solicited IDs may be ignored. Reload after network suspension, then
+    /// verify and commit a single atomic batch and reuse its verified summary.
+    @discardableResult
+    func applyQuery(_ proofs:[ChatRecipientProofV1],requested:[String]) throws -> [String:ChatRecipientProofSummary] {
         guard (1...256).contains(requested.count),Set(requested).count==requested.count,
               proofs.count<=requested.count,Set(proofs.map(\.id)).count==proofs.count,
               Set(proofs.map(\.id)).isSubset(of:Set(requested)) else {throw ChatHistoryError.invalidArchive}
-        let known=Set(try load().groups.flatMap(\.fragments).map(\.id))
+        let snapshot=try load()
+        let known=Set(snapshot.groups.flatMap(\.fragments).map(\.id))
         let applicable=proofs.filter{known.contains($0.id)}
-        if !applicable.isEmpty {try apply(applicable)}
+        guard !applicable.isEmpty else {return summaries(snapshot)}
+        let next=try updating(applicable,snapshot:snapshot)
+        try save(next)
+        return summaries(next)
     }
 
     func unconfirmedIDs(limit:Int=256) throws -> [String] {
@@ -163,16 +193,24 @@ final class ChatRecipientProofLedger {
     /// recipient cannot starve later messages.
     func nextUnconfirmedIDs(after cursor:String?,limit:Int=256) throws -> [String] {
         guard (1...256).contains(limit) else {throw ChatHistoryError.invalidArchive}
-        let ids=try load().groups.flatMap(\.fragments).filter{$0.proof==nil}.map(\.id).sorted()
-        guard let cursor else {return Array(ids.prefix(limit))}
-        let later=ids.filter{$0>cursor}
-        let earlier=ids.filter{$0<=cursor}
-        return Array((later+earlier).prefix(limit))
+        return try pollPage(after:cursor,limit:limit).ids
     }
 
-    func summaries() throws -> [String:ChatRecipientProofSummary] {
+    func pollPage(after cursor:String?,limit:Int=256) throws -> (ids:[String],summaries:[String:ChatRecipientProofSummary]) {
+        guard (1...256).contains(limit) else {throw ChatHistoryError.invalidArchive}
+        let snapshot=try load()
+        let ids=snapshot.groups.flatMap(\.fragments).filter{$0.proof==nil}.map(\.id).sorted()
+        let ordered:[String]
+        if let cursor {ordered=ids.filter{$0>cursor}+ids.filter{$0<=cursor}}
+        else {ordered=ids}
+        return (Array(ordered.prefix(limit)),summaries(snapshot))
+    }
+
+    func summaries() throws -> [String:ChatRecipientProofSummary] {try summaries(load())}
+
+    private func summaries(_ snapshot:Snapshot) -> [String:ChatRecipientProofSummary] {
         var result:[String:ChatRecipientProofSummary]=[:]
-        for group in try load().groups {
+        for group in snapshot.groups {
             let users=Dictionary(grouping:group.fragments,by:{$0.recipient.userID})
             let devices=Dictionary(grouping:group.fragments,by:{$0.recipient.deviceID})
             result[group.id]=ChatRecipientProofSummary(

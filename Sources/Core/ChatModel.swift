@@ -1209,6 +1209,17 @@ final class ChatModel {
                 guard messages.contains(where:{$0.id==groupID && $0.direction == .outgoing}) else {
                     throw ChatHistoryError.invalidArchive
                 }
+                let proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+                try Task.checkCancellation()
+                guard sendGeneration==configurationGeneration,self.configuration==configuration,
+                      isFamilyCredentialActive else {throw CancellationError()}
+                if proofEnabled {
+                    var reserved=Dictionary(uniqueKeysWithValues:try outbox.pendingGroups().map{($0.groupID,$0.entries.count)})
+                    reserved[groupID]=staged.count
+                    let retained=Set(messages.filter{$0.direction == .outgoing}.map(\.id)).union(reserved.keys)
+                    try openRecipientProofLedger(configuration:configuration,keys:keys)
+                        .requireCapacity(groupSizes:reserved,retaining:retained)
+                }
                 try outbox.enqueue(groupID:groupID,recipients:recipients,envelopes:staged)
                 // The journal owns the exact signed group now, even if a
                 // subsequent read or network call fails. Never offer a new ID.
@@ -1666,15 +1677,16 @@ final class ChatModel {
         try requireCurrent()
         guard let keys else {throw ChatHistoryError.missingKey}
         let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
-        let ids=try ledger.nextUnconfirmedIDs(after:recipientProofPollCursor)
-        if !ids.isEmpty {
-            let claims=try await relay.queryRecipientProofs(ids,configuration:configuration)
+        let page=try ledger.pollPage(after:recipientProofPollCursor)
+        if !page.ids.isEmpty {
+            let claims=try await relay.queryRecipientProofs(page.ids,configuration:configuration)
             try requireCurrent()
-            try ledger.applyQuery(claims,requested:ids)
-            recipientProofPollCursor=ids.last
+            recipientProofSummaries=try ledger.applyQuery(claims,requested:page.ids)
+            recipientProofPollCursor=page.ids.last
+        } else {
+            try requireCurrent()
+            recipientProofSummaries=page.summaries
         }
-        try requireCurrent()
-        recipientProofSummaries=try ledger.summaries()
     }
 
     private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration,proofEnabled:Bool=false) async throws {
