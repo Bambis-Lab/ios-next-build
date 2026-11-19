@@ -56,7 +56,7 @@ private struct DistributedAudioRole:Decodable {
         return value
     }
 
-    static func load(role:String,duration:Int64) throws -> Self {
+    static func readRoleFile() throws -> (Data,URL) {
         guard let dir=FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask).first
         else {throw FamilyAudioWireError.invalidCredential}
         let url=dir.appendingPathComponent("iosnext-v64-test-role.json")
@@ -66,6 +66,11 @@ private struct DistributedAudioRole:Decodable {
               let size=metadata.fileSize,size<=16384,
               let data=try? Data(contentsOf:url),data.count==size
         else {throw FamilyAudioWireError.invalidCredential}
+        return (data,url)
+    }
+
+    static func load(role:String,duration:Int64) throws -> Self {
+        let (data,_)=try readRoleFile()
         return try parse(data,role:role,duration:duration,now:Int(Date().timeIntervalSince1970))
     }
 
@@ -152,7 +157,8 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
     private func verifyOfflineRoleHandoff(_ role:String) throws {
         #if targetEnvironment(simulator)
         XCTAssertEqual(ProcessInfo.processInfo.operatingSystemVersion.majorVersion,27)
-        let contract=try DistributedAudioRole.load(role:role,duration:30)
+        let (raw,url)=try DistributedAudioRole.readRoleFile()
+        let contract=try DistributedAudioRole.parse(raw,role:role,duration:30,now:Int(Date().timeIntervalSince1970))
         XCTAssertEqual(try contract.endpoint().host,"fixture.invalid")
         let signing=try contract.signing()
         let challenge=Data("iosnext-v65-offline-handoff".utf8)
@@ -160,6 +166,15 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         XCTAssertThrowsError(try DistributedAudioRole.load(role:role=="A" ? "B" : "A",duration:30))
         XCTAssertThrowsError(try DistributedAudioRole.load(role:role,duration:120))
         // No URLSession or network transport is created by this test.
+        // Prove exact consumed fixture bytes and the actual native data container.
+        // The host keeps the receipt in a private result bundle; no key is printed.
+        let container=url.resolvingSymlinksInPath().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let cid=try XCTUnwrap(UUID(uuidString:container.lastPathComponent)).uuidString.lowercased()
+        let digest=SHA256.hash(data:raw).map {String(format:"%02x",$0)}.joined()
+        let payload=Data("iosnext-sr22-offline-v1|\(contract.callID)|\(role)|30|\(cid)|\(digest)".utf8)
+        let receipt=try signing.signature(for:payload).base64EncodedString()
+        print("SR22_NATIVE_RECEIPT container=\(cid) signature=\(receipt)")
         print("V65_OFFLINE_NATIVE_ROLE_HANDOFF=PASS role=\(role)")
         #else
         XCTFail("Simulator only")
