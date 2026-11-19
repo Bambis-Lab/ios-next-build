@@ -1952,7 +1952,7 @@ extension ChatModel {
            TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:generation,
               currentGeneration:configurationGeneration,requestScope:scope,activeScope:ticketReadFence.scope) {
             resetTicketReadAccess()
-            if scope.owner {app.clearFamilyOwnerSession()}
+            // Owner approval is requested anew by AppModel; no cached owner session exists here.
         }
     }
 
