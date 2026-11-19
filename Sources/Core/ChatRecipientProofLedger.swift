@@ -3,6 +3,14 @@ import Foundation
 /// Local-only sender expectations. These are created from a fully confirmed
 /// outbox head before that head can be forgotten. No server-provided roster
 /// or replacement key can change an existing expectation.
+struct ChatRecipientProofSummary:Equatable,Sendable {
+    let confirmedUsers:Int
+    let totalUsers:Int
+    let confirmedDevices:Int
+    let totalDevices:Int
+    var allConfirmed:Bool {totalDevices>0 && confirmedDevices==totalDevices && totalUsers>0 && confirmedUsers==totalUsers}
+}
+
 @MainActor
 final class ChatRecipientProofLedger {
     struct Fragment:Codable,Equatable {
@@ -130,6 +138,29 @@ final class ChatRecipientProofLedger {
     func unconfirmedIDs(limit:Int=256) throws -> [String] {
         guard (1...256).contains(limit) else {throw ChatHistoryError.invalidArchive}
         return Array(try load().groups.flatMap(\.fragments).filter{$0.proof==nil}.map(\.id).prefix(limit))
+    }
+
+    /// Rotate across unresolved IDs, not just the oldest page, so an offline
+    /// recipient cannot starve later messages.
+    func nextUnconfirmedIDs(after cursor:String?,limit:Int=256) throws -> [String] {
+        guard (1...256).contains(limit) else {throw ChatHistoryError.invalidArchive}
+        let ids=try load().groups.flatMap(\.fragments).filter{$0.proof==nil}.map(\.id).sorted()
+        guard let cursor else {return Array(ids.prefix(limit))}
+        let later=ids.filter{$0>cursor}
+        let earlier=ids.filter{$0<=cursor}
+        return Array((later+earlier).prefix(limit))
+    }
+
+    func summaries() throws -> [String:ChatRecipientProofSummary] {
+        var result:[String:ChatRecipientProofSummary]=[:]
+        for group in try load().groups {
+            let users=Dictionary(grouping:group.fragments,by:{$0.recipient.userID})
+            let devices=Dictionary(grouping:group.fragments,by:{$0.recipient.deviceID})
+            result[group.id]=ChatRecipientProofSummary(
+                confirmedUsers:users.values.filter{$0.allSatisfy{$0.proof != nil}}.count,totalUsers:users.count,
+                confirmedDevices:devices.values.filter{$0.allSatisfy{$0.proof != nil}}.count,totalDevices:devices.count)
+        }
+        return result
     }
 
     /// A device is complete only when every expected fragment is attested.

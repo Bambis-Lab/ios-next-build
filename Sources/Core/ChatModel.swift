@@ -92,12 +92,26 @@ final class ChatModel {
     @ObservationIgnored private let historyMutationGate = ChatHistoryMutationGate()
     private var partialMessages: [String: PartialMessage] = [:]
     private var pendingRecipientProofs:[String:ChatPendingRecipientProof]=[:]
+    private(set) var recipientProofSummaries:[String:ChatRecipientProofSummary]=[:]
+    private var recipientProofPollCursor:String?
+    private var recipientProofSubmitCursor:String?
 
     private func openChatOutbox(configuration:ChatConfiguration,keys:ChatDeviceKeys) throws -> DurableChatOutbox {
         let scope=ChatOutboxScope(endpoint:configuration.baseURL,user:configuration.userID,
             device:configuration.deviceID,keyFingerprint:keys.safetyNumber)
         return try DurableChatOutbox(scope:scope,local:keys.publicIdentity(
             userID:configuration.userID,deviceID:configuration.deviceID))
+    }
+
+    private func openRecipientProofLedger(configuration:ChatConfiguration,keys:ChatDeviceKeys) throws -> ChatRecipientProofLedger {
+        try ChatRecipientProofLedger(scope:ChatOutboxScope(endpoint:configuration.baseURL,user:configuration.userID,
+            device:configuration.deviceID,keyFingerprint:keys.safetyNumber))
+    }
+
+    private func clearRecipientProofView() {
+        recipientProofSummaries=[:]
+        recipientProofPollCursor=nil
+        recipientProofSubmitCursor=nil
     }
 
     private func refreshChatOutboxState(configuration:ChatConfiguration,keys:ChatDeviceKeys) {
@@ -163,6 +177,7 @@ final class ChatModel {
         guard self.configuration == configuration, let keys else { throw CancellationError() }
         historyArchive=nil
         historyRecordCheckpoint=nil
+        clearRecipientProofView()
         // Clear decrypted state before even the marker/key lookup can throw.
         restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
         chatOutboxBlocked=true
@@ -696,6 +711,7 @@ final class ChatModel {
         readyOutboxTask?.cancel()
         readyOutboxTask=nil
         configurationGeneration &+= 1
+        clearRecipientProofView()
         resetTicketReadAccess()
         resetCalls()
         historyArchive = nil
@@ -839,6 +855,7 @@ final class ChatModel {
     }
 
     func stop() {
+        clearRecipientProofView()
         readyOutboxTask?.cancel()
         readyOutboxTask=nil
         applyPendingChatState([])
@@ -864,6 +881,7 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
+        clearRecipientProofView()
         readyOutboxTask?.cancel()
         readyOutboxTask=nil
         applyPendingChatState([])
@@ -1380,6 +1398,20 @@ final class ChatModel {
                 try reloadChatOutboxState(outbox)
             }
         }
+        // The final journal contains the exact timestamps/digests actually
+        // accepted by relay, including a possible ready-head timestamp renewal.
+        guard let confirmed=try outbox.pending(),confirmed.groupID==pending.groupID,
+              confirmed.entries.allSatisfy({$0.phase == .confirmed}) else {throw ChatHistoryError.invalidArchive}
+        let proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+        try requireCurrent()
+        if proofEnabled {
+            guard let keys else {throw ChatHistoryError.missingKey}
+            let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
+            // Complete expectations are written before forgetting the head.
+            // Capacity/error leaves the confirmed head intact, never replays it.
+            try ledger.registerConfirmed(confirmed)
+            recipientProofSummaries=try ledger.summaries()
+        }
         try await commitHistoryMutation(generation:generation) {
             guard messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing}) else {
                 throw ChatHistoryError.invalidArchive
@@ -1531,7 +1563,7 @@ final class ChatModel {
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
                 var proofEnabled=false
-                if ackMode && (!envelopes.isEmpty || !pendingRecipientProofs.isEmpty) {
+                if ackMode {
                     // Legacy ack_v1 continues without claiming recipient proofs.
                     proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
                     try Task.checkCancellation()
@@ -1555,6 +1587,7 @@ final class ChatModel {
                 }
                 if proofEnabled {
                     try await drainRecipientProofs(configuration:configuration,generation:generation)
+                    try await refreshRecipientProofs(configuration:configuration,generation:generation)
                 }
                 if invalidCount > 0 {
                     // Do not report or persist attacker-controlled ciphertext,
@@ -1589,9 +1622,14 @@ final class ChatModel {
         try requireCurrent()
         guard let keys else {throw ChatHistoryError.missingKey}
         // Bounded batches: never block message receive behind an unbounded queue.
-        let candidates=pendingRecipientProofs.values.sorted{$0.committedAt<$1.committedAt}
-            .filter{Date().timeIntervalSince($0.committedAt)<86400}.prefix(8)
-        for pending in candidates {
+        let sorted=pendingRecipientProofs.values.filter{Date().timeIntervalSince($0.committedAt)<86400}
+            .sorted{$0.proof.id<$1.proof.id}
+        let ordered:[ChatPendingRecipientProof]
+        if let cursor=recipientProofSubmitCursor {
+            ordered=sorted.filter{$0.proof.id>cursor}+sorted.filter{$0.proof.id<=cursor}
+        } else {ordered=sorted}
+        for pending in ordered.prefix(8) {
+            recipientProofSubmitCursor=pending.proof.id
             try requireCurrent()
             let signed=try pending.signed(using:keys,configuration:configuration)
             if signed != pending {
@@ -1614,6 +1652,26 @@ final class ChatModel {
                 pendingRecipientProofs.removeValue(forKey:signed.proof.id)
             }
         }
+    }
+
+    private func refreshRecipientProofs(configuration:ChatConfiguration,generation:UInt64) async throws {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,
+                  isFamilyCredentialActive,!historyMigrationInProgress else {throw CancellationError()}
+        }
+        try requireCurrent()
+        guard let keys else {throw ChatHistoryError.missingKey}
+        let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
+        let ids=try ledger.nextUnconfirmedIDs(after:recipientProofPollCursor)
+        if !ids.isEmpty {
+            let claims=try await relay.queryRecipientProofs(ids,configuration:configuration)
+            try requireCurrent()
+            if !claims.isEmpty {try ledger.apply(claims)}
+            recipientProofPollCursor=ids.last
+        }
+        try requireCurrent()
+        recipientProofSummaries=try ledger.summaries()
     }
 
     private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration,proofEnabled:Bool=false) async throws {

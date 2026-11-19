@@ -33,6 +33,11 @@ final class ChatRecipientProofLedgerTests:XCTestCase {
         uncertain.entries[0].phase = .uncertain
         XCTAssertThrowsError(try open().registerConfirmed(uncertain))
         try open().registerConfirmed(pending)
+        let page=try open().nextUnconfirmedIDs(after:nil,limit:2)
+        XCTAssertEqual(page.count,2)
+        let secondPage=try open().nextUnconfirmedIDs(after:page.last,limit:2)
+        XCTAssertEqual(Set(page+secondPage),Set(envelopes.map(\.id)))
+        XCTAssertFalse(try XCTUnwrap(open().summaries()[group]).allConfirmed)
         XCTAssertNil(try Data(contentsOf:file).range(of:Data(group.utf8)))
         try open().apply([proofs[0]])
         XCTAssertTrue(try open().confirmedDevices(groupID:group).isEmpty)
@@ -51,6 +56,10 @@ final class ChatRecipientProofLedgerTests:XCTestCase {
         XCTAssertEqual(try open().confirmedUsers(groupID:group),Set([b.userID]))
         XCTAssertEqual(try open().confirmedDevices(groupID:group),Set([b.deviceID,c.deviceID]))
         XCTAssertTrue(try open().unconfirmedIDs().isEmpty)
+        let summary=try XCTUnwrap(open().summaries()[group])
+        XCTAssertEqual(summary.confirmedDevices,2)
+        XCTAssertEqual(summary.confirmedUsers,1)
+        XCTAssertTrue(summary.allConfirmed)
         try open().apply([proofs[0]])
     }
 }

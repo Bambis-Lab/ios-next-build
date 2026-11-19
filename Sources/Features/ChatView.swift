@@ -225,7 +225,8 @@ struct ChatView: View {
                         .padding(.top, 60)
                     }
                     ForEach(chatModel.visibleMessages) { message in
-                        ChatBubble(message: message,locallyPending:message.direction == .outgoing && chatModel.pendingChatGroupIDs.contains(message.id))
+                        ChatBubble(message: message,locallyPending:message.direction == .outgoing && chatModel.pendingChatGroupIDs.contains(message.id),
+                             proofSummary:message.direction == .outgoing ? chatModel.recipientProofSummaries[message.id] : nil)
                             .id(message.id)
                     }
                 }
@@ -439,6 +440,7 @@ private struct InMemoryCameraPicker: UIViewControllerRepresentable {
 private struct ChatBubble: View {
     let message: ChatMessage
     let locallyPending:Bool
+    let proofSummary:ChatRecipientProofSummary?
 
     var body: some View {
         HStack {
@@ -448,8 +450,13 @@ private struct ChatBubble: View {
                 HStack(spacing: 4) {
                     Text(message.createdAt, format: .dateTime.hour().minute())
                     if message.direction == .outgoing {
+                        if !locallyPending,message.delivery == .queued,let proofSummary,proofSummary.totalUsers>1 {
+                            Text("\(proofSummary.confirmedUsers)/\(proofSummary.totalUsers) bestätigt")
+                                .accessibilityHidden(true)
+                        }
                         Image(systemName: deliverySymbol)
-                            .foregroundStyle(!locallyPending && (message.delivery == .failed || message.delivery == .unconfirmedExpired) ? .red : .secondary)
+                            .foregroundStyle(!locallyPending && (message.delivery == .failed || message.delivery == .unconfirmedExpired) ? .red :
+                                (!locallyPending && message.delivery == .queued && proofSummary?.allConfirmed == true ? .green : .secondary))
                             .accessibilityLabel(deliveryLabel)
                     }
                 }
@@ -498,6 +505,7 @@ private struct ChatBubble: View {
 
     private var deliverySymbol: String {
         if locallyPending {return "clock"}
+        if message.delivery == .queued && proofSummary?.allConfirmed == true {return "checkmark.seal.fill"}
         return switch message.delivery {
         case .sending: "clock"
         case .queued: "checkmark"
@@ -508,6 +516,10 @@ private struct ChatBubble: View {
 
     private var deliveryLabel:String {
         if locallyPending {return "Lokal gesichert, Versand ausstehend"}
+        if message.delivery == .queued, let proofSummary {
+            if proofSummary.allConfirmed {return "Alle Nachrichtenfragmente für alle Empfängergeräte kryptografisch bestätigt; nicht als gelesen markiert"}
+            return "\(proofSummary.confirmedUsers) von \(proofSummary.totalUsers) Empfängern vollständig bestätigt, \(proofSummary.confirmedDevices) von \(proofSummary.totalDevices) Geräten"
+        }
         return switch message.delivery {
         case .sending: "Versand läuft"
         case .queued: "Vom Relay angenommen, Zustellung nicht bestätigt"
