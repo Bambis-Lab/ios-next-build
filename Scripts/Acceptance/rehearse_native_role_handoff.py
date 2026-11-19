@@ -64,6 +64,20 @@ def native_result_status(tree,role):
     if len(cases)!=1 or len(exact)!=1: return "WRONG_TEST"
     return "PASS" if exact[0].get("result")=="Passed" else "NOT_PASSED"
 
+def destination_matches(summary,uid):
+    # Xcode 27 schema must be verified against actual runner output.
+    # Unknown schemas fail closed; never accept UUIDs from arbitrary text.
+    groups=summary.get("devicesAndConfigurations") if isinstance(summary,dict) else None
+    if not isinstance(groups,list) or not groups:
+        return False
+    device_ids=[]
+    for group in groups:
+        device=group.get("device") if isinstance(group,dict) else None
+        if not isinstance(device,dict) or not isinstance(device.get("deviceId"),str):
+            return False
+        device_ids.append(device["deviceId"].lower())
+    return set(device_ids)=={uid.lower()}
+
 def inspect_result(result,out,role,uid):
     stage("read_xcresult")
     require(result.is_dir(),"xcresult_missing")
@@ -72,7 +86,7 @@ def inspect_result(result,out,role,uid):
     tree=run_bounded(["xcrun","xcresulttool","get","test-results","tests","--path",str(result)],
         timeout=60,emit_output=False)
     status=native_result_status(json.loads(tree),role)
-    destination=uid.lower() in summary.lower()
+    destination=destination_matches(json.loads(summary),uid)
     # Export only fixed status fields, not raw logs, exception text or JSON.
     (out/"handoff-result-status.json").write_text(json.dumps({
         "role":role,"test_status":status,"destination_matches":destination,
@@ -102,7 +116,7 @@ def resolve_container(uid):
 def rehearse():
     stage("import_dependencies")
     from distributed_role_provisioning import generate
-    from native_role_handoff import install_role, read_private
+    from native_role_handoff import install_role
     stage("authorize_disposable_host")
     require(os.environ.get("GITHUB_ACTIONS")=="true" and
             os.environ.get("RUNNER_ENVIRONMENT")=="github-hosted","disposable_host_required")
@@ -143,6 +157,7 @@ def rehearse():
     print("V65_OFFLINE_ROLE_HANDOFF_COMPLETE role="+role)
 
 def execute_handoff(target,result,out,role,uid,container,raw,role_data):
+    from native_role_handoff import read_private
     try:
         stage("run_native_xctest")
         command_failed=False
@@ -208,6 +223,14 @@ def self_test():
             tree["testNodes"]*=2
             self.assertEqual(native_result_status(tree,"A"),"WRONG_TEST")
             self.assertEqual(native_result_status({"testNodes":[]},"A"),"WRONG_TEST")
+        def test_destination_exact(self):
+            uid="12345678-1234-1234-1234-123456789abc"
+            data={"devicesAndConfigurations":[{"device":{"deviceId":uid.upper()}}]}
+            self.assertTrue(destination_matches(data,uid))
+            data["devicesAndConfigurations"].append({"device":{"deviceId":"other"}})
+            self.assertFalse(destination_matches(data,uid))
+            self.assertFalse(destination_matches({"message":uid},uid))
+            self.assertFalse(destination_matches({"devicesAndConfigurations":[]},uid))
         def test_invalid_schema(self):
             with self.assertRaises(HandoffError):
                 native_result_status({},"A")
