@@ -142,6 +142,30 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         #endif
     }
 
+    @MainActor
+    func testOfflineRoleHandoffA() throws {try verifyOfflineRoleHandoff("A")}
+
+    @MainActor
+    func testOfflineRoleHandoffB() throws {try verifyOfflineRoleHandoff("B")}
+
+    @MainActor
+    private func verifyOfflineRoleHandoff(_ role:String) throws {
+        #if targetEnvironment(simulator)
+        XCTAssertEqual(ProcessInfo.processInfo.operatingSystemVersion.majorVersion,27)
+        let contract=try DistributedAudioRole.load(role:role,duration:30)
+        XCTAssertEqual(try contract.endpoint().host,"fixture.invalid")
+        let signing=try contract.signing()
+        let challenge=Data("iosnext-v65-offline-handoff".utf8)
+        XCTAssertTrue(signing.publicKey.isValidSignature(try signing.signature(for:challenge),for:challenge))
+        XCTAssertThrowsError(try DistributedAudioRole.load(role:role=="A" ? "B" : "A",duration:30))
+        XCTAssertThrowsError(try DistributedAudioRole.load(role:role,duration:120))
+        // No URLSession or network transport is created by this test.
+        print("V65_OFFLINE_NATIVE_ROLE_HANDOFF=PASS role=\(role)")
+        #else
+        XCTFail("Simulator only")
+        #endif
+    }
+
     private func frame(sequence:UInt64,marker:UInt8) -> Data {
         var seq=sequence.bigEndian
         return withUnsafeBytes(of:&seq) {Data($0)} + Data(repeating:marker,count:632)
