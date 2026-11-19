@@ -79,13 +79,15 @@ def serve():
             "fixture-b":SimpleNamespace(user_id=B[0],device_id=B[1],family_device=True,expires_at=100),
             "fixture-a-renewed":SimpleNamespace(user_id=A[0],device_id=A[1],family_device=True,expires_at=200),
             "fixture-b-renewed":SimpleNamespace(user_id=B[0],device_id=B[1],family_device=True,expires_at=200),
+            "fixture-a-renewed2":SimpleNamespace(user_id=A[0],device_id=A[1],family_device=True,expires_at=300),
+            "fixture-b-renewed2":SimpleNamespace(user_id=B[0],device_id=B[1],family_device=True,expires_at=300),
             "fixture-foreign":SimpleNamespace(user_id="foreign",device_id="ios-foreign",family_device=True,expires_at=100)}
     registry=SimpleNamespace(is_active=lambda u,d:(u,d) in (A,B))
     identities={A[0]:[{"device_id":A[1],"signing_public_key":b64(public(sa))}],
                 B[0]:[{"device_id":B[1],"signing_public_key":b64(public(sb))}]}
     calls=CallSignalling()
     # Only this synthetic acceptance fixture manufactures an already accepted call.
-    calls.calls[CID]={"id":CID,"caller":A,"callee":B,"state":"accepted","expires":time.monotonic()+600}
+    calls.calls[CID]={"id":CID,"caller":A,"callee":B,"state":"accepted","expires":time.monotonic()+1200}
     broker=SimpleNamespace(family_registry=registry,bootstrap_issuer=SimpleNamespace(verify=claims.get),
                            store=SimpleNamespace(chat_identities=lambda u:identities.get(u,[])),calls=calls)
     with audio_websocket(broker,port=PORT) as server:

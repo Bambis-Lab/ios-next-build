@@ -1,7 +1,7 @@
-name: iOS173 two independent native iPhone simulators WSS
+name: iOS173 two independent native iPhone simulators WSS 600s
 on:
   push:
-    branches: ['feature/ios173-v3-two-simulators']
+    branches: ['feature/ios173-v3-two-simulators-600s']
   workflow_dispatch:
 permissions:
   contents: read
@@ -184,7 +184,7 @@ jobs:
             echo "::error::iOS 27 Simulator did not boot; XCTest correctly blocked"
             exit 1
           fi
-      - name: Two independently booted native iPhone simulators WSS (10 seconds)
+      - name: Two independently booted native iPhone simulators WSS (600 seconds)
         shell: bash
         run: bash Scripts/Acceptance/run_native_wss_smoke.sh dual
       - name: Execute family authorization and navigation XCTest
@@ -248,7 +248,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: IOS173-Two-Independent-Simulators-Evidence
+          name: IOS173-Two-Independent-Simulators-600s-Evidence
           path: |
             build/ios173/dual-simulator/
             build/ios173/BuildForTesting.log
