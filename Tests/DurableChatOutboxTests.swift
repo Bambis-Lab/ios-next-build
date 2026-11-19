@@ -187,4 +187,62 @@ final class DurableChatOutboxTests:XCTestCase {
         XCTAssertEqual(try open().pending()?.entries.first?.envelope,renewed)
         XCTAssertEqual(try open().pending()?.entries.first?.phase,.uncertain)
     }
+
+    /// Measures scoped archive/outbox primitives, not full UI submission or
+    /// physical flash durability. All data and keys are disposable fixtures.
+    @MainActor
+    func testTextOutboxP95AndEightGroupRecovery() throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:root)}
+        let localKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=localKeys.publicIdentity(userID:"fixture-a",deviceID:"ios-a")
+        let peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),
+            user:local.userID,device:local.deviceID,keyFingerprint:localKeys.safetyNumber)
+        let aad=Data("fixture-performance".utf8), key=Data(repeating:42,count:32)
+        let clock=ContinuousClock()
+        func milliseconds(_ start:ContinuousClock.Instant)->Double {
+            let elapsed=start.duration(to:clock.now).components
+            return Double(elapsed.seconds)*1000+Double(elapsed.attoseconds)/1e15
+        }
+        func p95(_ values:[Double])->Double {
+            let sorted=values.sorted()
+            return sorted[max(0,Int(ceil(Double(sorted.count)*0.95))-1)]
+        }
+        var saveSamples:[Double]=[],reopenSamples:[Double]=[]
+        // 20 independent archives, 160 samples including a full FIFO.
+        // Each archive remains intact through all recovery samples.
+        for iteration in 0..<20 {
+            let file=root.appendingPathComponent("outbox-\(iteration).enc")
+            func open() throws -> DurableChatOutbox {
+                try DurableChatOutbox(scope:scope,local:local,
+                    archive:ChatHistoryArchive(file:file,scope:aad,keyData:key))
+            }
+            let journal=try open()
+            var expected:[ChatEnvelope]=[]
+            for _ in 0..<8 {
+                let group=UUID().uuidString.lowercased()
+                let stamp=ISO8601DateFormatter().string(from:Date())
+                let started=clock.now
+                let envelope=try localKeys.encrypt(Data(repeating:65,count:512),kind:.text,
+                    contentType:"text/plain",groupID:group,chunkIndex:0,chunkCount:1,
+                    sender:local,recipient:peer,createdAt:stamp)
+                try journal.enqueue(groupID:group,recipients:[peer],envelopes:[envelope])
+                saveSamples.append(milliseconds(started))
+                expected.append(envelope)
+            }
+            let started=clock.now
+            let recovered=try open().pendingGroups()
+            reopenSamples.append(milliseconds(started))
+            XCTAssertEqual(recovered.count,8)
+            XCTAssertEqual(recovered.flatMap(\.entries).map(\.envelope),expected)
+            XCTAssertTrue(recovered.flatMap(\.entries).allSatisfy{$0.phase == .ready})
+        }
+        let save=p95(saveSamples),restore=p95(reopenSamples)
+        print("V64_OUTBOX_PERF archive_scope=synthetic text_samples=\(saveSamples.count) restore_samples=\(reopenSamples.count) text_p95_ms=\(save) restore_p95_ms=\(restore)")
+        XCTAssertLessThanOrEqual(save,150)
+        XCTAssertLessThanOrEqual(restore,1000)
+    }
 }
