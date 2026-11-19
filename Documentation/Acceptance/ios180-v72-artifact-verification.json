@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "scope": "V72-00-06 historical artifact byte verification; no new native execution or final gate acceptance",
+  "integration": "9ffcacea8b9562d1cb46cd0b4301c4ac22333452",
+  "native_handoff": "9692d35f0c748239cdd89668b424959934970726",
+  "prior_evidence": "a53b69a467171df93c0942057852c7643c61ad19",
+  "method": "Downloaded original GitHub artifact ZIPs; Python hashlib.sha256 on actual bytes and ZipFile.testzip CRC of every member; no raw archive contents published",
+  "artifacts": [
+    {
+      "id": 14502055191,
+      "name": "V64-preflight-validation",
+      "run_id": 44463085229,
+      "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+      "head_branch": "feature/ios180-v64-native-role-contract",
+      "expires_at": "2026-12-03T05:19:38Z",
+      "bytes": 84324,
+      "sha256_recomputed": "ccc6b9bccfcd2381add516817ea63e3025938ca1da8ee319220271514d079532",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 83
+    },
+    {
+      "id": 14501855271,
+      "name": "V64-preflight-B",
+      "run_id": 44463085229,
+      "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+      "head_branch": "feature/ios180-v64-native-role-contract",
+      "expires_at": "2026-12-03T05:16:41Z",
+      "bytes": 40545,
+      "sha256_recomputed": "525a9a75ea1b807508367ead8bee370a45f8f67ddebc0a563e078bc4d20b0dc9",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 41
+    },
+    {
+      "id": 14501201268,
+      "name": "V64-distributed-build-30s",
+      "run_id": 44463085229,
+      "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+      "head_branch": "feature/ios180-v64-native-role-contract",
+      "expires_at": "2026-12-03T05:10:25Z",
+      "bytes": 25473,
+      "sha256_recomputed": "99331f093b6f835017b32bb628036d75661aee180dda1d774efbb4facbe7ec5b",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 4
+    },
+    {
+      "id": 14500757045,
+      "name": "V64-distributed-products-30s",
+      "run_id": 44463085229,
+      "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+      "head_branch": "feature/ios180-v64-native-role-contract",
+      "expires_at": "2026-12-03T05:10:23Z",
+      "bytes": 11641067,
+      "sha256_recomputed": "c639b669bd8ffba93380d1c50b52995b4b4d875772d9458bdc14d571355eb8bc",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 5
+    },
+    {
+      "id": 14500319812,
+      "name": "V64-preflight-A",
+      "run_id": 44463085229,
+      "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+      "head_branch": "feature/ios180-v64-native-role-contract",
+      "expires_at": "2026-12-03T05:18:55Z",
+      "bytes": 40499,
+      "sha256_recomputed": "7c695874f0359c4cc4ac8b52a70cfd5e1c0b042ebb7ab7121841965f23351ca2",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 41
+    },
+    {
+      "id": 14501366461,
+      "name": "IOS173-Integration-Xcode27-Evidence",
+      "run_id": 44462109985,
+      "head_sha": "4fbdb1bd6e04c5c57331e3bbc8d2d5d527b80dc2",
+      "head_branch": "feature/ios180-v64-write-fence",
+      "expires_at": "2026-12-03T05:11:28Z",
+      "bytes": 4892649,
+      "sha256_recomputed": "e73573891c5ed73b153353d1dd059d0b3d9428a4ba0132db12821e3f57bf932e",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 352
+    },
+    {
+      "id": 14501613182,
+      "name": "V64-isolated-relay-local-evidence",
+      "run_id": 44465634961,
+      "head_sha": "325e5f12412bdd1ff26645cffd97082177409bbf",
+      "head_branch": "feature/ios180-v64-wss-continuous-control",
+      "expires_at": "2026-12-03T05:31:26Z",
+      "bytes": 1733,
+      "sha256_recomputed": "1d80192607793ace9961d7bcdb48e93257c1fb22d9f2488c22a12bca9cbfb322",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 4
+    },
+    {
+      "id": 14494679449,
+      "name": "V62-native-dual-30s",
+      "run_id": 44450386899,
+      "head_sha": "098771bef9313fd44f99d3f10feaf99b987be3ea",
+      "head_branch": "feature/ios180-v62-native-staged-call",
+      "expires_at": "2026-12-03T03:27:54Z",
+      "bytes": 29355,
+      "sha256_recomputed": "ecac6f8468e3ddd865a3b45a8be234424bef16c87a15f6231c8747a23defb29f",
+      "github_digest_match": true,
+      "zip_crc_pass": true,
+      "zip_entries": 17
+    }
+  ],
+  "preflight": {
+    "run_id": 44463085229,
+    "attempt": 1,
+    "head_sha": "ab1a34f2ed1d53b5a9edf16b88124075d403c80f",
+    "inner_products_sha256": "fc290536f019107b1d6fb56d7ee33faca0fe644a033bd87b1b66b9bffa7a9303",
+    "matches_inner_manifest_and_both_clients": true,
+    "independent_host_boot_sessions": true,
+    "probe_windows_overlap": true,
+    "individual_preflight_records_match_joint_validation": true,
+    "roles": [
+      {
+        "role": "A",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "destination_matches_structured_device_id": true
+      },
+      {
+        "role": "B",
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "destination_matches_structured_device_id": true
+      }
+    ],
+    "real_xcresult_summary_device_schema": "devicesAndConfigurations[].device.deviceId",
+    "scope": "native prerequisite only; no private handoff, relay, or media"
+  },
+  "historical_integration": {
+    "run_id": 44462109985,
+    "head_sha": "4fbdb1bd6e04c5c57331e3bbc8d2d5d527b80dc2",
+    "native_swift_passed": 135,
+    "native_swift_failed": 0,
+    "native_ui_passed": 3,
+    "native_ui_failed": 0,
+    "method": "terminal XCTest counts from archived logs; historical only"
+  },
+  "historical_local_wss": {
+    "run_id": 44465634961,
+    "head_sha": "325e5f12412bdd1ff26645cffd97082177409bbf",
+    "tests": {
+      "relay": 4,
+      "gateway": 1,
+      "provisioning": 3,
+      "timed_control": 1
+    },
+    "passed": 9,
+    "timed_control_wall_seconds": 30.074,
+    "scope": "local Python control only; not native audio"
+  },
+  "work_packages": {
+    "V72-00-06": "SEVEN_REQUIRED_AND_ONE_ADDITIONAL_ARCHIVE_BYTES_VERIFIED",
+    "V72-01-02": "HISTORICAL_XCRESULT_DEVICE_SCHEMA_VERIFIED_ONLY; actual failed handoff evidence missing"
+  },
+  "blockers": [
+    "new push run IDs unavailable",
+    "V6.5 failed handoff run missing",
+    "full original V6.4 requirements incomplete",
+    "no authorized shared relay route",
+    "factory host execution not authorized"
+  ],
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "new_native_runs": 0,
+  "release": false,
+  "production_changes": false
+}
