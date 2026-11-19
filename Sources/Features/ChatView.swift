@@ -10,11 +10,17 @@ struct ChatView: View {
     @State private var imageSelection: PhotosPickerItem?
     @State private var videoSelection: PhotosPickerItem?
     @State private var isPresentingCamera = false
+    @State private var isPresentingImagePicker=false
+    @State private var isPresentingVideoPicker=false
     @State private var isPresentingConfiguration = false
     @State private var isPresentingSecurity = false
     @State private var isPresentingSupportTicket = false
     @State private var isPresentingMemberTickets = false
     @State private var voicePressIsActive = false
+    @State private var captureTarget:ChatModel.MediaTarget?
+    @State private var mediaLoadTask:Task<Void,Never>?
+    @State private var mediaLoadRevision=UUID()
+    @State private var voiceTarget:ChatModel.MediaTarget?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -56,8 +62,7 @@ struct ChatView: View {
                             isPresentingSupportTicket = true
                         }
                     }
-                    Button("Lokalen Verlauf löschen", systemImage: "trash", role: .destructive) {
-                        chatModel.messages.removeAll(keepingCapacity: false)
+                    Button("Chat-Vorschauen aus dem Speicher entfernen", systemImage: "photo.badge.arrow.down") {
                         ChatMediaThumbnailCache.shared.clear()
                     }
                 } label: {
@@ -67,7 +72,25 @@ struct ChatView: View {
             }
         }
         .task { await IOSNextRuntime.shared.lifecycleCoordinator.chatViewAppeared(appModel: appModel) }
-        .onDisappear { IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared() }
+        .onDisappear {
+            AudioPlayback.shared.stop()
+            cancelVoiceCapture()
+            cancelMediaLoading()
+            captureTarget=nil
+            IOSNextRuntime.shared.lifecycleCoordinator.chatViewDisappeared()
+        }
+        .onChange(of:chatModel.mediaTarget()) { _,_ in
+            AudioPlayback.shared.stop()
+            cancelVoiceCapture()
+            cancelMediaLoading()
+            captureTarget=nil
+            isPresentingCamera=false
+            isPresentingImagePicker=false
+            isPresentingVideoPicker=false
+        }
+        .onChange(of:scenePhase) { _,phase in
+            if phase != .active {AudioPlayback.shared.stop();cancelVoiceCapture()}
+        }
         .sheet(isPresented: $isPresentingConfiguration) {
             ChatSettingsView(appModel: appModel, chatModel: chatModel)
         }
@@ -87,35 +110,54 @@ struct ChatView: View {
                     chatModel.lastError = ChatError.unsupportedMedia.localizedDescription
                     return
                 }
-                Task { await chatModel.sendImage(data) }
+                guard let target=captureTarget else {return}
+                captureTarget=nil
+                Task {await chatModel.sendCapturedMedia(data,kind:.image,contentType:"image/jpeg",target:target)}
             } onCancel: {
+                captureTarget=nil
                 isPresentingCamera = false
             }
             .ignoresSafeArea()
         }
+        .photosPicker(isPresented:$isPresentingImagePicker,selection:$imageSelection,matching:.images)
+        .photosPicker(isPresented:$isPresentingVideoPicker,selection:$videoSelection,matching:.videos)
         .onChange(of: imageSelection) { _, item in
             guard let item else { return }
-            Task {
-                defer { imageSelection = nil }
+            guard let target=captureTarget,chatModel.acceptsMediaTarget(target) else {imageSelection=nil;return}
+            captureTarget=nil
+            cancelMediaLoading()
+            let revision=mediaLoadRevision
+            mediaLoadTask=Task {
+                defer {
+                    if mediaLoadRevision==revision {imageSelection=nil;mediaLoadTask=nil}
+                }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
                         throw ChatError.unsupportedMedia
                     }
-                    await chatModel.sendImage(data)
-                } catch { chatModel.lastError = error.localizedDescription }
+                    guard !Task.isCancelled,mediaLoadRevision==revision else {return}
+                    await chatModel.sendCapturedMedia(data,kind:.image,contentType:"image/jpeg",target:target)
+                } catch {if chatModel.acceptsMediaTarget(target) {chatModel.lastError=error.localizedDescription}}
             }
         }
         .onChange(of: videoSelection) { _, item in
             guard let item else { return }
-            Task {
-                defer { videoSelection = nil }
+            guard let target=captureTarget,chatModel.acceptsMediaTarget(target) else {videoSelection=nil;return}
+            captureTarget=nil
+            cancelMediaLoading()
+            let revision=mediaLoadRevision
+            mediaLoadTask=Task {
+                defer {
+                    if mediaLoadRevision==revision {videoSelection=nil;mediaLoadTask=nil}
+                }
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else {
                         throw ChatError.unsupportedMedia
                     }
                     let contentType = item.supportedContentTypes.first(where: { $0.conforms(to: .movie) })?.preferredMIMEType ?? "video/mp4"
-                    await chatModel.sendVideo(data, contentType: contentType)
-                } catch { chatModel.lastError = error.localizedDescription }
+                    guard !Task.isCancelled,mediaLoadRevision==revision else {return}
+                    await chatModel.sendCapturedMedia(data,kind:.video,contentType:contentType,target:target)
+                } catch {if chatModel.acceptsMediaTarget(target) {chatModel.lastError=error.localizedDescription}}
             }
         }
         .alert("Chatfehler", isPresented: errorBinding) {
@@ -124,9 +166,8 @@ struct ChatView: View {
             Text(chatModel.lastError ?? "Unbekannter Fehler")
         }
         .onChange(of: recorder.duration) { _, duration in
-            guard duration >= 230, let data = recorder.stop() else { return }
-            voicePressIsActive = false
-            Task { await chatModel.sendVoice(data) }
+            guard duration >= 230 else {return}
+            finishVoiceCapture()
         }
     }
 
@@ -220,12 +261,13 @@ struct ChatView: View {
                         ContentUnavailableView(
                             "Noch keine Nachrichten",
                             systemImage: "message.badge.shield.fill",
-                            description: Text("Nachrichten erscheinen nur in dieser Sitzung und werden nicht als Verlauf gespeichert.")
+                            description: Text("Der lokale Nachrichtenverlauf wird verschlüsselt gespeichert.")
                         )
                         .padding(.top, 60)
                     }
                     ForEach(chatModel.visibleMessages) { message in
-                        ChatBubble(message: message)
+                        ChatBubble(message: message,locallyPending:message.direction == .outgoing && chatModel.pendingChatGroupIDs.contains(message.id),
+                             proofSummary:message.direction == .outgoing ? chatModel.recipientProofSummaries[message.id] : nil)
                             .id(message.id)
                     }
                 }
@@ -245,14 +287,17 @@ struct ChatView: View {
             Menu {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button("Kamera", systemImage: "camera.fill") {
-                        isPresentingCamera = true
+                        captureTarget=chatModel.mediaTarget()
+                        isPresentingCamera = captureTarget != nil
                     }
                 }
-                PhotosPicker(selection: $imageSelection, matching: .images) {
-                    Label("Foto", systemImage: "photo")
+                Button("Foto",systemImage:"photo") {
+                    captureTarget=chatModel.mediaTarget()
+                    isPresentingImagePicker=captureTarget != nil
                 }
-                PhotosPicker(selection: $videoSelection, matching: .videos) {
-                    Label("Video", systemImage: "video")
+                Button("Video",systemImage:"video") {
+                    captureTarget=chatModel.mediaTarget()
+                    isPresentingVideoPicker=captureTarget != nil
                 }
             } label: {
                 Image(systemName: "plus")
@@ -260,7 +305,7 @@ struct ChatView: View {
             }
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
-            .disabled(!chatModel.canSend)
+            .disabled(!chatModel.canSend || mediaLoadTask != nil || isPresentingImagePicker || isPresentingVideoPicker || isPresentingCamera)
 
             TextField("Nachricht", text: Bindable(chatModel).draft, axis: .vertical)
                 .accessibilityIdentifier("chat-composer-field")
@@ -302,20 +347,23 @@ struct ChatView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        guard !voicePressIsActive else { return }
-                        voicePressIsActive = true
+                        guard !voicePressIsActive,!recorder.isPreparing,let target=chatModel.mediaTarget() else {return}
+                        voiceTarget=target
+                        voicePressIsActive=true
                         Task {
                             do {
                                 try await recorder.start()
-                                if !voicePressIsActive { _ = recorder.stop() }
+                                if !voicePressIsActive || voiceTarget != target || !chatModel.acceptsMediaTarget(target) {
+                                    cancelVoiceCapture()
+                                }
+                            } catch {
+                                cancelVoiceCapture()
+                                if chatModel.acceptsMediaTarget(target) {chatModel.lastError=error.localizedDescription}
                             }
-                            catch { chatModel.lastError = error.localizedDescription }
                         }
                     }
                     .onEnded { _ in
-                        voicePressIsActive = false
-                        guard let data = recorder.stop() else { return }
-                        Task { await chatModel.sendVoice(data) }
+                        finishVoiceCapture()
                     }
             )
             .accessibilityLabel(recorder.isRecording ? "Aufnahme läuft" : "Für Sprachnachricht gedrückt halten")
@@ -328,6 +376,26 @@ struct ChatView: View {
                         .offset(y: -18)
                 }
             }
+    }
+
+    private func cancelMediaLoading() {
+        mediaLoadRevision=UUID()
+        mediaLoadTask?.cancel()
+        mediaLoadTask=nil
+    }
+
+    private func cancelVoiceCapture() {
+        voicePressIsActive=false
+        voiceTarget=nil
+        _=recorder.stop()
+    }
+
+    private func finishVoiceCapture() {
+        voicePressIsActive=false
+        let target=voiceTarget
+        voiceTarget=nil
+        guard let data=recorder.stop(),let target else {return}
+        Task {await chatModel.sendCapturedMedia(data,kind:.voice,contentType:"audio/wav",target:target)}
     }
 
     private var errorBinding: Binding<Bool> {
@@ -353,7 +421,7 @@ private struct SupportTicketComposerView: View {
                 } header: {
                     Text("Anfrage an den Owner")
                 } footer: {
-                    Text("Tickets sind absichtlich persistent und getrennt vom flüchtigen E2EE-Chat. Keine Passwörter, Tokens oder privaten Schlüssel eintragen.")
+                    Text("Tickets werden getrennt vom verschlüsselten Chatverlauf gespeichert. Keine Passwörter, Tokens oder privaten Schlüssel eintragen.")
                 }
 
                 if let ticketID = chatModel.lastCreatedTicketID {
@@ -438,6 +506,8 @@ private struct InMemoryCameraPicker: UIViewControllerRepresentable {
 
 private struct ChatBubble: View {
     let message: ChatMessage
+    let locallyPending:Bool
+    let proofSummary:ChatRecipientProofSummary?
 
     var body: some View {
         HStack {
@@ -447,8 +517,14 @@ private struct ChatBubble: View {
                 HStack(spacing: 4) {
                     Text(message.createdAt, format: .dateTime.hour().minute())
                     if message.direction == .outgoing {
+                        if !locallyPending,message.delivery == .queued,let proofSummary,proofSummary.totalUsers>1 {
+                            Text("\(proofSummary.confirmedUsers)/\(proofSummary.totalUsers) bestätigt")
+                                .accessibilityHidden(true)
+                        }
                         Image(systemName: deliverySymbol)
-                            .foregroundStyle(message.delivery == .failed ? .red : .secondary)
+                            .foregroundStyle(!locallyPending && (message.delivery == .failed || message.delivery == .unconfirmedExpired) ? .red :
+                                (!locallyPending && message.delivery == .queued && proofSummary?.allConfirmed == true ? .green : .secondary))
+                            .accessibilityLabel(deliveryLabel)
                     }
                 }
                 .font(.caption2)
@@ -495,11 +571,28 @@ private struct ChatBubble: View {
     }
 
     private var deliverySymbol: String {
-        switch message.delivery {
+        if locallyPending {return "clock"}
+        if message.delivery == .queued && proofSummary?.allConfirmed == true {return "checkmark.seal.fill"}
+        return switch message.delivery {
         case .sending: "clock"
         case .queued: "checkmark"
         case .received: "checkmark"
-        case .failed: "exclamationmark.circle.fill"
+        case .failed, .unconfirmedExpired: "exclamationmark.circle.fill"
+        }
+    }
+
+    private var deliveryLabel:String {
+        if locallyPending {return "Lokal gesichert, Versand ausstehend"}
+        if message.delivery == .queued, let proofSummary {
+            if proofSummary.allConfirmed {return "Alle Nachrichtenfragmente für alle Empfängergeräte kryptografisch bestätigt; nicht als gelesen markiert"}
+            return "\(proofSummary.confirmedUsers) von \(proofSummary.totalUsers) Empfängern vollständig bestätigt, \(proofSummary.confirmedDevices) von \(proofSummary.totalDevices) Geräten"
+        }
+        return switch message.delivery {
+        case .sending: "Versand läuft"
+        case .queued: "Vom Relay angenommen, Zustellung nicht bestätigt"
+        case .received: "Empfangen"
+        case .failed: "Versand nicht bestätigt"
+        case .unconfirmedExpired: "Versandzeitfenster abgelaufen, Zustellung unklar"
         }
     }
 }
@@ -572,7 +665,7 @@ struct ChatConfigurationView: View {
                 } header: {
                     Text("Privater Relay")
                 } footer: {
-                    Text("Der Relay speichert nur öffentliche Geräteschlüssel. Nachrichten und Medien liegen höchstens 120 Sekunden verschlüsselt im RAM und werden bei Abruf gelöscht.")
+                    Text("Nachrichten und Medien werden Ende-zu-Ende-verschlüsselt übertragen. Die Speicherdauer auf dem Relay hängt vom ausgehandelten Zustellvertrag ab; lokale Verläufe und ausstehende Aufträge sind verschlüsselt.")
                 }
                 if let errorMessage {
                     Section { IOSNextErrorBanner(message: errorMessage) }
@@ -629,7 +722,7 @@ private struct ChatSecurityView: View {
                     Label("ChaCha20-Poly1305 pro Nachrichtenblock", systemImage: "lock.fill")
                     Label("X25519-Schlüsselaustausch", systemImage: "key.fill")
                     Label("Ed25519-Signaturen", systemImage: "checkmark.seal.fill")
-                    Label("Kein persistenter Chatverlauf", systemImage: "internaldrive.fill.badge.xmark")
+                    Label("Verschlüsselter lokaler Chatverlauf", systemImage: "internaldrive.fill")
                 }
                 Section {
                     Button("Geänderte Kontaktschlüssel bestätigen", systemImage: "person.badge.key.fill") {

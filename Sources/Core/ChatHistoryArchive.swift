@@ -3,7 +3,7 @@ import Foundation
 import Security
 
 enum ChatHistoryError: LocalizedError {
-    case invalidScope, missingKey, invalidArchive, capacity
+    case invalidScope, missingKey, invalidArchive, capacity, busy
     var errorDescription: String? { "Der verschlüsselte Chatverlauf konnte nicht sicher gespeichert oder geöffnet werden." }
 }
 
@@ -33,7 +33,10 @@ final class ChatHistoryArchive {
         guard !scope.isEmpty, scope.count <= 8192,
               [( "chatHistory.v1", "EncryptedChatHistory"),
                ( "ticketOutbox.v1", "EncryptedTicketOutbox"),
-               ( "ticketProject.v1", "EncryptedTicketProjects")].contains(where: { $0.0 == namespace && $0.1 == folder })
+               ( "ticketProject.v1", "EncryptedTicketProjects"),
+               ( "chatOutbox.v1", "EncryptedChatOutbox"),
+               ( "ticketCache.v1", "EncryptedTicketCache"),
+               ( "chatRecipientProof.v1", "EncryptedChatRecipientProof")].contains(where: { $0.0 == namespace && $0.1 == folder })
         else { throw ChatHistoryError.invalidScope }
         let digest = SHA256.hash(data: scope).map { String(format: "%02x", $0) }.joined()
         let directory = try FileManager.default.url(for: .applicationSupportDirectory,
@@ -66,6 +69,12 @@ final class ChatHistoryArchive {
     }
 
     func load<T: Decodable>(_ type: T.Type) throws -> T? {
+        try loadAuthenticated(type)?.value
+    }
+
+    /// Bind migration verification to the exact authenticated ciphertext read,
+    /// not a separately opened file which may have changed in the meantime.
+    func loadAuthenticated<T: Decodable>(_ type: T.Type) throws -> (value: T, fingerprint: Data)? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
@@ -79,7 +88,7 @@ final class ChatHistoryArchive {
         do {
             let box = try AES.GCM.SealedBox(combined: data.dropFirst(Self.magic.count))
             let plain = try AES.GCM.open(box, using: key, authenticating: aad)
-            return try JSONDecoder().decode(type, from: plain)
+            return (try JSONDecoder().decode(type, from: plain), Data(SHA256.hash(data: data)))
         } catch { throw ChatHistoryError.invalidArchive }
     }
 

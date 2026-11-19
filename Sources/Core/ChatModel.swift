@@ -31,12 +31,23 @@ final class ChatModel {
         .video: 30 * 1024 * 1024,
     ]
 
-    var state: State = .notConfigured
+    // Independent of authentication generation: A -> B -> A must not
+    // revive an asynchronous capture originally issued in conversation A.
+    private(set) var mediaContextRevision:UInt64=0
+    var state: State = .notConfigured {
+        didSet {if oldValue != state {mediaContextRevision &+= 1}}
+    }
     var messages: [ChatMessage] = []
     var draft = ""
-    var recipientUserID = ""
-    var showingFamilyGroup = false
-    var familyGroup: ChatFamilyGroup?
+    var recipientUserID = "" {
+        didSet {if oldValue != recipientUserID {mediaContextRevision &+= 1}}
+    }
+    var showingFamilyGroup = false {
+        didSet {if oldValue != showingFamilyGroup {mediaContextRevision &+= 1}}
+    }
+    var familyGroup: ChatFamilyGroup? {
+        didSet {if oldValue != familyGroup && showingFamilyGroup {mediaContextRevision &+= 1}}
+    }
     private var draftsByPeer: [String: String] = [:]
 
     var visibleMessages: [ChatMessage] {
@@ -53,6 +64,15 @@ final class ChatModel {
     var ownSafetyNumber = ""
     var recipientSafetyNumbers: [String] = []
     var isSending = false
+    private(set) var pendingChatSendID:String?
+    private(set) var pendingChatGroupIDs=Set<String>()
+    private var stagingChatID:String?
+    var pendingChatCount:Int {pendingChatGroupIDs.count}
+    var chatOutboxCapacity:Int {DurableChatOutbox.maximumPendingGroups}
+    private(set) var chatOutboxBlocked=false
+    private(set) var pendingChatExpiresAt:Date?
+    private(set) var pendingChatAllConfirmed=false
+    private(set) var pendingChatNeverSubmitted=false
     var accessRole: ChatAccessRole?
     var lastCreatedTicketID: String?
     var memberTickets: [SupportTicket] = []
@@ -65,57 +85,273 @@ final class ChatModel {
     private var keys: ChatDeviceKeys?
     private var receiveTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
+    private var readyOutboxTask: Task<Void,Never>?
     private var startupToken: UUID?
     private var startupEpoch: UInt64 = 0
     private var configurationGeneration: UInt64 = 0
+    private var ticketReadLease: TicketOfflineLease?
+    private var ticketReadFence=TicketReadRequestFence()
+    private var ticketWriteGeneration:UInt64?
+    private var ticketCacheReady = false
+    private var ticketReadOffline = false
     private typealias HistorySnapshot = ChatPersistentSnapshot
     private var historyArchive: ChatHistoryArchive?
+    private var historyRecordCheckpoint: ChatRecordReceiveCheckpoint?
+    private(set) var historyMigrationInProgress=false
+    private(set) var historyMigrationNotice:String?
+    var historyUsesV2:Bool { historyRecordCheckpoint != nil }
+    @ObservationIgnored private let historyMutationGate = ChatHistoryMutationGate()
     private var partialMessages: [String: PartialMessage] = [:]
+    private var pendingRecipientProofs:[String:ChatPendingRecipientProof]=[:]
+    private(set) var recipientProofSummaries:[String:ChatRecipientProofSummary]=[:]
+    private var recipientProofPollCursor:String?
+    private var recipientProofSubmitCursor:String?
 
-    private func loadFamilyHistory(configuration: ChatConfiguration) throws {
+    private func openChatOutbox(configuration:ChatConfiguration,keys:ChatDeviceKeys) throws -> DurableChatOutbox {
+        let scope=ChatOutboxScope(endpoint:configuration.baseURL,user:configuration.userID,
+            device:configuration.deviceID,keyFingerprint:keys.safetyNumber)
+        return try DurableChatOutbox(scope:scope,local:keys.publicIdentity(
+            userID:configuration.userID,deviceID:configuration.deviceID))
+    }
+
+    private func openRecipientProofLedger(configuration:ChatConfiguration,keys:ChatDeviceKeys) throws -> ChatRecipientProofLedger {
+        try ChatRecipientProofLedger(scope:ChatOutboxScope(endpoint:configuration.baseURL,user:configuration.userID,
+            device:configuration.deviceID,keyFingerprint:keys.safetyNumber))
+    }
+
+    private func clearRecipientProofView() {
+        recipientProofSummaries=[:]
+        recipientProofPollCursor=nil
+        recipientProofSubmitCursor=nil
+    }
+
+    private func refreshChatOutboxState(configuration:ChatConfiguration,keys:ChatDeviceKeys) {
+        do {
+            try reloadChatOutboxState(openChatOutbox(configuration:configuration,keys:keys))
+        } catch {
+            chatOutboxBlocked=true
+        }
+    }
+
+    private func reloadChatOutboxState(_ outbox:DurableChatOutbox) throws {
+        do {
+            applyPendingChatState(try outbox.pendingGroups())
+            chatOutboxBlocked=false
+        } catch {
+            chatOutboxBlocked=true
+            throw error
+        }
+    }
+
+    private func applyPendingChatState(_ groups:[DurableChatOutbox.Pending]) {
+        pendingChatGroupIDs=Set(groups.map(\.groupID))
+        let pending=groups.first
+        pendingChatSendID=pending?.groupID
+        pendingChatExpiresAt=pending?.entries.first.flatMap {
+            ISO8601DateFormatter().date(from:$0.envelope.createdAt)?.addingTimeInterval(90)
+        }
+        pendingChatAllConfirmed=pending?.entries.allSatisfy({$0.phase == .confirmed}) ?? false
+        pendingChatNeverSubmitted=pending?.entries.allSatisfy({$0.phase == .ready}) ?? false
+    }
+
+    /// Recover only the exact authenticated outgoing groups. A journal that
+    /// references missing or mismatched history must not enter transport.
+    static func recoverOutgoingHistory(_ messages:[ChatMessage],pending:[DurableChatOutbox.Pending]) throws -> [ChatMessage] {
+        let ids=Set(pending.map(\.groupID))
+        for group in pending {
+            guard let first=group.entries.first?.envelope else {throw ChatHistoryError.invalidArchive}
+            let matches=messages.filter{$0.id==group.groupID && $0.direction == .outgoing}
+            guard matches.count==1,let message=matches.first,
+                  message.senderUserID==group.scope.user,
+                  message.recipientUserID==(first.conversationID=="family" ? "family" : first.recipientUserID),
+                  message.conversationID==first.conversationID,
+                  message.kind==first.messageType,message.contentType==first.contentType
+            else {throw ChatHistoryError.invalidArchive}
+        }
+        return messages.map { message in
+            var record=message
+            if record.direction == .outgoing && record.delivery == .sending && !ids.contains(record.id) {
+                record.delivery = .failed
+            }
+            return record
+        }
+    }
+
+    private func loadFamilyHistory(configuration: ChatConfiguration) async throws {
+        let generation=configurationGeneration
+        try await historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
+            try await loadFamilyHistoryLocked(configuration:configuration,generation:generation)
+        }
+    }
+
+    private func loadFamilyHistoryLocked(configuration:ChatConfiguration,generation:UInt64) async throws {
+        guard self.configuration == configuration, let keys else { throw CancellationError() }
+        historyArchive=nil
+        historyRecordCheckpoint=nil
+        clearRecipientProofView()
+        // Clear decrypted state before even the marker/key lookup can throw.
+        restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
+        chatOutboxBlocked=true
+        let pending=try openChatOutbox(configuration:configuration,keys:keys).pendingGroups()
+        // A marker, once published by the separately authorized migration,
+        // is the authority. Missing/corrupt v2 must never reactivate v1.
+        if try ChatV2MigrationCoordinator.hasActiveMarker(configuration:configuration,keyFingerprint:keys.safetyNumber) {
+            restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
+            let coordinator=try ChatV2MigrationCoordinator(configuration:configuration,keyFingerprint:keys.safetyNumber)
+            guard let active=try await coordinator.openActive() else { throw ChatHistoryError.invalidArchive }
+            let original=try await active.load()
+            try Task.checkCancellation()
+            guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
+            let normalized=HistorySnapshot(version:1,messages:try Self.recoverOutgoingHistory(original.messages,pending:pending),
+                partials:original.partials,seen:original.seen,pendingRecipientProofs:original.pendingRecipientProofs)
+            if normalized != original {
+                _ = try await active.commit(previous:original,next:normalized,verifiedEnvelopeIDs:[])
+            }
+            try Task.checkCancellation()
+            guard generation == configurationGeneration, self.configuration == configuration else { throw CancellationError() }
+            restoreCheckpoint(normalized)
+            historyRecordCheckpoint=active
+            return
+        }
         let archive = try ChatHistoryArchive(configuration: configuration)
         if let snapshot = try archive.load(HistorySnapshot.self) {
             guard snapshot.version == 1, snapshot.messages.count <= 200,
                   snapshot.partials.count <= 256, snapshot.seen.count <= 20_000 else {
                 throw ChatHistoryError.invalidArchive
             }
-            messages = snapshot.messages.map { message in
-                var record = message
-                if record.delivery == .sending { record.delivery = .failed }
-                return record
-            }
+            messages = try Self.recoverOutgoingHistory(snapshot.messages,pending:pending)
             partialMessages = snapshot.partials
             seenEnvelopeIDs = snapshot.seen
+            pendingRecipientProofs = snapshot.pendingRecipientProofs ?? [:]
         } else {
+            guard pending.isEmpty else {throw ChatHistoryError.invalidArchive}
             messages = []
             partialMessages = [:]
             seenEnvelopeIDs = [:]
+            pendingRecipientProofs = [:]
         }
         historyArchive = archive
     }
 
+    // Only this interactive path can publish a new marker. It is never called
+    // automatically at login or by a background task.
+    func canActivateHistoryV2(_ app:AppModel) -> Bool {
+        guard isFamilyCredentialActive, state == .online, !historyMigrationInProgress,
+              !isSending, pendingChatSendID==nil, !chatOutboxBlocked,
+              !callBusy, !audioPreparing, audioSession==nil,
+              startupTask==nil, historyArchive != nil, historyRecordCheckpoint==nil,
+              let configuration,let family=app.familyChatContext(),
+              family.haUserID==configuration.userID,family.deviceID==configuration.deviceID,
+              family.endpoint==configuration.baseURL,family.grant.accessToken==configuration.token
+        else {return false}
+        return !(callListing?.calls.contains(where:{$0.state == .accepted || $0.state == .ringing}) ?? false)
+    }
+
+    func activateHistoryV2(using app:AppModel) async {
+        guard canActivateHistoryV2(app),let configuration,let keys else {return}
+        historyMigrationNotice=nil
+        historyMigrationInProgress=true
+        defer {historyMigrationInProgress=false}
+        let originalGeneration=configurationGeneration
+        var migrationGeneration=originalGeneration
+        func matches() -> Bool {
+            guard !Task.isCancelled,configurationGeneration==migrationGeneration,
+                  self.configuration==configuration,isFamilyCredentialActive,
+                  let family=app.familyChatContext(),family.haUserID==configuration.userID,
+                  family.deviceID==configuration.deviceID,family.endpoint==configuration.baseURL,
+                  family.grant.accessToken==configuration.token,
+                  self.keys?.safetyNumber==keys.safetyNumber
+            else {return false}
+            return true
+        }
+        // Device authentication is local; it does not mint an owner privilege.
+        // Recheck after the interactive prompt because the account may change.
+        var paused=false
+        do {
+            let auth=LAContext()
+            var policyError:NSError?
+            guard auth.canEvaluatePolicy(.deviceOwnerAuthentication,error:&policyError),
+                  try await auth.evaluatePolicy(.deviceOwnerAuthentication,
+                    localizedReason:"Verschlüsselten Chatverlauf einmalig auf V2 umstellen"),
+                  matches(),state == .online,!isSending,!callBusy,!audioPreparing,
+                  audioSession==nil,startupTask==nil,
+                  !(callListing?.calls.contains(where:{$0.state == .accepted || $0.state == .ringing}) ?? false)
+            else {throw ChatError.authenticationFailed}
+            // Stop new sends/calls, cancel receive and renew, then wait for
+            // any already-admitted durable transaction to finish.
+            state = .connecting
+            paused=true
+            receiveTask?.cancel()
+            receiveTask=nil
+            familyRenewalTask?.cancel()
+            familyRenewalTask=nil
+            try await historyMutationGate.withExclusive(isCurrent:{matches()}) {
+                guard matches(),let archive=historyArchive,historyRecordCheckpoint==nil else {
+                    throw ChatError.authenticationFailed
+                }
+                configurationGeneration &+= 1
+                resetTicketReadAccess()
+                migrationGeneration=configurationGeneration
+                let coordinator=try ChatV2MigrationCoordinator(configuration:configuration,keyFingerprint:keys.safetyNumber)
+                let source=try await coordinator.prepare(archive)
+                guard matches() else {throw ChatError.authenticationFailed}
+                // Read-only broker identity/delivery check after import.
+                let session=try await relay.session(configuration:configuration)
+                guard session.userID==configuration.userID else {throw ChatError.authenticationFailed}
+                try await relay.requireAcknowledgedDelivery(configuration:configuration)
+                let active=try await coordinator.activate(prepared:source,archive:archive,authorize:{matches()})
+                // Marker publication is irreversible even if the account
+                // changes while the async call returns. Never reattach V1.
+                guard matches() else {throw CancellationError()}
+                historyArchive=nil
+                historyRecordCheckpoint=active
+            }
+            if matches() {historyMigrationNotice="V2 aktiviert. Das ursprüngliche Archiv bleibt unverändert erhalten."}
+        } catch {
+            if configurationGeneration==migrationGeneration,self.configuration==configuration {
+                historyMigrationNotice="Umstellung nicht abgeschlossen. Der Speicherzustand wird beim erneuten Verbinden sicher geprüft."
+            }
+        }
+        guard paused,configurationGeneration==migrationGeneration,self.configuration==configuration,
+              !Task.isCancelled else {return}
+        // Reopen exclusively through marker-aware startup, including after a
+        // failure near marker publication. Never resume an old writer directly.
+        historyArchive=nil
+        historyRecordCheckpoint=nil
+        historyMigrationInProgress=false
+        await start(using:app)
+    }
+
     private func historySnapshot() -> HistorySnapshot {
-        HistorySnapshot(version: 1, messages: messages, partials: partialMessages, seen: seenEnvelopeIDs)
+        HistorySnapshot(version: 1, messages: messages, partials: partialMessages, seen: seenEnvelopeIDs,
+            pendingRecipientProofs:pendingRecipientProofs.isEmpty ? nil : pendingRecipientProofs)
     }
 
     private func restoreCheckpoint(_ snapshot: HistorySnapshot) {
         messages = snapshot.messages
         partialMessages = snapshot.partials
         seenEnvelopeIDs = snapshot.seen
+        pendingRecipientProofs = snapshot.pendingRecipientProofs ?? [:]
     }
 
-    private func persistFamilyHistory() throws {
-        guard isFamilyCredentialActive else { return }
-        guard let historyArchive else { throw ChatHistoryError.missingKey }
-        try historyArchive.save(historySnapshot())
-    }
-
-    // Mutations and persistence are synchronous on the main actor. A failed
-    // write must not leave replay IDs or message buffers claiming durability.
-    private func commitVerifiedReceive(_ mutation: () throws -> Void) throws {
-        try ChatHistoryCheckpoint.commit(previous: historySnapshot(),
-            mutate: mutation, persist: { try persistFamilyHistory() },
-            restore: { restoreCheckpoint($0) })
+    private func commitHistoryMutation(generation:UInt64, verifiedEnvelopeIDs:[String]=[],
+                                       _ mutation: () throws -> Void) async throws {
+        guard generation == configurationGeneration else { throw CancellationError() }
+        if !isFamilyCredentialActive {
+            try mutation()
+            return
+        }
+        try await historyMutationGate.commit(isCurrent:{ generation == self.configurationGeneration },
+            read:{ historySnapshot() }, apply:{ restoreCheckpoint($0) }, mutate:mutation,
+            persist:{ previous,next in
+                if let checkpoint=historyRecordCheckpoint {
+                    let receipt=try await checkpoint.commit(previous:previous,next:next,verifiedEnvelopeIDs:verifiedEnvelopeIDs)
+                    guard receipt.envelopeIDs == verifiedEnvelopeIDs else { throw ChatHistoryError.invalidArchive }
+                } else {
+                    guard let historyArchive else { throw ChatHistoryError.missingKey }
+                    try historyArchive.save(next)
+                }
+            })
     }
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
@@ -221,7 +457,7 @@ final class ChatModel {
             }
         }
     }
-    var canSignalCalls: Bool { isFamilyCredentialActive && state == .online }
+    var canSignalCalls: Bool { isFamilyCredentialActive && state == .online && !historyMigrationInProgress }
     var canShowCallPanel: Bool { canSignalCalls || (isFamilyCredentialActive && audioSession != nil) }
 
     private func resetCalls() {
@@ -322,10 +558,12 @@ final class ChatModel {
     }
 
     var canSend: Bool {
-        state == .online && (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
+        state == .online && (!isFamilyCredentialActive || (!chatOutboxBlocked && pendingChatCount < chatOutboxCapacity)) &&
+            (showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty)
     }
 
     func start(using appModel: AppModel) async {
+        guard !historyMigrationInProgress else {return}
         if let existingStartupTask = startupTask {
             let observedToken = startupToken
             await existingStartupTask.value
@@ -481,9 +719,18 @@ final class ChatModel {
         } else {
             stop()
         }
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
         configurationGeneration &+= 1
+        clearRecipientProofView()
+        resetTicketReadAccess()
         resetCalls()
         historyArchive = nil
+        historyRecordCheckpoint = nil
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
+        chatOutboxBlocked=isFamilyCredentialActive
         if replacesIdentity {
             draft = ""
             showingFamilyGroup = false
@@ -494,6 +741,7 @@ final class ChatModel {
             memberTicketDetails.removeAll(keepingCapacity: false)
             partialMessages.removeAll(keepingCapacity: false)
             seenEnvelopeIDs.removeAll(keepingCapacity: false)
+            pendingRecipientProofs.removeAll(keepingCapacity:false)
             ChatMediaThumbnailCache.shared.clear()
         }
         // Persist the credential first. A failed Keychain write must not leave
@@ -509,6 +757,7 @@ final class ChatModel {
     }
 
     func start() async {
+        guard !historyMigrationInProgress else {return}
         // Pre-HA standalone chat cannot reuse a stale legacy credential when
         // authenticated family enrollment is mandatory.
         guard FamilyBootstrapClient.configuredURL() == nil || isFamilyCredentialActive else {
@@ -560,7 +809,9 @@ final class ChatModel {
                 try await relay.requireAcknowledgedDelivery(configuration: configuration)
             }
             guard epoch == startupEpoch, !Task.isCancelled, self.configuration == configuration else { return }
-            if isFamilyCredentialActive { try loadFamilyHistory(configuration: configuration) }
+            if isFamilyCredentialActive { try await loadFamilyHistory(configuration: configuration) }
+            guard epoch == startupEpoch, !Task.isCancelled, self.configuration == configuration else { return }
+            if isFamilyCredentialActive {refreshChatOutboxState(configuration:configuration,keys:keys)}
             accessRole = session.role
             do {
                 let loadedContacts = try await relay.contacts(configuration: configuration)
@@ -607,6 +858,7 @@ final class ChatModel {
             }
             state = .online
             receiveTask = Task { [weak self] in await self?.receiveLoop() }
+            scheduleReadyOutboxResume()
         } catch {
             guard epoch == startupEpoch, !Task.isCancelled else { return }
             state = .offline(error.localizedDescription)
@@ -614,9 +866,18 @@ final class ChatModel {
     }
 
     func stop() {
+        clearRecipientProofView()
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
+        chatOutboxBlocked=false
         resetCalls()
         configurationGeneration &+= 1
+        resetTicketReadAccess()
         historyArchive = nil
+        historyRecordCheckpoint = nil
         startupEpoch &+= 1
         startupTask?.cancel()
         startupTask = nil
@@ -631,8 +892,17 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
+        clearRecipientProofView()
+        readyOutboxTask?.cancel()
+        readyOutboxTask=nil
+        applyPendingChatState([])
+        stagingChatID=nil
+        isSending=false
+        chatOutboxBlocked=false
         historyArchive = nil
+        historyRecordCheckpoint = nil
         configurationGeneration &+= 1
+        resetTicketReadAccess()
         resetCalls()
         draft = ""
         showingFamilyGroup = false
@@ -650,6 +920,7 @@ final class ChatModel {
         ChatMediaThumbnailCache.shared.clear()
         partialMessages.removeAll(keepingCapacity: false)
         seenEnvelopeIDs.removeAll(keepingCapacity: false)
+        pendingRecipientProofs.removeAll(keepingCapacity:false)
         configuration = nil
         isFamilyCredentialActive = false
         familyRenewalTask?.cancel()
@@ -770,15 +1041,24 @@ final class ChatModel {
                family.grant.expiresAt > grant.expiresAt,
                family.grant.accessToken != current.token {
                 do {
-                    try KeychainStore.save(family.grant.accessToken, account: self.tokenAccount)
                     self.receiveTask?.cancel()
-                    self.configurationGeneration &+= 1
-                    self.configuration = ChatConfiguration(baseURL: current.baseURL,
-                        token: family.grant.accessToken, userID: current.userID, deviceID: current.deviceID)
-                    self.receiveTask = Task { [weak self] in await self?.receiveLoop() }
-                    self.scheduleFamilyRenewal(using: appModel, grant: family.grant)
+                    try await self.historyMutationGate.withExclusive(isCurrent:{generation == self.configurationGeneration}) {
+                        try KeychainStore.save(family.grant.accessToken, account:self.tokenAccount)
+                        self.readyOutboxTask?.cancel()
+                        self.readyOutboxTask=nil
+                        self.isSending=false
+                        self.stagingChatID=nil
+                        self.configurationGeneration &+= 1
+                        self.resetTicketReadAccess()
+                        self.configuration=ChatConfiguration(baseURL:current.baseURL,
+                            token:family.grant.accessToken,userID:current.userID,deviceID:current.deviceID)
+                        self.receiveTask=Task { [weak self] in await self?.receiveLoop() }
+                        self.scheduleReadyOutboxResume()
+                        self.scheduleFamilyRenewal(using:appModel,grant:family.grant)
+                    }
                     return
                 } catch {
+                    guard generation == self.configurationGeneration, !Task.isCancelled else { return }
                     self.stopAudio()
                 }
             }
@@ -792,13 +1072,55 @@ final class ChatModel {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         let originalDraft = draft
+        let generation=configurationGeneration
         let selectedPeer = recipientUserID
         let selectedGroup = showingFamilyGroup
         let accepted = await send(Data(value.utf8), kind: .text, contentType: "text/plain; charset=utf-8")
         // A failed preflight/relay request must not erase text the user typed.
         // Never erase edits made while the send was in flight.
-        if accepted && recipientUserID == selectedPeer &&
+        if accepted && generation==configurationGeneration && recipientUserID == selectedPeer &&
             showingFamilyGroup == selectedGroup && draft == originalDraft { draft = "" }
+    }
+
+    /// A delayed media picker/recording must never retarget its content to a
+    /// different contact or account. No bearer or private key enters this value.
+    struct MediaTarget:Equatable,Sendable {
+        let generation:UInt64
+        let selectionRevision:UInt64
+        let endpoint:URL
+        let user:String
+        let device:String
+        let peer:String
+        let family:Bool
+        let members:[String]
+    }
+
+    func mediaTarget() -> MediaTarget? {
+        guard let configuration, state == .online,
+              showingFamilyGroup ? familyGroup?.isReady == true : !recipientUserID.isEmpty else {return nil}
+        return MediaTarget(generation:configurationGeneration,selectionRevision:mediaContextRevision,endpoint:configuration.baseURL,
+            user:configuration.userID,device:configuration.deviceID,peer:recipientUserID,
+            family:showingFamilyGroup,members:showingFamilyGroup ? (familyGroup?.members.map(\.userID).sorted() ?? []) : [])
+    }
+
+    func acceptsMediaTarget(_ target:MediaTarget) -> Bool {
+        !Task.isCancelled && mediaTarget()==target
+    }
+
+    func sendCapturedMedia(_ data:Data,kind:ChatMessageKind,contentType:String,target:MediaTarget) async {
+        guard acceptsMediaTarget(target) else {return}
+        switch kind {
+        case .image:
+            do {
+                let prepared=try Self.preparedImageData(data)
+                _=await send(prepared,kind:.image,contentType:"image/jpeg",expectedMediaTarget:target)
+            } catch {
+                if acceptsMediaTarget(target) {lastError=error.localizedDescription}
+            }
+        case .video: _=await send(data,kind:.video,contentType:contentType,expectedMediaTarget:target)
+        case .voice: _=await send(data,kind:.voice,contentType:"audio/wav",expectedMediaTarget:target)
+        case .text: return
+        }
     }
 
     func sendImage(_ originalData: Data) async {
@@ -819,10 +1141,11 @@ final class ChatModel {
     }
 
     @discardableResult
-    func send(_ data: Data, kind: ChatMessageKind, contentType: String) async -> Bool {
+    func send(_ data: Data, kind: ChatMessageKind, contentType: String, expectedMediaTarget:MediaTarget?=nil) async -> Bool {
+        if let expectedMediaTarget,!acceptsMediaTarget(expectedMediaTarget) {return false}
         let trace = IOSNextPerformance.begin("Chat.Send")
         defer { IOSNextPerformance.end("Chat.Send", trace) }
-        guard let configuration, let keys, state == .online,
+        guard let configuration, let keys, state == .online, !isSending, !historyMigrationInProgress,
               showingFamilyGroup || !recipientUserID.isEmpty else {
             lastError = "Bitte zuerst einen Chat-Kontakt auswählen."
             return false
@@ -832,10 +1155,32 @@ final class ChatModel {
             return false
         }
         isSending = true
-        defer { isSending = false }
         let sendGeneration = configurationGeneration
+        defer {
+            if sendGeneration==configurationGeneration {
+                stagingChatID=nil
+                isSending=false
+            }
+        }
+        // Capture the actual target before the first asynchronous preflight.
         let selectedPeer = recipientUserID
         let selectedGroup = showingFamilyGroup
+        let selectedMembers = familyGroup?.members.map(\.userID)
+        if isFamilyCredentialActive {
+            do {
+                let outbox=try openChatOutbox(configuration:configuration,keys:keys)
+                try reloadChatOutboxState(outbox)
+                guard pendingChatCount < chatOutboxCapacity else {throw ChatHistoryError.capacity}
+                try await relay.requireIdempotentSender(configuration:configuration)
+                guard sendGeneration==configurationGeneration,self.configuration==configuration,!Task.isCancelled,
+                      selectedPeer==recipientUserID,selectedGroup==showingFamilyGroup else {return false}
+            } catch {
+                guard sendGeneration==configurationGeneration else {return false}
+                lastError="Sicherer Versand nicht verfügbar oder Versandwarteschlange voll."
+                return false
+            }
+        }
+        if let expectedMediaTarget,!acceptsMediaTarget(expectedMediaTarget) {return false}
         if selectedGroup {
             guard let familyGroup, familyGroup.isReady,
                   familyGroup.members.contains(where: { $0.userID == configuration.userID }) else {
@@ -844,6 +1189,8 @@ final class ChatModel {
             }
         }
         let groupID = UUID().uuidString.lowercased()
+        if isFamilyCredentialActive {stagingChatID=groupID}
+        var handedOff=false
         var localMessage = ChatMessage(
             id: groupID,
             senderUserID: configuration.userID,
@@ -856,17 +1203,16 @@ final class ChatModel {
             delivery: .sending
         )
         localMessage.conversationID = selectedGroup ? "family" : nil
-        let previousMessages = messages
-        appendMessage(localMessage)
-        do { try persistFamilyHistory() }
-        catch {
-            messages = previousMessages
+        do {
+            try await commitHistoryMutation(generation:sendGeneration) { try appendMessage(localMessage) }
+        } catch {
+            guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
             return false
         }
         do {
             let targetUsers: [String] = selectedGroup
-                ? (familyGroup?.members.map(\.userID).filter { $0 != configuration.userID } ?? [])
+                ? (selectedMembers?.filter { $0 != configuration.userID } ?? [])
                 : [selectedPeer]
             guard !targetUsers.isEmpty else { throw ChatError.noRecipientDevice }
             var recipients: [ChatIdentity] = []
@@ -885,6 +1231,7 @@ final class ChatModel {
             let chunks = Self.chunks(of: data)
             let sender = keys.publicIdentity(userID: configuration.userID, deviceID: configuration.deviceID)
             let createdAt = ISO8601DateFormatter().string(from: localMessage.createdAt)
+            var staged:[ChatEnvelope]=[]
             for recipient in recipients {
                 for (index, chunk) in chunks.enumerated() {
                     let envelope = try keys.encrypt(
@@ -901,22 +1248,253 @@ final class ChatModel {
                     )
                     try Task.checkCancellation()
                     guard sendGeneration == configurationGeneration else { return false }
-                    _ = try await relay.send(envelope, configuration: configuration)
-                    guard sendGeneration == configurationGeneration else { return false }
+                    if isFamilyCredentialActive {
+                        staged.append(envelope)
+                        guard staged.count<=1024 else {throw ChatHistoryError.capacity}
+                    } else {
+                        _ = try await relay.send(envelope, configuration: configuration)
+                        guard sendGeneration == configurationGeneration else { return false }
+                    }
                 }
             }
             guard sendGeneration == configurationGeneration else { return false }
-            updateDelivery(id: groupID, to: .queued)
-            do { try persistFamilyHistory() }
-            catch { lastError = "Nachricht übertragen, lokaler Versandstatus konnte nicht gespeichert werden." }
+            if isFamilyCredentialActive {
+                let outbox=try openChatOutbox(configuration:configuration,keys:keys)
+                guard messages.contains(where:{$0.id==groupID && $0.direction == .outgoing}) else {
+                    throw ChatHistoryError.invalidArchive
+                }
+                let proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+                try Task.checkCancellation()
+                guard sendGeneration==configurationGeneration,self.configuration==configuration,
+                      isFamilyCredentialActive else {throw CancellationError()}
+                if proofEnabled {
+                    var reserved=Dictionary(uniqueKeysWithValues:try outbox.pendingGroups().map{($0.groupID,$0.entries.count)})
+                    reserved[groupID]=staged.count
+                    let retained=Set(messages.filter{$0.direction == .outgoing}.map(\.id)).union(reserved.keys)
+                    try openRecipientProofLedger(configuration:configuration,keys:keys)
+                        .requireCapacity(groupSizes:reserved,retaining:retained)
+                }
+                try outbox.enqueue(groupID:groupID,recipients:recipients,envelopes:staged)
+                // The journal owns the exact signed group now, even if a
+                // subsequent read or network call fails. Never offer a new ID.
+                handedOff=true
+                pendingChatGroupIDs.insert(groupID)
+                try reloadChatOutboxState(outbox)
+                if pendingChatSendID==groupID || pendingChatNeverSubmitted || pendingChatAllConfirmed {
+                    try await drainReadyChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
+                } else {
+                    // A new send is not authorization to replay an older
+                    // ambiguous head. Explicit action is required in settings.
+                    lastError=nil
+                }
+                return true
+            }
+            do {
+                try await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.queued) }
+            } catch {
+                guard sendGeneration == configurationGeneration else { return false }
+                lastError = "Nachricht übertragen, lokaler Versandstatus konnte nicht gespeichert werden."
+            }
             return true
         } catch {
             guard sendGeneration == configurationGeneration else { return false }
-            updateDelivery(id: groupID, to: .failed)
-            try? persistFamilyHistory()
+            if !handedOff {
+                try? await commitHistoryMutation(generation:sendGeneration) { updateDelivery(id:groupID,to:.failed) }
+            } else if let outbox=try? openChatOutbox(configuration:configuration,keys:keys) {
+                try? reloadChatOutboxState(outbox)
+            }
+            guard sendGeneration == configurationGeneration else { return false }
             lastError = error.localizedDescription
-            return false
+            // Once this exact group is durable, the composer has handed it
+            // off to the journal, even if the network outcome is uncertain.
+            // Do not invite the user to resend the same draft as a new ID.
+            return handedOff && isFamilyCredentialActive
         }
+    }
+
+    // Only explicit user action retries an ambiguous submission after a
+    // restart. The same signed envelopes are reused, never encrypted again.
+    /// Explicit, local-only closure of an expired uncertain send. A queued
+    /// fragment may already have arrived: never claim non-delivery or resend.
+    func closeExpiredChatSend(expectedGroupID:String) async {
+        guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
+              let configuration,let keys else {return}
+        let generation=configurationGeneration
+        isSending=true
+        defer {if generation==configurationGeneration {isSending=false}}
+        do {
+            let outbox=try openChatOutbox(configuration:configuration,keys:keys)
+            try reloadChatOutboxState(outbox)
+            guard let pending=try outbox.expiredPending(),pending.groupID==expectedGroupID else {throw ChatHistoryError.busy}
+            try await commitHistoryMutation(generation:generation) {
+                guard messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing &&
+                    $0.senderUserID==configuration.userID}) else {throw ChatHistoryError.invalidArchive}
+                updateDelivery(id:pending.groupID,to:.unconfirmedExpired)
+            }
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration else {return}
+            try outbox.closeExpiredAfterHistoryCommit(groupID:pending.groupID)
+            try reloadChatOutboxState(outbox)
+            lastError="Versandauftrag abgeschlossen. Eine frühere Zustellung kann nicht ausgeschlossen werden."
+            // A failure in a later head must not misreport the already
+            // durably closed group as still pending.
+            do {
+                try await drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
+            } catch {
+                guard generation==configurationGeneration,!Task.isCancelled else {return}
+                lastError="Vorheriger Versandauftrag abgeschlossen; ein weiterer gesicherter Auftrag benötigt Prüfung."
+            }
+        } catch {
+            guard generation==configurationGeneration else {return}
+            lastError="Abschluss nicht vollständig bestätigt. Bitte gesicherten Versandstatus prüfen."
+        }
+    }
+
+    func retryPendingChatSend(expectedGroupID:String) async {
+        guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
+              let configuration,let keys else {return}
+        let generation=configurationGeneration
+        isSending=true
+        defer {if generation==configurationGeneration {isSending=false}}
+        do {
+            let outbox=try openChatOutbox(configuration:configuration,keys:keys)
+            try reloadChatOutboxState(outbox)
+            guard pendingChatSendID==expectedGroupID else {throw ChatHistoryError.busy}
+            try await flushChatOutbox(outbox,configuration:configuration,generation:generation)
+            try await drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
+            if generation==configurationGeneration {lastError=nil}
+        } catch {
+            guard generation==configurationGeneration else {return}
+            lastError="Ausstehender Versand bleibt gesichert. Erneute Zustellung nicht bestätigt; Schlüssel und Zeitfenster beachten."
+        }
+    }
+
+    /// A fresh session or successful receive after an offline period may
+    /// resume a proven ready head, never a partially submitted group.
+    static func canAutomaticallyResume(_ pending:DurableChatOutbox.Pending?) -> Bool {
+        guard let pending,!pending.entries.isEmpty else {return false}
+        return pending.entries.allSatisfy{$0.phase == .ready}
+    }
+
+    private func scheduleReadyOutboxResume() {
+        guard readyOutboxTask==nil,isFamilyCredentialActive,state == .online,!isSending,
+              !historyMigrationInProgress,!chatOutboxBlocked,(pendingChatNeverSubmitted || pendingChatAllConfirmed),
+              let configuration,let keys else {return}
+        let generation=configurationGeneration
+        readyOutboxTask=Task { [weak self] in
+            guard let self else {return}
+            defer {if generation==self.configurationGeneration {self.readyOutboxTask=nil}}
+            guard !Task.isCancelled,generation==self.configurationGeneration,
+                  self.configuration==configuration,self.isFamilyCredentialActive,self.state == .online,
+                  !self.historyMigrationInProgress,!self.isSending,!self.chatOutboxBlocked else {return}
+            self.isSending=true
+            defer {if generation==self.configurationGeneration {self.isSending=false}}
+            do {
+                let outbox=try self.openChatOutbox(configuration:configuration,keys:keys)
+                try self.reloadChatOutboxState(outbox)
+                try await self.drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
+            } catch {
+                guard generation==self.configurationGeneration,!Task.isCancelled else {return}
+                self.lastError="Gesicherter Versand bleibt erhalten. Bitte Versandstatus prüfen."
+            }
+        }
+    }
+
+    /// Continue only positively unsubmitted heads. Never automatically replay
+    /// an uncertain request or change the roster of a queued group.
+    private func drainReadyChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64) async throws {
+        for _ in 0..<DurableChatOutbox.maximumPendingGroups {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,isFamilyCredentialActive,
+                  state == .online,!historyMigrationInProgress else {throw CancellationError()}
+            guard let head=try outbox.pending(), !head.entries.isEmpty,
+                  Self.canAutomaticallyResume(head) || head.entries.allSatisfy({$0.phase == .confirmed})
+            else {return}
+            // An all-confirmed head needs only local finalization, no send.
+            try await flushChatOutbox(outbox,configuration:configuration,generation:generation,allowIdempotentReplay:false)
+        }
+    }
+
+    private func flushChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64,
+                                 allowIdempotentReplay:Bool=true) async throws {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,
+                  isFamilyCredentialActive,state == .online,!historyMigrationInProgress else {throw CancellationError()}
+        }
+        try requireCurrent()
+        guard let pending=try outbox.pending(),
+              let first=pending.entries.first?.envelope,
+              messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing &&
+                $0.senderUserID==configuration.userID &&
+                $0.recipientUserID==(first.conversationID=="family" ? "family" : first.recipientUserID) &&
+                $0.conversationID==first.conversationID && $0.kind==first.messageType &&
+                $0.contentType==first.contentType})
+        else {throw ChatHistoryError.invalidArchive}
+
+        if pending.entries.contains(where:{$0.phase != .confirmed}) {
+            try await relay.requireIdempotentSender(configuration:configuration)
+            try requireCurrent()
+            let targets:Set<String>
+            if first.conversationID=="family" {
+                let group=try await relay.familyGroup(configuration:configuration)
+                try requireCurrent()
+                guard group.isReady,group.members.contains(where:{$0.userID==configuration.userID}) else {
+                    throw ChatError.authenticationFailed
+                }
+                targets=Set(group.members.map(\.userID).filter{$0 != configuration.userID})
+            } else {
+                targets=[first.recipientUserID]
+            }
+            guard targets==Set(pending.recipients.map(\.userID)) else {throw ChatError.identityChanged}
+            var recipients:[ChatIdentity]=[]
+            for target in targets.sorted() {
+                let devices=try await relay.identities(for:target,configuration:configuration)
+                try requireCurrent()
+                guard !devices.isEmpty,devices.allSatisfy({$0.userID==target}) else {throw ChatError.noRecipientDevice}
+                for device in devices {try ChatDeviceKeys.pin(device)}
+                recipients+=devices
+            }
+            if pending.entries.allSatisfy({$0.phase == .ready}),
+               try outbox.expiredPending()?.groupID==pending.groupID {
+                try requireCurrent()
+                guard let keys else {throw ChatHistoryError.missingKey}
+                try outbox.refreshReadyHead(groupID:pending.groupID,currentRecipients:recipients,keys:keys)
+                try reloadChatOutboxState(outbox)
+            }
+            while true {
+                try requireCurrent()
+                guard let envelope=try outbox.beginNext(currentRecipients:recipients,allowIdempotentReplay:allowIdempotentReplay) else {break}
+                let receipt=try await relay.sendWithReceipt(envelope,configuration:configuration)
+                try requireCurrent()
+                try outbox.confirm(envelope,receipt:receipt)
+                try reloadChatOutboxState(outbox)
+            }
+        }
+        // The final journal contains the exact timestamps/digests actually
+        // accepted by relay, including a possible ready-head timestamp renewal.
+        guard let confirmed=try outbox.pending(),confirmed.groupID==pending.groupID,
+              confirmed.entries.allSatisfy({$0.phase == .confirmed}) else {throw ChatHistoryError.invalidArchive}
+        let proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+        try requireCurrent()
+        if proofEnabled {
+            guard let keys else {throw ChatHistoryError.missingKey}
+            let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
+            // Complete expectations are written before forgetting the head.
+            // Capacity/error leaves the confirmed head intact, never replays it.
+            let retained=Set(messages.filter{$0.direction == .outgoing}.map(\.id)).union(pendingChatGroupIDs)
+            try ledger.registerConfirmed(confirmed,retaining:retained)
+            recipientProofSummaries=try ledger.summaries()
+        }
+        try await commitHistoryMutation(generation:generation) {
+            guard messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing}) else {
+                throw ChatHistoryError.invalidArchive
+            }
+            updateDelivery(id:pending.groupID,to:.queued)
+        }
+        try requireCurrent()
+        try outbox.finishAfterHistoryCommit(groupID:pending.groupID)
+        try reloadChatOutboxState(outbox)
     }
 
     func loadMemberTickets() async {
@@ -1052,13 +1630,21 @@ final class ChatModel {
         while !Task.isCancelled, let configuration {
             do {
                 let ackMode = isFamilyCredentialActive
+                let generation=configurationGeneration
                 let envelopes = try await relay.receive(
                     configuration: configuration, requiresAcknowledgement: ackMode
                 )
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
+                var proofEnabled=false
+                if ackMode {
+                    // Legacy ack_v1 continues without claiming recipient proofs.
+                    proofEnabled=try await relay.supportsRecipientProofContract(configuration:configuration)
+                    try Task.checkCancellation()
+                    guard generation==configurationGeneration,self.configuration==configuration else {return}
+                }
                 let invalidCount = try await Self.processReceivedBatch(envelopes) { envelope in
-                    try await self.accept(envelope, configuration: configuration)
+                    try await self.accept(envelope, configuration: configuration,proofEnabled:proofEnabled)
                 }
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
@@ -1066,19 +1652,25 @@ final class ChatModel {
                     // Verified envelopes are individually checkpointed before
                     // returning from accept(). Previously committed replays
                     // and explicitly rejected ciphertext need no new write.
-                    guard historyArchive != nil else { throw ChatHistoryError.missingKey }
+                    guard historyArchive != nil || historyRecordCheckpoint != nil else { throw ChatHistoryError.missingKey }
                     try await relay.acknowledge(
                         envelopes.map(\.id), configuration: configuration
                     )
                     try Task.checkCancellation()
                     guard self.configuration == configuration else { return }
                 }
+                if proofEnabled {
+                    try await drainRecipientProofs(configuration:configuration,generation:generation)
+                    try await refreshRecipientProofs(configuration:configuration,generation:generation)
+                }
                 if invalidCount > 0 {
                     // Do not report or persist attacker-controlled ciphertext,
                     // decrypted content or detailed crypto errors in UI/logs.
                     lastError = "\(invalidCount) ungültige oder nicht verifizierte Chat-Nachrichten verworfen."
                 }
+                let recovered = state != .online
                 state = .online
+                if recovered {scheduleReadyOutboxResume()}
                 retryNanoseconds = 500_000_000
             } catch is CancellationError {
                 return
@@ -1095,7 +1687,85 @@ final class ChatModel {
         receiveTask = nil
     }
 
-    private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws {
+    private func drainRecipientProofs(configuration:ChatConfiguration,generation:UInt64) async throws {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,
+                  isFamilyCredentialActive,!historyMigrationInProgress else {throw CancellationError()}
+        }
+        try requireCurrent()
+        guard let keys else {throw ChatHistoryError.missingKey}
+        // Bounded batches: never block message receive behind an unbounded queue.
+        let sorted=pendingRecipientProofs.values.filter{Date().timeIntervalSince($0.committedAt)<86400}
+            .sorted{$0.proof.id<$1.proof.id}
+        let ordered:[ChatPendingRecipientProof]
+        if let cursor=recipientProofSubmitCursor {
+            ordered=sorted.filter{$0.proof.id>cursor}+sorted.filter{$0.proof.id<=cursor}
+        } else {ordered=sorted}
+        let candidates=Array(ordered.prefix(8))
+        guard !candidates.isEmpty else {return}
+        try requireCurrent()
+        if candidates.contains(where:{$0.proof.signature.isEmpty}) {
+            try await commitHistoryMutation(generation:generation) {
+                // The gate may have waited behind another history mutation.
+                pendingRecipientProofs=try ChatRecipientProofBatch.prepare(candidates,
+                    in:pendingRecipientProofs,keys:keys,configuration:configuration)
+            }
+        }
+        // Reload the exact persisted signatures (CryptoKit need not generate
+        // identical signature bytes for the same message on successive calls).
+        try requireCurrent()
+        let batch=try candidates.map { candidate -> ChatPendingRecipientProof in
+            guard let signed=pendingRecipientProofs[candidate.proof.id],!signed.proof.signature.isEmpty,
+                  signed.proof.envelopeSHA256==candidate.proof.envelopeSHA256
+            else {throw ChatHistoryError.invalidArchive}
+            return try signed.signed(using:keys,configuration:configuration)
+        }
+        var confirmed:[ChatPendingRecipientProof]=[]
+        for signed in batch {
+            try requireCurrent()
+            recipientProofSubmitCursor=signed.proof.id
+            do {
+                try await relay.submitRecipientProof(signed.proof,configuration:configuration)
+            } catch ChatError.rejected(let code) where [403,409,422,503].contains(code) {
+                // Retain ambiguous or unavailable claims exactly as signed.
+                continue
+            }
+            try requireCurrent()
+            confirmed.append(signed)
+        }
+        // If a connection fails halfway through, all signed claims remain
+        // durable. Earlier successful submissions can be replayed exactly.
+        if !confirmed.isEmpty {
+            try await commitHistoryMutation(generation:generation) {
+                pendingRecipientProofs=try ChatRecipientProofBatch.completing(confirmed,in:pendingRecipientProofs)
+            }
+        }
+    }
+
+    private func refreshRecipientProofs(configuration:ChatConfiguration,generation:UInt64) async throws {
+        func requireCurrent() throws {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,
+                  isFamilyCredentialActive,!historyMigrationInProgress else {throw CancellationError()}
+        }
+        try requireCurrent()
+        guard let keys else {throw ChatHistoryError.missingKey}
+        let ledger=try openRecipientProofLedger(configuration:configuration,keys:keys)
+        let page=try ledger.pollPage(after:recipientProofPollCursor)
+        if !page.ids.isEmpty {
+            let claims=try await relay.queryRecipientProofs(page.ids,configuration:configuration)
+            try requireCurrent()
+            recipientProofSummaries=try ledger.applyQuery(claims,requested:page.ids)
+            recipientProofPollCursor=page.ids.last
+        } else {
+            try requireCurrent()
+            recipientProofSummaries=page.summaries
+        }
+    }
+
+    private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration,proofEnabled:Bool=false) async throws {
+        let generation=configurationGeneration
         let now = Date.now
         guard let envelopeDate = ISO8601DateFormatter().date(from: envelope.createdAt),
               abs(now.timeIntervalSince(envelopeDate)) < 600 else {
@@ -1136,9 +1806,26 @@ final class ChatModel {
             // relay availability failures.
             throw ChatError.invalidEnvelope
         }
-        try commitVerifiedReceive {
+        try await commitHistoryMutation(generation:generation,verifiedEnvelopeIDs:[envelope.id]) {
+            let alreadySeen=seenEnvelopeIDs[envelope.id] != nil
             try storeVerifiedFragment(envelope, plaintext: plaintext, configuration: configuration,
                                      envelopeDate: envelopeDate, now: now)
+            if proofEnabled && isFamilyCredentialActive && !alreadySeen {
+                guard seenEnvelopeIDs[envelope.id] != nil else {throw ChatHistoryError.invalidArchive}
+                let claim=try ChatRecipientProofV1.unsignedClaim(envelope)
+                if let old=pendingRecipientProofs[envelope.id] {
+                    guard old.proof.envelopeSHA256==claim.envelopeSHA256,
+                          old.keyFingerprint==keys.safetyNumber else {throw ChatHistoryError.invalidArchive}
+                } else {
+                    // Claims older than the server's retention cannot become
+                    // new delivery evidence. Prune only expired local metadata.
+                    pendingRecipientProofs=pendingRecipientProofs.filter{
+                        now.timeIntervalSince($0.value.committedAt)<86400}
+                    guard pendingRecipientProofs.count<4096 else {throw ChatHistoryError.capacity}
+                    pendingRecipientProofs[envelope.id]=ChatPendingRecipientProof(proof:claim,
+                        keyFingerprint:keys.safetyNumber,committedAt:now)
+                }
+            }
         }
     }
 
@@ -1216,22 +1903,32 @@ final class ChatModel {
             delivery: .received
         )
         receivedMessage.conversationID = partial.conversationID
-        appendMessage(receivedMessage)
+        try appendMessage(receivedMessage)
         seenEnvelopeIDs[envelope.id] = now
     }
 
     private func updateDelivery(id: String, to delivery: ChatMessage.Delivery) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = messages.firstIndex(where: { $0.id == id && $0.direction == .outgoing }) else { return }
         messages[index].delivery = delivery
     }
 
-    private func appendMessage(_ message: ChatMessage) {
-        messages.append(message)
-        var totalBytes = messages.reduce(0) { $0 + $1.data.count }
-        while messages.count > 200 || totalBytes > 160 * 1024 * 1024 {
-            guard !messages.isEmpty else { break }
-            totalBytes -= messages.removeFirst().data.count
+    private func appendMessage(_ message: ChatMessage) throws {
+        // If the encrypted outbox cannot be read, its protected history IDs
+        // are unknown. Do not mutate/acknowledge history in that condition.
+        if isFamilyCredentialActive && chatOutboxBlocked {throw ChatHistoryError.invalidArchive}
+        var next=messages
+        next.append(message)
+        var protected=pendingChatGroupIDs
+        if let stagingChatID {protected.insert(stagingChatID)}
+        if isFamilyCredentialActive {protected.insert(message.id)}
+        var totalBytes=next.reduce(0) {$0+$1.data.count}
+        while next.count > 200 || totalBytes > 160 * 1024 * 1024 {
+            guard let evict=next.firstIndex(where:{!protected.contains($0.id)}) else {
+                throw ChatHistoryError.capacity
+            }
+            totalBytes -= next.remove(at:evict).data.count
         }
+        messages=next
     }
 
     private func restoreConfiguration() {
@@ -1301,29 +1998,78 @@ extension ChatModel {
     }
 
     private func ticketAuthorization(_ scope: TicketScreenScope, _ app: AppModel) async throws -> EncryptedTicketAuthorization {
+        let (auth,_)=try await ticketAuthorizationWithExpiry(scope,app)
+        return auth
+    }
+
+    private func ticketAuthorizationWithExpiry(_ scope: TicketScreenScope, _ app: AppModel) async throws -> (EncryptedTicketAuthorization,Date) {
         try checkTicketScope(scope, app)
-        guard let configuration else { throw ChatError.authenticationFailed }
+        let generation=configurationGeneration
+        guard let configuration,let family=app.familyChatContext(),
+              family.grant.accessToken==configuration.token else { throw ChatError.authenticationFailed }
         if scope.owner {
             let approved = try await app.requestApprovedFamilyOwnerSession()
             try checkTicketScope(scope, app)
-            guard approved.isValid(haUserID: scope.user, deviceID: scope.device)
+            guard generation==configurationGeneration, approved.isValid(haUserID: scope.user, deviceID: scope.device)
             else { throw ChatError.authenticationFailed }
-            return .owner(AdminControlConfiguration(baseURL: scope.endpoint,
+            return (.owner(AdminControlConfiguration(baseURL: scope.endpoint,
                 ownerToken: approved.accessToken, ownerDeviceSession: approved.deviceSession),
-                userID: scope.user, deviceID: scope.device)
+                userID: scope.user, deviceID: scope.device),
+                Date(timeIntervalSince1970:TimeInterval(min(approved.expiresAt,family.grant.expiresAt))))
         }
-        return .member(configuration)
+        return (.member(configuration),Date(timeIntervalSince1970:TimeInterval(family.grant.expiresAt)))
     }
 
-    func secureTicketList(_ scope: TicketScreenScope, app: AppModel) async throws -> [EncryptedTicketSummary] {
-        let auth = try await ticketAuthorization(scope, app)
+    private func resetTicketReadAccess() {
+        ticketReadFence.invalidate()
+        ticketReadLease=nil
+        ticketCacheReady=false
+        ticketReadOffline=false
+    }
+
+    func invalidateSecureTicketRead(_ scope:TicketScreenScope) {
+        if ticketReadLease?.scope==scope || ticketReadFence.scope==scope { resetTicketReadAccess() }
+    }
+
+    private func handleTicketAuthorizationDenial(_ error:Error,scope:TicketScreenScope,generation:UInt64,app:AppModel) {
+        // Consult the matching active lease/fence, including an in-flight
+        // request. A denied old revision is not a reason to keep reading.
+        if TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:generation,
+              currentGeneration:configurationGeneration,requestScope:scope,activeScope:ticketReadLease?.scope) ||
+           TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:generation,
+              currentGeneration:configurationGeneration,requestScope:scope,activeScope:ticketReadFence.scope) {
+            resetTicketReadAccess()
+            // Owner approval is requested anew by AppModel; no cached owner session exists here.
+        }
+    }
+
+    func secureTicketCanRead(_ scope:TicketScreenScope,app:AppModel) -> Bool {
+        guard secureTicketScope(app)==scope,let lease=ticketReadLease else {return false}
+        return (try? lease.require(scope,generation:configurationGeneration)) != nil
+    }
+
+    func secureTicketIsOffline(_ scope:TicketScreenScope,app:AppModel) -> Bool {
+        secureTicketCanRead(scope,app:app) && ticketReadOffline
+    }
+
+    private func ticketLocalIdentity(_ scope:TicketScreenScope,app:AppModel) throws -> ChatIdentity {
+        try checkTicketScope(scope,app)
+        guard let keys else {throw ChatError.authenticationFailed}
+        return keys.publicIdentity(userID:scope.user,deviceID:scope.device)
+    }
+
+    private func fetchSecureTicketList(_ scope:TicketScreenScope,app:AppModel,
+                                       auth:EncryptedTicketAuthorization,generation:UInt64) async throws -> [EncryptedTicketSummary] {
         let client = EncryptedTicketClient()
         var result: [EncryptedTicketSummary] = []
         var cursor: String?
         for _ in 0..<21 {
             let page = try await client.list(using: auth, after: cursor)
             try checkTicketScope(scope, app)
-            guard page.tickets.allSatisfy({ cursor == nil || $0.ticketID > cursor! }),
+            guard generation==configurationGeneration else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            guard page.tickets.allSatisfy({ (cursor == nil || $0.ticketID > cursor!) &&
+                TicketIdentityBinding.matches(local,scope.owner ? $0.owner : $0.requester) }),
                   Set(result.map(\.id)).isDisjoint(with: Set(page.tickets.map(\.id)))
             else { throw ChatError.invalidResponse }
             result.append(contentsOf: page.tickets)
@@ -1333,6 +2079,86 @@ extension ChatModel {
             cursor = next
         }
         throw ChatError.invalidResponse
+    }
+
+    func secureTicketList(_ scope:TicketScreenScope,app:AppModel) async throws -> [EncryptedTicketSummary] {
+        try checkTicketScope(scope,app)
+        let generation=configurationGeneration
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        let revision=ticketReadFence.begin(scope)
+        do {
+            let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
+            let result=try await fetchSecureTicketList(scope,app:app,auth:auth,generation:generation)
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
+            ticketCacheReady=false
+            do {
+                try SecureTicketCache(scope:scope,local:local).replaceList(result,lease:lease)
+                ticketCacheReady=true
+            } catch {}
+            ticketReadLease=lease
+            ticketReadOffline=false
+            return result
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
+            guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
+                  secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+            do {
+                let local=try ticketLocalIdentity(scope,app:app)
+                let result=try SecureTicketCache(scope:scope,local:local).list(lease:lease)
+                ticketReadOffline=true
+                return result
+            } catch {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+        }
+    }
+
+    func readSecureTicketDetail(_ id:String,scope:TicketScreenScope,app:AppModel) async throws -> EncryptedTicketDetail {
+        try checkTicketScope(scope,app)
+        let generation=configurationGeneration
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        let revision=ticketReadFence.begin(scope)
+        do {
+            let (auth,expiry)=try await ticketAuthorizationWithExpiry(scope,app)
+            let result=try await EncryptedTicketClient().detail(id,using:auth)
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
+            let local=try ticketLocalIdentity(scope,app:app)
+            guard TicketIdentityBinding.matches(local,scope.owner ? result.owner : result.requester)
+            else {throw ChatError.identityChanged}
+            let lease=try TicketOfflineLease(scope:scope,verifiedGrantExpiry:expiry,generation:generation)
+            if ticketCacheReady {
+                do {try SecureTicketCache(scope:scope,local:local).putDetail(result,lease:lease)}
+                catch {ticketCacheReady=false}
+            }
+            ticketReadLease=lease
+            ticketReadOffline=false
+            return result
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
+            guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
+                  secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+            do {
+                let local=try ticketLocalIdentity(scope,app:app)
+                guard let result=try SecureTicketCache(scope:scope,local:local).detail(id,lease:lease)
+                else {throw ChatError.invalidResponse}
+                ticketReadOffline=true
+                return result
+            } catch {
+                invalidateSecureTicketRead(scope)
+                throw error
+            }
+        }
     }
 
     func secureTicketOwnerDevices(_ scope: TicketScreenScope, app: AppModel) async throws -> [ChatIdentity] {
@@ -1367,7 +2193,7 @@ extension ChatModel {
     func openSecureTicket(_ detail: EncryptedTicketDetail, number: String,
                           scope: TicketScreenScope, app: AppModel) throws -> [TicketReadableMessage] {
         try checkTicketScope(scope, app)
-        guard let keys else { throw ChatError.authenticationFailed }
+        guard secureTicketCanRead(scope,app:app),let keys else { throw ChatError.authenticationFailed }
         let local = TicketIdentityBinding.canonical(keys.publicIdentity(userID: scope.user, deviceID: scope.device))
         let requester = TicketIdentityBinding.canonical(detail.requester)
         let owner = TicketIdentityBinding.canonical(detail.owner)
@@ -1424,14 +2250,47 @@ extension ChatModel {
         try SecureTicketOutbox(scope: scope).stage(pending)
     }
 
+    private func beginTicketWrite(_ scope:TicketScreenScope) throws -> (UInt64,UInt64) {
+        let generation=configurationGeneration
+        guard ticketWriteGeneration != generation else {throw ChatHistoryError.busy}
+        ticketWriteGeneration=generation
+        let revision=ticketReadFence.begin(scope)
+        ticketCacheReady=false
+        return (generation,revision)
+    }
+
+    private func requireTicketWrite(_ scope:TicketScreenScope,app:AppModel,generation:UInt64,revision:UInt64) throws {
+        try checkTicketScope(scope,app)
+        guard ticketWriteGeneration==generation else {throw CancellationError()}
+        try ticketReadFence.requireWrite(revision,scope:scope,generation:generation,
+            currentGeneration:configurationGeneration,lease:ticketReadLease)
+    }
+
+    private func finishTicketWrite(_ generation:UInt64) {
+        guard ticketWriteGeneration==generation else {return}
+        ticketWriteGeneration=nil
+        if generation==configurationGeneration {
+            ticketReadFence.invalidate()
+            ticketCacheReady=false
+        }
+    }
+
     func submitSecureTicket(_ pending: TicketPendingSend, scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
-        guard pending.scope == scope, let configuration else { throw ChatError.authenticationFailed }
+        guard pending.scope == scope, let configuration,
+              secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
+        // An ambiguous write may have changed remote history.
+        let (generation,revision)=try beginTicketWrite(scope)
+        defer {finishTicketWrite(generation)}
+        do {
         try checkTicketScope(scope, app)
+        try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
         let current = try await relay.identities(for: pending.peer.userID, configuration: configuration)
         try checkTicketScope(scope, app)
+        try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
         guard current.contains(where: { TicketIdentityBinding.matches($0, pending.peer) }) else { throw ChatError.identityChanged }
         let auth = try await ticketAuthorization(scope, app)
         try checkTicketScope(scope, app)
+        try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
         // Reauthenticate the stored signed message against the current key.
         guard let keys, try SecureTicketOutbox(scope: scope).pending() == pending,
               let safety = ChatDeviceKeys.safetyNumber(for: pending.peer) else { throw ChatError.authenticationFailed }
@@ -1446,11 +2305,16 @@ extension ChatModel {
             result = try await client.reply(pending.message, using: auth)
         }
         try checkTicketScope(scope, app)
+        try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
         guard TicketIdentityBinding.matches(scope.owner ? result.owner : result.requester, local),
               TicketIdentityBinding.matches(scope.owner ? result.requester : result.owner, pending.peer)
         else { throw ChatError.identityChanged }
         try SecureTicketOutbox(scope: scope).acknowledge(pending, receipt: result)
         return result
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            throw error
+        }
     }
 
     func secureTicketProjects(_ scope: TicketScreenScope, app: AppModel) async throws -> [String:String] {
@@ -1473,10 +2337,21 @@ extension ChatModel {
 
     func secureTicketStatus(_ status: EncryptedTicketStatus, id: String,
                             scope: TicketScreenScope, app: AppModel) async throws -> EncryptedTicketDetail {
-        guard scope.owner else { throw ChatError.authenticationFailed }
-        let auth = try await ticketAuthorization(scope, app)
-        let result = try await EncryptedTicketClient().status(status, ticketID: id, using: auth)
-        try checkTicketScope(scope, app)
-        return result
+        guard scope.owner,secureTicketCanRead(scope,app:app),!ticketReadOffline else { throw ChatError.authenticationFailed }
+        let (generation,revision)=try beginTicketWrite(scope)
+        defer {finishTicketWrite(generation)}
+        do {
+            let auth = try await ticketAuthorization(scope, app)
+            try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
+            let result=try await EncryptedTicketClient().status(status,ticketID:id,using:auth)
+            try requireTicketWrite(scope,app:app,generation:generation,revision:revision)
+            let local=try ticketLocalIdentity(scope,app:app)
+            guard result.ticketID==id,result.status==status,TicketIdentityBinding.matches(local,result.owner)
+            else {throw ChatError.invalidResponse}
+            return result
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            throw error
+        }
     }
 }

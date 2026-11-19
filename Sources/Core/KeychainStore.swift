@@ -30,6 +30,23 @@ enum KeychainStore {
         guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
     }
 
+    /// Add only: never delete or replace a concurrent writer's value.
+    /// Used for the v2 archive key and the one-way cutover marker.
+    static func insertIfAbsent(_ data: Data, account: String,
+        accessibility: CFString = kSecAttrAccessibleWhenUnlockedThisDeviceOnly) throws -> Bool {
+        let item: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecValueData: data,
+            kSecAttrAccessible: accessibility
+        ]
+        let status = SecItemAdd(item as CFDictionary, nil)
+        if status == errSecDuplicateItem { return false }
+        guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
+        return true
+    }
+
     static func value(account: String) throws -> String? {
         guard let data = try data(account: account) else { return nil }
         return String(data: data, encoding: .utf8)

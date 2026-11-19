@@ -44,12 +44,21 @@ struct ChatDeliveryContract: Decodable, Sendable {
     let maxBatch: Int
     let ttlSeconds: Int
     let persistent: Bool
+    let sendReceiptVersion: Int?
+    let sendMaxAgeSeconds: Int?
 
     enum CodingKeys: String, CodingKey {
         case mode
         case maxBatch = "max_batch"
         case ttlSeconds = "ttl_seconds"
         case persistent
+        case sendReceiptVersion = "send_receipt_version"
+        case sendMaxAgeSeconds = "send_max_age_seconds"
+    }
+
+    var supportsIdempotentSender: Bool {
+        isSupported && persistent && sendReceiptVersion == 1 &&
+        sendMaxAgeSeconds == 90 && ttlSeconds > 90
     }
 
     var isSupported: Bool {
@@ -57,6 +66,21 @@ struct ChatDeliveryContract: Decodable, Sendable {
         ttlSeconds >= 30
     }
 }
+
+private struct ChatRecipientProofCapability:Decodable {
+    let version:Int?
+    let scope:String?
+    enum CodingKeys:String,CodingKey {
+        case version="recipient_proof_version"
+        case scope="recipient_proof_scope"
+    }
+}
+private struct ChatRecipientProofReply:Decodable { let id:String;let replayed:Bool }
+private struct ChatRecipientProofQuery:Encodable {
+    let messageIDs:[String]
+    enum CodingKeys:String,CodingKey {case messageIDs="message_ids"}
+}
+private struct ChatRecipientProofQueryReply:Decodable {let proofs:[ChatRecipientProofV1]}
 
 private struct ChatAcknowledgementRequest: Encodable {
     let recipientDeviceID: String
@@ -275,6 +299,53 @@ actor ChatRelayClient {
         )
     }
 
+    func requireIdempotentSender(configuration: ChatConfiguration) async throws {
+        let contract: ChatDeliveryContract = try await request(
+            path:"v1/chat/delivery-contract", method:"GET", body:Optional<String>.none,
+            configuration:configuration)
+        guard contract.supportsIdempotentSender else {throw ChatError.invalidResponse}
+    }
+
+    // Never fall back to the legacy POST when this contract is unavailable.
+    func sendWithReceipt(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws -> ChatSendReceiptV1 {
+        guard envelope.senderUserID==configuration.userID,
+              envelope.senderDeviceID==configuration.deviceID else {throw ChatError.authenticationFailed}
+        let receipt:ChatSendReceiptV1=try await request(
+            path:"v1/chat/messages/receipt-v1",method:"POST",body:envelope,configuration:configuration)
+        try receipt.requireMatch(envelope)
+        return receipt
+    }
+
+    func supportsRecipientProofContract(configuration:ChatConfiguration) async throws -> Bool {
+        let value:ChatRecipientProofCapability=try await request(path:"v1/chat/delivery-contract",
+            method:"GET",body:Optional<String>.none,configuration:configuration)
+        return value.version==1 && value.scope=="persisted_envelope"
+    }
+
+    func requireRecipientProofContract(configuration:ChatConfiguration) async throws {
+        guard try await supportsRecipientProofContract(configuration:configuration) else {throw ChatError.invalidResponse}
+    }
+
+    func submitRecipientProof(_ proof:ChatRecipientProofV1,configuration:ChatConfiguration) async throws {
+        guard proof.recipientUserID==configuration.userID,proof.recipientDeviceID==configuration.deviceID
+        else {throw ChatError.authenticationFailed}
+        let response:ChatRecipientProofReply=try await request(path:"v1/chat/messages/recipient-proof-v1",
+            method:"POST",body:proof,configuration:configuration)
+        guard response.id==proof.id else {throw ChatError.invalidResponse}
+    }
+
+    /// Returns untrusted signed claims. The caller MUST verify each against
+    /// the original durable envelope digest and pinned recipient identity.
+    func queryRecipientProofs(_ ids:[String],configuration:ChatConfiguration) async throws -> [ChatRecipientProofV1] {
+        guard (1...256).contains(ids.count),Set(ids).count==ids.count else {throw ChatError.invalidResponse}
+        let reply:ChatRecipientProofQueryReply=try await request(path:"v1/chat/messages/recipient-proof-v1/query",
+            method:"POST",body:ChatRecipientProofQuery(messageIDs:ids),configuration:configuration)
+        guard reply.proofs.count<=ids.count,Set(reply.proofs.map(\.id)).count==reply.proofs.count,
+              reply.proofs.allSatisfy({ids.contains($0.id) && $0.senderUserID==configuration.userID &&
+                  $0.senderDeviceID==configuration.deviceID}) else {throw ChatError.invalidResponse}
+        return reply.proofs
+    }
+
     func requireAcknowledgedDelivery(configuration: ChatConfiguration) async throws {
         let contract: ChatDeliveryContract = try await request(
             path: "v1/chat/delivery-contract",
@@ -344,6 +415,10 @@ actor ChatRelayClient {
         baseURL: URL,
         bearerToken: String
     ) async throws -> Response {
+        guard LegacyTicketTransportPolicy.allows(path:path,
+            familyBrokerConfigured:FamilyBootstrapClient.configuredURL() != nil) else {
+            throw ChatError.authenticationFailed
+        }
         let transportBaseURL = Self.transportBaseURL(for: baseURL)
         guard let url = URL(string: path, relativeTo: transportBaseURL)?.absoluteURL else {
             throw ChatError.invalidConfiguration

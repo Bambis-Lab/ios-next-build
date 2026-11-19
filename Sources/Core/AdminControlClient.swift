@@ -407,6 +407,10 @@ actor AdminControlClient {
         configuration: AdminControlConfiguration,
         extraHeaders: [String: String] = [:]
     ) async throws -> Response {
+        guard LegacyTicketTransportPolicy.allows(path:path,
+            familyBrokerConfigured:FamilyBootstrapClient.configuredURL() != nil) else {
+            throw AdminControlError.forbidden
+        }
         guard let url = URL(string: path, relativeTo: configuration.baseURL)?.absoluteURL else {
             throw AdminControlError.invalidConfiguration
         }
@@ -435,6 +439,10 @@ actor AdminControlClient {
         configuration: AdminControlConfiguration,
         extraHeaders: [String: String] = [:]
     ) async throws -> Response {
+        guard LegacyTicketTransportPolicy.allows(path:path,
+            familyBrokerConfigured:FamilyBootstrapClient.configuredURL() != nil) else {
+            throw AdminControlError.forbidden
+        }
         guard let url = URL(string: path, relativeTo: configuration.baseURL)?.absoluteURL else {
             throw AdminControlError.invalidConfiguration
         }
@@ -622,27 +630,42 @@ final class AdminControlModel {
 
     func refresh() async {
         guard case .unlocked = state, let configuration else { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            lastError = nil
-            async let status = client.status(configuration: configuration)
-            async let audit = client.audit(configuration: configuration)
-            async let routes = client.projectRoutes(configuration: configuration)
-            backendStatus = try await status
-            auditEvents = try await audit
-            if FamilyBootstrapClient.configuredURL() == nil {
-                let tickets = try await client.tickets(configuration: configuration)
-                if FamilyBootstrapClient.configuredURL() == nil { supportTickets = tickets }
-            } else {
-                supportTickets = []
-                ticketDetails = [:]
-                lastDispatch = nil
+        let generation=ownerSessionGeneration
+        func current() -> Bool {
+            guard !Task.isCancelled,generation==ownerSessionGeneration,self.configuration==configuration,
+                  case .unlocked=state else {return false}
+            if FamilyBootstrapClient.configuredURL() != nil {
+                guard let expires=deviceSessionExpiresAt,expires>Date() else {return false}
             }
-            projectRoutes = try await routes
+            return true
+        }
+        guard current() else {return}
+        isLoading=true
+        defer {if generation==ownerSessionGeneration && self.configuration==configuration {isLoading=false}}
+        do {
+            lastError=nil
+            async let status=client.status(configuration:configuration)
+            async let audit=client.audit(configuration:configuration)
+            async let routes=client.projectRoutes(configuration:configuration)
+            let values=try await (status,audit,routes)
+            guard current() else {return}
+            let tickets:[SupportTicket]
+            if FamilyBootstrapClient.configuredURL()==nil {
+                tickets=try await client.tickets(configuration:configuration)
+            } else {tickets=[]}
+            guard current() else {return}
+            backendStatus=values.0
+            auditEvents=values.1
+            projectRoutes=values.2
+            supportTickets=tickets
+            if FamilyBootstrapClient.configuredURL() != nil {
+                ticketDetails=[:]
+                lastDispatch=nil
+            }
             await refreshV2()
         } catch {
-            lastError = error.localizedDescription
+            guard current() else {return}
+            lastError=error.localizedDescription
         }
     }
 

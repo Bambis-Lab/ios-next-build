@@ -56,8 +56,14 @@ final class SecureTicketOutbox {
 
     /// The caller must have a validated server receipt with the exact message.
     func acknowledge(_ value: TicketPendingSend, receipt: EncryptedTicketDetail) throws {
+        let local=scope.owner ? receipt.owner : receipt.requester
+        let peer=scope.owner ? receipt.requester : receipt.owner
         guard try pending() == value, receipt.ticketID == value.message.ticketID,
-              receipt.messages.contains(value.message) else { throw ChatError.invalidResponse }
+              receipt.messages.filter({$0.messageID==value.message.messageID}) == [value.message],
+              local.userID==scope.user,local.deviceID==scope.device,
+              ChatDeviceKeys.safetyNumber(for:local)==scope.keyFingerprint,
+              TicketIdentityBinding.matches(peer,value.peer)
+        else { throw ChatError.invalidResponse }
         try archive.save(Snapshot(version: 1, pending: nil))
     }
 }

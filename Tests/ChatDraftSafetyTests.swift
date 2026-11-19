@@ -369,4 +369,88 @@ final class ChatDraftSafetyTests: XCTestCase {
     }
 
 
+
+    func testRecoverOutgoingHistoryDoesNotMarkDurableSendAsFailed() throws {
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a")
+        let peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,
+            device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        let group=UUID().uuidString.lowercased(),now=Date()
+        let data=Data("synthetic recovery".utf8)
+        let envelope=try keys.encrypt(data,kind:.text,contentType:"text/plain",groupID:group,
+            chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:ISO8601DateFormatter().string(from:now))
+        let pending=DurableChatOutbox.Pending(scope:scope,groupID:group,recipients:[peer],
+            entries:[.init(envelope:envelope,phase:.uncertain)])
+        func message(_ id:String,_ recipient:String)->ChatMessage {
+            ChatMessage(id:id,senderUserID:local.userID,recipientUserID:recipient,kind:.text,contentType:"text/plain",
+                data:data,createdAt:now,direction:.outgoing,delivery:.sending)
+        }
+        let durable=message(group,peer.userID),orphan=message(UUID().uuidString.lowercased(),peer.userID)
+        let recovered=try ChatModel.recoverOutgoingHistory([durable,orphan],pending:[pending])
+        XCTAssertEqual(recovered.map(\.delivery),[.sending,.failed])
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([orphan],pending:[pending]))
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([message(group,"other")],pending:[pending]))
+        XCTAssertThrowsError(try ChatModel.recoverOutgoingHistory([durable,durable],pending:[pending]))
+    }
+
+    func testAutomaticResumeRequiresAllEntriesNeverSubmitted() throws {
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a")
+        let peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,
+            device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        let group=UUID().uuidString.lowercased()
+        let e=try keys.encrypt(Data("fixture".utf8),kind:.text,contentType:"text/plain",groupID:group,
+            chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:ISO8601DateFormatter().string(from:Date()))
+        var pending=DurableChatOutbox.Pending(scope:scope,groupID:group,recipients:[peer],
+            entries:[.init(envelope:e,phase:.ready)])
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(nil))
+        XCTAssertTrue(ChatModel.canAutomaticallyResume(pending))
+        pending.entries[0].phase = .uncertain
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+        pending.entries[0].phase = .confirmed
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+        pending.entries=[]
+        XCTAssertFalse(ChatModel.canAutomaticallyResume(pending))
+    }
+
+    func testCapturedMediaScopeChangesOnRecipientRoleOrAccountSwitch() throws {
+        let endpoint=try XCTUnwrap(URL(string:"https://example.invalid"))
+        func target(generation:UInt64=1,revision:UInt64=0,user:String="a",device:String="ios-a",peer:String="b",
+                    family:Bool=false,members:[String]=[]) -> ChatModel.MediaTarget {
+            .init(generation:generation,selectionRevision:revision,endpoint:endpoint,user:user,device:device,peer:peer,family:family,members:members)
+        }
+        let original=target()
+        XCTAssertEqual(original,target())
+        XCTAssertNotEqual(original,target(generation:2))
+        XCTAssertNotEqual(original,target(revision:1))
+        XCTAssertNotEqual(original,target(user:"c"))
+        XCTAssertNotEqual(original,target(device:"ios-c"))
+        XCTAssertNotEqual(original,target(peer:"c"))
+        XCTAssertNotEqual(original,target(family:true,members:["a","b"]))
+        XCTAssertNotEqual(target(family:true,members:["a","b"]),target(family:true,members:["a","c"]))
+    }
+
+    func testMediaContextNeverRevivesAfterRoundTripOrOfflineReconnect() {
+        let chat=ChatModel()
+        chat.recipientUserID="fixture-a"
+        let initial=chat.mediaContextRevision
+        chat.recipientUserID="fixture-b"
+        chat.recipientUserID="fixture-a"
+        XCTAssertEqual(chat.mediaContextRevision,initial+2)
+        let direct=chat.mediaContextRevision
+        chat.showingFamilyGroup=true
+        chat.showingFamilyGroup=false
+        XCTAssertEqual(chat.mediaContextRevision,direct+2)
+        chat.state = .online
+        let online=chat.mediaContextRevision
+        chat.state = .offline("synthetic disconnect")
+        chat.state = .online
+        XCTAssertEqual(chat.mediaContextRevision,online+2)
+        chat.state = .online
+        XCTAssertEqual(chat.mediaContextRevision,online+2)
+    }
 }
