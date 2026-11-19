@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "phase": "SR21",
+  "run": 44521986318,
+  "pr": 17,
+  "prHead": "ac0f9441e66e6deb06ea318b83f6160b7f3817bb",
+  "testedMerge": "ee3a67faabc94fa869e076119e9cd5cb66af61c1",
+  "attempt": 1,
+  "terminalJobs": {
+    "source": "success",
+    "build": "success",
+    "AB": "success",
+    "CF": "success",
+    "roleA": "failure",
+    "roleB": "failure",
+    "validate": "failure",
+    "aggregate": "failure"
+  },
+  "native": {
+    "unitTests": 148,
+    "uiTests": 4,
+    "failed": 0,
+    "skipped": 0,
+    "expectedFailures": 0,
+    "prerequisitePassed": 2,
+    "roleReadXCTestPassed": 2,
+    "roleHandoffAccepted": 0,
+    "distinctBootSessions": 4,
+    "productSha256": "aee5ad6d78c9ce54b1e9c5c751116048c1c12e4f644900b6dbaeca386a8f1338"
+  },
+  "failure": {
+    "stage": "verify_sandbox_identity",
+    "reason": "sandbox_changed",
+    "exactCauseOfLifecycleChangeUnproven": true
+  },
+  "archive": {
+    "scope": "original CI artifacts preserved in conversation export; not uploaded to public repo",
+    "bytes": 20051102,
+    "sha256": "30198c9393c07609354105db461594beca21a629bc47a9f19a614270ec8c642a",
+    "artifacts": [
+      14529537849,
+      14529236516,
+      14529148054,
+      14528842694,
+      14528722908,
+      14528637718,
+      14528446531,
+      14527769773
+    ],
+    "verifiedAllOriginalHashes": true
+  },
+  "repair": {
+    "head": "43323ac66cd82435bffc7faff19857c6fb330502",
+    "syntheticLocalReceiptTestsPassed": 14,
+    "localCryptography": "46.0.4",
+    "nativeStatus": "PENDING",
+    "policyScope": "explicit hosted disposable offline test only; no live relay authorization"
+  },
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN"
+  },
+  "release": false
+}
