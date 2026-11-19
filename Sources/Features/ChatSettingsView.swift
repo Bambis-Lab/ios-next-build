@@ -9,6 +9,7 @@ struct ChatSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingTechnicalConfiguration = false
     @State private var confirmV2=false
+    @State private var confirmExpired=false
 
     private var connectionTitle: String {
         switch chatModel.state {
@@ -63,13 +64,26 @@ struct ChatSettingsView: View {
                             Text("Versandjournal nicht lesbar. Kein automatischer Versand.").foregroundStyle(.secondary)
                         } else if chatModel.pendingChatSendID != nil {
                             Text("Eine Nachricht ist noch nicht vollständig bestätigt.").font(.footnote)
-                            Button("Identische Nachricht erneut prüfen und übertragen",systemImage:"arrow.clockwise") {
-                                Task {await chatModel.retryPendingChatSend()}
+                            TimelineView(.periodic(from:.now,by:1)) { context in
+                                let expired = !chatModel.pendingChatAllConfirmed &&
+                                    (chatModel.pendingChatExpiresAt.map{$0<=context.date} ?? false)
+                                if expired {
+                                    Button("Abgelaufenen Versand abschließen",systemImage:"archivebox") {confirmExpired=true}
+                                        .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
+                                        .accessibilityIdentifier("chat-settings-close-expired-send")
+                                    Text("Es ist unklar, ob bereits Teile zugestellt wurden. Kein erneuter Versand.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Button(chatModel.pendingChatAllConfirmed ? "Versandstatus speichern" : "Identische Nachricht erneut prüfen und übertragen",
+                                           systemImage:"arrow.clockwise") {
+                                        Task {await chatModel.retryPendingChatSend()}
+                                    }
+                                    .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
+                                    .accessibilityIdentifier("chat-settings-retry-pending-send")
+                                    Text("Keine neue Nachrichten-ID. Eine Relay-Bestätigung ist kein Empfangsnachweis.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                             }
-                            .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
-                            .accessibilityIdentifier("chat-settings-retry-pending-send")
-                            Text("Nur nach erneuter Empfängerprüfung und innerhalb des zulässigen Zeitfensters. Keine neue Nachrichten-ID.")
-                                .font(.caption).foregroundStyle(.secondary)
                         } else {
                             Text("Keine ausstehenden Versandaufträge").foregroundStyle(.secondary)
                         }
@@ -110,6 +124,12 @@ struct ChatSettingsView: View {
                 Button("Abbrechen",role:.cancel) {}
             } message: {
                 Text("Empfang und Versand werden während der Prüfung pausiert. Das Originalarchiv wird nicht gelöscht. Die Aktivierung ist nicht automatisch rückgängig zu machen.")
+            }
+            .alert("Abgelaufenen Versand abschließen?",isPresented:$confirmExpired) {
+                Button("Lokal abschließen",role:.destructive) {Task {await chatModel.closeExpiredChatSend()}}
+                Button("Abbrechen",role:.cancel) {}
+            } message: {
+                Text("Der Verlauf bleibt erhalten. Bereits zugestellte Teile können nicht zurückgerufen werden. Es wird nichts erneut gesendet.")
             }
             .navigationTitle("Chat-Einstellungen")
             .navigationBarTitleDisplayMode(.inline)

@@ -185,7 +185,7 @@ struct ChatConfiguration: Equatable, Sendable {
 
 struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     enum Direction: String, Equatable, Sendable, Codable { case incoming, outgoing }
-    enum Delivery: String, Equatable, Sendable, Codable { case sending, queued, received, failed }
+    enum Delivery: String, Equatable, Sendable, Codable { case sending, queued, received, failed, unconfirmedExpired }
 
     let id: String
     let senderUserID: String

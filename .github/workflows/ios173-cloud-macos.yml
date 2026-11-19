@@ -1,7 +1,7 @@
 name: iOS173 Cloud macOS target acceptance
 on:
   push:
-    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover', 'feature/ios173-v3-storage-binding', 'feature/ios173-v3-storage-routing', 'feature/ios173-v3-storage-explicit-activation', 'feature/ios173-v3-chat-outbox', 'feature/ios180-v4-receipt-client', 'feature/ios180-v4-outbox-integration']
+    branches: ['feature/ios173-n00-n08-cloud', 'feature/ios173-v3-storage-cutover', 'feature/ios173-v3-storage-binding', 'feature/ios173-v3-storage-routing', 'feature/ios173-v3-storage-explicit-activation', 'feature/ios173-v3-chat-outbox', 'feature/ios180-v4-receipt-client', 'feature/ios180-v4-outbox-integration', 'feature/ios180-v5-expired-outbox']
   workflow_dispatch:
 permissions:
   contents: read

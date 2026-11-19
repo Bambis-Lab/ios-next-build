@@ -24,9 +24,20 @@ final class DurableChatOutbox {
         let recipients: [ChatIdentity]
         var entries: [Entry]
     }
+    struct ExpiredRecord: Codable, Equatable, Sendable {
+        let groupID:String
+        let closedAt:Date
+        let entries:[EntrySummary]
+        struct EntrySummary:Codable,Equatable,Sendable {
+            let id:String
+            let digest:String
+            let phase:Phase
+        }
+    }
     private struct Snapshot: Codable {
         let version: Int
         let pending: Pending?
+        let expired:[ExpiredRecord]?
     }
 
     private let scope: ChatOutboxScope
@@ -85,16 +96,65 @@ final class DurableChatOutbox {
         guard try JSONEncoder().encode(batch).count<=Self.maxArchiveBytes else {throw ChatHistoryError.capacity}
     }
 
-    func pending() throws -> Pending? {
-        guard let snapshot=try archive.load(Snapshot.self) else {return nil}
+    private func readSnapshot() throws -> Snapshot {
+        guard let snapshot=try archive.load(Snapshot.self) else {
+            return Snapshot(version:1,pending:nil,expired:nil)
+        }
         guard snapshot.version==1 else {throw ChatHistoryError.invalidArchive}
         if let batch=snapshot.pending {try validate(batch)}
-        return snapshot.pending
+        let expired=snapshot.expired ?? []
+        guard expired.count<=200,
+              Set(expired.map(\.groupID)).count==expired.count,
+              expired.allSatisfy({record in
+                  EncryptedTicketMessage.validID(record.groupID) &&
+                  (1...1024).contains(record.entries.count) &&
+                  Set(record.entries.map(\.id)).count==record.entries.count &&
+                  record.entries.contains(where:{$0.phase != .confirmed}) &&
+                  record.entries.allSatisfy({EncryptedTicketMessage.validID($0.id) &&
+                      $0.digest.utf8.count==64 && $0.digest.utf8.allSatisfy({(48...57).contains($0)||(97...102).contains($0)})})
+              }),
+              !expired.contains(where:{$0.groupID==snapshot.pending?.groupID})
+        else {throw ChatHistoryError.invalidArchive}
+        return snapshot
     }
+
+    func pending() throws -> Pending? {try readSnapshot().pending}
+    func expiredRecords() throws -> [ExpiredRecord] {try readSnapshot().expired ?? []}
 
     private func save(_ batch:Pending?) throws {
         if let batch {try validate(batch)}
-        try archive.save(Snapshot(version:1,pending:batch))
+        let old=try readSnapshot()
+        guard !(old.expired ?? []).contains(where:{$0.groupID==batch?.groupID}) else {
+            throw ChatHistoryError.invalidArchive
+        }
+        try archive.save(Snapshot(version:1,pending:batch,expired:old.expired))
+    }
+
+    func expiredPending(now:Date = .now) throws -> Pending? {
+        guard let batch=try pending(),
+              batch.entries.contains(where:{$0.phase != .confirmed}),
+              let first=batch.entries.first?.envelope,
+              let stamp=ISO8601DateFormatter().date(from:first.createdAt),
+              now.timeIntervalSince(stamp)>=90 else {return nil}
+        return batch
+    }
+
+    /// No transport action is performed. The caller must first durably mark
+    /// the local history as an unknown delivery outcome, then release the slot.
+    /// Keep bounded, encrypted per-envelope audit metadata, not media copies.
+    func closeExpiredAfterHistoryCommit(groupID:String,now:Date = .now) throws {
+        guard let batch=try expiredPending(now:now),batch.groupID==groupID else {
+            throw ChatHistoryError.busy
+        }
+        let old=try readSnapshot()
+        var records=old.expired ?? []
+        let entries=try batch.entries.map {
+            ExpiredRecord.EntrySummary(id:$0.envelope.id,
+                digest:try ChatSendReceiptV1.digest($0.envelope),phase:$0.phase)
+        }
+        records.append(ExpiredRecord(groupID:groupID,closedAt:now,entries:entries))
+        records=Array(records.suffix(200))
+        try archive.save(Snapshot(version:1,pending:nil,expired:records))
     }
 
     func stage(groupID:String,recipients:[ChatIdentity],envelopes:[ChatEnvelope]) throws {

@@ -448,7 +448,8 @@ private struct ChatBubble: View {
                     Text(message.createdAt, format: .dateTime.hour().minute())
                     if message.direction == .outgoing {
                         Image(systemName: deliverySymbol)
-                            .foregroundStyle(message.delivery == .failed ? .red : .secondary)
+                            .foregroundStyle(message.delivery == .failed || message.delivery == .unconfirmedExpired ? .red : .secondary)
+                            .accessibilityLabel(deliveryLabel)
                     }
                 }
                 .font(.caption2)
@@ -499,7 +500,17 @@ private struct ChatBubble: View {
         case .sending: "clock"
         case .queued: "checkmark"
         case .received: "checkmark"
-        case .failed: "exclamationmark.circle.fill"
+        case .failed, .unconfirmedExpired: "exclamationmark.circle.fill"
+        }
+    }
+
+    private var deliveryLabel:String {
+        switch message.delivery {
+        case .sending: "Versand läuft"
+        case .queued: "Vom Relay angenommen, Zustellung nicht bestätigt"
+        case .received: "Empfangen"
+        case .failed: "Versand nicht bestätigt"
+        case .unconfirmedExpired: "Versandzeitfenster abgelaufen, Zustellung unklar"
         }
     }
 }

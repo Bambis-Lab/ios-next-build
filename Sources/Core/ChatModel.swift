@@ -55,6 +55,8 @@ final class ChatModel {
     var isSending = false
     private(set) var pendingChatSendID:String?
     private(set) var chatOutboxBlocked=false
+    private(set) var pendingChatExpiresAt:Date?
+    private(set) var pendingChatAllConfirmed=false
     var accessRole: ChatAccessRole?
     var lastCreatedTicketID: String?
     var memberTickets: [SupportTicket] = []
@@ -88,12 +90,23 @@ final class ChatModel {
 
     private func refreshChatOutboxState(configuration:ChatConfiguration,keys:ChatDeviceKeys) {
         pendingChatSendID=nil
+        pendingChatExpiresAt=nil
+        pendingChatAllConfirmed=false
         chatOutboxBlocked=false
         do {
-            pendingChatSendID=try openChatOutbox(configuration:configuration,keys:keys).pending()?.groupID
+            let pending=try openChatOutbox(configuration:configuration,keys:keys).pending()
+            applyPendingChatState(pending)
         } catch {
             chatOutboxBlocked=true
         }
+    }
+
+    private func applyPendingChatState(_ pending:DurableChatOutbox.Pending?) {
+        pendingChatSendID=pending?.groupID
+        pendingChatExpiresAt=pending?.entries.first.flatMap {
+            ISO8601DateFormatter().date(from:$0.envelope.createdAt)?.addingTimeInterval(90)
+        }
+        pendingChatAllConfirmed=pending?.entries.allSatisfy({$0.phase == .confirmed}) ?? false
     }
 
     private func loadFamilyHistory(configuration: ChatConfiguration) async throws {
@@ -107,6 +120,8 @@ final class ChatModel {
         guard self.configuration == configuration, let keys else { throw CancellationError() }
         historyArchive=nil
         historyRecordCheckpoint=nil
+        // Clear decrypted state before even the marker/key lookup can throw.
+        restoreCheckpoint(HistorySnapshot(version:1,messages:[],partials:[:],seen:[:]))
         // A marker, once published by the separately authorized migration,
         // is the authority. Missing/corrupt v2 must never reactivate v1.
         if try ChatV2MigrationCoordinator.hasActiveMarker(configuration:configuration,keyFingerprint:keys.safetyNumber) {
@@ -770,7 +785,7 @@ final class ChatModel {
     }
 
     func stop() {
-        pendingChatSendID=nil
+        applyPendingChatState(nil)
         chatOutboxBlocked=false
         resetCalls()
         configurationGeneration &+= 1
@@ -790,7 +805,7 @@ final class ChatModel {
     }
 
     func forgetConfiguration(preservingStartup: Bool = false) {
-        pendingChatSendID=nil
+        applyPendingChatState(nil)
         chatOutboxBlocked=false
         historyArchive = nil
         historyRecordCheckpoint = nil
@@ -1100,7 +1115,7 @@ final class ChatModel {
                     throw ChatHistoryError.invalidArchive
                 }
                 try outbox.stage(groupID:groupID,recipients:recipients,envelopes:staged)
-                pendingChatSendID=groupID
+                applyPendingChatState(try outbox.pending())
                 try await flushChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
                 return true
             }
@@ -1125,6 +1140,33 @@ final class ChatModel {
 
     // Only explicit user action retries an ambiguous submission after a
     // restart. The same signed envelopes are reused, never encrypted again.
+    /// Explicit, local-only closure of an expired uncertain send. A queued
+    /// fragment may already have arrived: never claim non-delivery or resend.
+    func closeExpiredChatSend() async {
+        guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
+              let configuration,let keys else {return}
+        let generation=configurationGeneration
+        isSending=true
+        defer {isSending=false}
+        do {
+            let outbox=try openChatOutbox(configuration:configuration,keys:keys)
+            guard let pending=try outbox.expiredPending() else {throw ChatHistoryError.busy}
+            try await commitHistoryMutation(generation:generation) {
+                guard messages.contains(where:{$0.id==pending.groupID && $0.direction == .outgoing &&
+                    $0.senderUserID==configuration.userID}) else {throw ChatHistoryError.invalidArchive}
+                updateDelivery(id:pending.groupID,to:.unconfirmedExpired)
+            }
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration else {return}
+            try outbox.closeExpiredAfterHistoryCommit(groupID:pending.groupID)
+            applyPendingChatState(nil)
+            lastError="Versandauftrag abgeschlossen. Eine frühere Zustellung kann nicht ausgeschlossen werden."
+        } catch {
+            guard generation==configurationGeneration else {return}
+            lastError="Abschluss nicht möglich. Der gesicherte Versandauftrag bleibt erhalten."
+        }
+    }
+
     func retryPendingChatSend() async {
         guard isFamilyCredentialActive,state == .online,!isSending,!historyMigrationInProgress,
               let configuration,let keys else {return}
@@ -1133,7 +1175,7 @@ final class ChatModel {
         defer {isSending=false}
         do {
             let outbox=try openChatOutbox(configuration:configuration,keys:keys)
-            pendingChatSendID=try outbox.pending()?.groupID
+            applyPendingChatState(try outbox.pending())
             guard pendingChatSendID != nil else {return}
             try await flushChatOutbox(outbox,configuration:configuration,generation:generation)
             if generation==configurationGeneration {lastError=nil}
@@ -1188,6 +1230,7 @@ final class ChatModel {
                 let receipt=try await relay.sendWithReceipt(envelope,configuration:configuration)
                 try requireCurrent()
                 try outbox.confirm(envelope,receipt:receipt)
+                applyPendingChatState(try outbox.pending())
             }
         }
         try await commitHistoryMutation(generation:generation) {
@@ -1198,7 +1241,7 @@ final class ChatModel {
         }
         try requireCurrent()
         try outbox.finishAfterHistoryCommit(groupID:pending.groupID)
-        pendingChatSendID=nil
+        applyPendingChatState(nil)
     }
 
     func loadMemberTickets() async {
