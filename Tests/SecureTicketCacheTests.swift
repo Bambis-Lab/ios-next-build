@@ -77,4 +77,24 @@ final class SecureTicketCacheTests: XCTestCase {
         XCTAssertFalse(fence.accepts(third,scope:a))
         XCTAssertTrue(fence.accepts(third,scope:b))
     }
+
+    func testSupersededAuthorizationDenialStillInvalidatesOnlyMatchingLease() throws {
+        let url=try XCTUnwrap(URL(string:"https://example.invalid"))
+        let a=TicketScreenScope(endpoint:url,user:"a",device:"ios-a",owner:true,keyFingerprint:"fixture-a")
+        let b=TicketScreenScope(endpoint:url,user:"b",device:"ios-b",owner:false,keyFingerprint:"fixture-b")
+        var fence=TicketReadRequestFence()
+        let first=fence.begin(a)
+        let second=fence.begin(a)
+        XCTAssertFalse(fence.accepts(first,scope:a))
+        XCTAssertTrue(fence.accepts(second,scope:a))
+        for error:Error in [ChatError.rejected(401),ChatError.rejected(403),ChatError.authenticationFailed,FamilyBootstrapError.unauthorized] {
+            XCTAssertTrue(TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:1,currentGeneration:1,requestScope:a,activeScope:fence.scope))
+            XCTAssertFalse(TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:0,currentGeneration:1,requestScope:a,activeScope:fence.scope))
+            XCTAssertFalse(TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:1,currentGeneration:1,requestScope:a,activeScope:b))
+        }
+        XCTAssertFalse(TicketOfflineFallbackPolicy.invalidatesLease(URLError(.timedOut),requestGeneration:1,currentGeneration:1,requestScope:a,activeScope:a))
+        XCTAssertFalse(TicketOfflineFallbackPolicy.invalidatesLease(CancellationError(),requestGeneration:1,currentGeneration:1,requestScope:a,activeScope:a))
+        fence.invalidate()
+        XCTAssertFalse(fence.accepts(second,scope:a))
+    }
 }

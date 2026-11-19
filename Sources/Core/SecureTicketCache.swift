@@ -49,6 +49,25 @@ struct TicketOfflineLease: Sendable {
 
 /// Authorization failures, TLS errors and cancellation never permit fallback.
 enum TicketOfflineFallbackPolicy {
+    /// Authorization denials must invalidate the matching current lease even
+    /// if the request's read revision was superseded. Old account generations
+    /// and other scopes cannot invalidate the new account.
+    static func isAuthorizationDenial(_ error:Error) -> Bool {
+        if let chat=error as? ChatError {
+            switch chat {
+            case .authenticationFailed,.rejected(401),.rejected(403): return true
+            default: return false
+            }
+        }
+        if let family=error as? FamilyBootstrapError,case .unauthorized=family {return true}
+        return false
+    }
+
+    static func invalidatesLease(_ error:Error,requestGeneration:UInt64,currentGeneration:UInt64,
+                                 requestScope:TicketScreenScope,activeScope:TicketScreenScope?) -> Bool {
+        requestGeneration==currentGeneration && requestScope==activeScope && isAuthorizationDenial(error)
+    }
+
     static func allows(_ error: Error) -> Bool {
         guard let network = error as? URLError else { return false }
         return [.notConnectedToInternet, .networkConnectionLost, .timedOut,

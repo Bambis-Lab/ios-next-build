@@ -1944,6 +1944,18 @@ extension ChatModel {
         if ticketReadLease?.scope==scope || ticketReadFence.scope==scope { resetTicketReadAccess() }
     }
 
+    private func handleTicketAuthorizationDenial(_ error:Error,scope:TicketScreenScope,generation:UInt64,app:AppModel) {
+        // Consult the matching active lease/fence, including an in-flight
+        // request. A denied old revision is not a reason to keep reading.
+        if TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:generation,
+              currentGeneration:configurationGeneration,requestScope:scope,activeScope:ticketReadLease?.scope) ||
+           TicketOfflineFallbackPolicy.invalidatesLease(error,requestGeneration:generation,
+              currentGeneration:configurationGeneration,requestScope:scope,activeScope:ticketReadFence.scope) {
+            resetTicketReadAccess()
+            if scope.owner {app.clearFamilyOwnerSession()}
+        }
+    }
+
     func secureTicketCanRead(_ scope:TicketScreenScope,app:AppModel) -> Bool {
         guard secureTicketScope(app)==scope,let lease=ticketReadLease else {return false}
         return (try? lease.require(scope,generation:configurationGeneration)) != nil
@@ -2002,6 +2014,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
             guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
@@ -2041,6 +2054,7 @@ extension ChatModel {
             ticketReadOffline=false
             return result
         } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
             guard generation==configurationGeneration,ticketReadFence.accepts(revision,scope:scope),!Task.isCancelled else {throw CancellationError()}
             guard TicketOfflineFallbackPolicy.allows(error),ticketCacheReady,
                   secureTicketCanRead(scope,app:app),let lease=ticketReadLease else {
@@ -2190,10 +2204,15 @@ extension ChatModel {
             counterparty: pending.peer, confirmedSafetyNumber: safety, local: local, keys: keys)
         let client = EncryptedTicketClient()
         let result: EncryptedTicketDetail
-        if pending.create {
-            result = try await client.create(pending.message, ownerDeviceID: pending.peer.deviceID, using: auth)
-        } else {
-            result = try await client.reply(pending.message, using: auth)
+        do {
+            if pending.create {
+                result = try await client.create(pending.message, ownerDeviceID: pending.peer.deviceID, using: auth)
+            } else {
+                result = try await client.reply(pending.message, using: auth)
+            }
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            throw error
         }
         try checkTicketScope(scope, app)
         guard generation==configurationGeneration else {throw CancellationError()}
@@ -2230,7 +2249,13 @@ extension ChatModel {
         let auth = try await ticketAuthorization(scope, app)
         try checkTicketScope(scope,app)
         guard generation==configurationGeneration else {throw CancellationError()}
-        let result = try await EncryptedTicketClient().status(status, ticketID: id, using: auth)
+        let result:EncryptedTicketDetail
+        do {
+            result=try await EncryptedTicketClient().status(status,ticketID:id,using:auth)
+        } catch {
+            handleTicketAuthorizationDenial(error,scope:scope,generation:generation,app:app)
+            throw error
+        }
         try checkTicketScope(scope, app)
         guard generation==configurationGeneration,result.ticketID==id,result.status==status else {throw ChatError.invalidResponse}
         return result
