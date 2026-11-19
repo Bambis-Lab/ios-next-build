@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "scope": "V72-00 read-only CI recovery and integrated source presence checks; not acceptance",
+  "integration": "9ffcacea8b9562d1cb46cd0b4301c4ac22333452",
+  "native_handoff": "9692d35f0c748239cdd89668b424959934970726",
+  "prior_evidence": "0aa434435725b0cfe027226aa21b19d7efdb32a5",
+  "ancestry": {
+    "ahead_by": 40,
+    "behind_by": 0
+  },
+  "recovered_historical_run": {
+    "id": 44450386899,
+    "job_id": 135312574531,
+    "conclusion": "failure",
+    "failed_step": "Boot both pre-reserved iPhones and verify exact destinations",
+    "native_wss_step": "skipped",
+    "is_v65_handoff_failure": false,
+    "artifact": {
+      "id": 14494679449,
+      "name": "V62-native-dual-30s",
+      "expired": false,
+      "digest": "sha256:ecac6f8468e3ddd865a3b45a8be234424bef16c87a15f6231c8747a23defb29f",
+      "size_in_bytes": 29355,
+      "bytes_rehashed": false
+    }
+  },
+  "static_checks": {
+    "total": 22,
+    "present": 22,
+    "kind": "literal source presence only; no Swift compilation or execution",
+    "files": [
+      {
+        "path": "Sources/Core/ChatModel.swift",
+        "blob": "da5ff19c63946f72df8769547233fa1f492c5cb0",
+        "checks": 4
+      },
+      {
+        "path": "Sources/Core/ChatRelayClient.swift",
+        "blob": "7147ddcbcb7b8b54a5195fec17fd3ff543ef785f",
+        "checks": 4
+      },
+      {
+        "path": "Tests/ChatDraftSafetyTests.swift",
+        "blob": "9b19cdbdf83edd38c88481212030ed543a965d47",
+        "checks": 4
+      },
+      {
+        "path": "Sources/Features/ChatInboxView.swift",
+        "blob": "dafc93b4538bd15afa0d8bf9178eba7792884a60",
+        "checks": 4
+      },
+      {
+        "path": "Tests/SecureTicketOutboxTests.swift",
+        "blob": "be7350470eb0f5588c534797b544f7043fb7c8b5",
+        "checks": 1
+      },
+      {
+        "path": "Tests/TicketIdentityBindingTests.swift",
+        "blob": "c3e391fc6b00d44547e301e45357735069766347",
+        "checks": 1
+      },
+      {
+        "path": "Tests/FamilyIdentityTests.swift",
+        "blob": "b832d4a70796a14f3adcafe0ae6a6a17b2e735e4",
+        "checks": 2
+      },
+      {
+        "path": "project.yml",
+        "blob": "0cb5f891eb175ea9940ee8b153cd9e2abbe3bae1",
+        "checks": 2
+      }
+    ]
+  },
+  "version": {
+    "marketing": "1.7.3",
+    "build": 31,
+    "new_build_verified": false
+  },
+  "blockers": [
+    "PR-only workflow query does not expose push runs",
+    "connected browser context unavailable",
+    "Factory host control and execution disabled",
+    "no confirmed authorized relay route",
+    "original V6.5 failing run not recovered",
+    "full original V6.4 text missing",
+    "artifact bytes not independently rehashed"
+  ],
+  "new_native_tests": 0,
+  "gates": {
+    "G01": "OPEN",
+    "G02": "OPEN",
+    "G03": "BLOCKED",
+    "G04": "BLOCKED",
+    "G05": "OPEN",
+    "G99": "OPEN",
+    "RC": "BLOCKED"
+  },
+  "release": false,
+  "production_changes": false
+}
