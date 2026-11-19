@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "run": 44529220167,
+  "attempt": 1,
+  "prHead": "ef61727bd8cd8117bb4ba051947fcefceda1cd54",
+  "testedMerge": "e72112e4c416073240fdefed4f4886949dbf7eac",
+  "terminalJobs": {
+    "source": "success",
+    "build": "success",
+    "AB": "success",
+    "CF": "success",
+    "A": "success",
+    "B": "success",
+    "validate": "success",
+    "aggregate": "success"
+  },
+  "native": {
+    "unitTests": 148,
+    "uiTests": 4,
+    "offlineRoleHandoffAccepted": 2,
+    "independentHosts": 4,
+    "productSha256": "4b9d0394124845ca3a7d66efc370e76f1c6f2618d6af5bee1f1c7915aafa8601"
+  },
+  "strictRevalidation": {
+    "status": "PASS_NATIVE_PILOT_PREREQUISITE_ONLY",
+    "verifierBlob": "2d20689da1363645cd38aa507f530f1ffa4bdaf3",
+    "matchesOriginalAggregate": true
+  },
+  "archive": {
+    "bytes": 20080049,
+    "sha256": "2fbdcff19f144dea281b8612b2e8c92e1d8fb351110d0f2ced7a4155459d633c",
+    "all8OriginalArchiveHashesAndCRCVerified": true,
+    "artifactIds": [
+      14534395378,
+      14534116293,
+      14533806402,
+      14533531923,
+      14533486775,
+      14532833443,
+      14532508493,
+      14532468766
+    ],
+    "scope": "conversation export; not uploaded to public repo"
+  },
+  "relay": "NOT_CONFIGURED_OR_TESTED",
+  "G03": "BLOCKED",
+  "G04": "BLOCKED",
+  "release": false
+}
