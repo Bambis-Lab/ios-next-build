@@ -19,12 +19,12 @@ def read_one(root, name):
     return matches[0].read_text()
 
 
-def summary(root, name, uid, minimum):
+def summary(root, name, uid, expected):
     data = json.loads(read_one(root, name + '-summary.json'))
     for key in ('failedTests', 'skippedTests', 'expectedFailures'):
         require(type(data.get(key)) is int and data[key] == 0, name + ': ' + key)
     passed = data.get('passedTests')
-    require(type(passed) is int and passed >= minimum and data.get('totalTestCount') == passed
+    require(type(passed) is int and passed == expected and data.get('totalTestCount') == passed
             and data.get('result') == 'Passed', name + ': incomplete result')
     devices = data.get('devicesAndConfigurations')
     require(isinstance(devices, list) and len(devices) > 0, name + ': missing devices')
@@ -41,12 +41,16 @@ def verify(root, identity):
     for r in roles:
         require(all(r.get(k) == v for k, v in identity.items()), 'foreign role identity')
         require(r.get('media_tested') is False and r.get('network_used') is False, 'wrong proof scope')
-        require(all(r.get(k) is True for k in ('native_role_read', 'wrong_role_rejected', 'wrong_duration_rejected', 'transient_file_removed')), 'role proof incomplete')
+        require(all(r.get(k) is True for k in ('native_role_read', 'wrong_role_rejected', 'wrong_duration_rejected', 'transient_file_removed', 'receipt_verified')), 'role proof incomplete')
+        require(r.get('sandbox_lifecycle') in ('UNCHANGED', 'VERIFIED_OFFLINE_ROTATION')
+                and r.get('native_container_observed') in ('INITIAL', 'CURRENT'), 'invalid sandbox receipt scope')
+        require(r.get('sandbox_lifecycle') != 'UNCHANGED' or r.get('native_container_observed') == 'INITIAL',
+                'inconsistent unchanged sandbox receipt')
     digest = roles[0]['build_sha256']
     require(re.fullmatch('[0-9a-f]{64}', digest) and roles[1]['build_sha256'] == digest, 'role product mismatch')
     hosts = [r['host_boot_sha256'] for r in roles]
     reports = {}
-    for shard, minimum in (('AB', 22), ('CF', 9)):
+    for shard, expected in (('AB', 75), ('CF', 73)):
         directory = root / ('R80-regression-' + shard)
         record = json.loads(read_one(directory, 'regression-binding.json'))
         require(all(record.get(k) == v for k, v in identity.items()) and record.get('shard') == shard, 'foreign regression identity')
@@ -54,7 +58,7 @@ def verify(root, identity):
         uid = record['simulator']
         require(re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', uid), 'invalid simulator')
         hosts.append(record['host_boot_sha256'])
-        reports[shard] = {'unit_passed': summary(directory, 'OwnerNavigation', uid, minimum)}
+        reports[shard] = {'unit_passed': summary(directory, 'OwnerNavigation', uid, expected)}
         if shard == 'CF':
             clean = json.loads(read_one(directory, 'clean-install-destination.json'))
             require(all(clean.get(k) == v for k, v in identity.items()) and clean.get('simulator') == uid
@@ -77,10 +81,11 @@ class Checks(unittest.TestCase):
         self.digest = 'd'*64
         roles = [{'role': role, **self.identity, 'build_sha256': self.digest,
                   'host_boot_sha256': host*64, 'media_tested': False, 'network_used': False,
-                  **dict.fromkeys(('native_role_read', 'wrong_role_rejected', 'wrong_duration_rejected', 'transient_file_removed'), True)}
+                  'sandbox_lifecycle': 'UNCHANGED', 'native_container_observed': 'INITIAL',
+                  **dict.fromkeys(('native_role_read', 'wrong_role_rejected', 'wrong_duration_rejected', 'transient_file_removed', 'receipt_verified'), True)}
                  for role, host in [('A', 'a'), ('B', 'b')]]
         self.put('V64-preflight-validation/handoff-validation.json', {'status': 'PASS_OFFLINE_NATIVE_ROLE_HANDOFF_ONLY', 'g03': 'BLOCKED', 'clients': roles})
-        for shard, host, count in [('AB', 'c', 22), ('CF', 'e', 9)]:
+        for shard, host, count in [('AB', 'c', 75), ('CF', 'e', 73)]:
             base = 'R80-regression-' + shard + '/'
             self.put(base+'regression-binding.json', {**self.identity, 'shard': shard, 'simulator': self.uid, 'build_sha256': self.digest, 'host_boot_sha256': host*64})
             self.put(base+'OwnerNavigation-summary.json', self.result(count))
@@ -143,6 +148,38 @@ class Checks(unittest.TestCase):
         (self.root / 'R80-regression-CF/CleanInstall-summary.json').unlink()
         with self.assertRaises(ValueError):
             verify(self.root, self.identity)
+
+    def test_exact_suite_count(self):
+        for shard, count in [('AB', 75), ('CF', 73)]:
+            name = f'R80-regression-{shard}/OwnerNavigation-summary.json'
+            for actual in (count-1, count+1):
+                with self.subTest(shard=shard, actual=actual):
+                    self.put(name, self.result(actual))
+                    with self.assertRaises(ValueError):
+                        verify(self.root, self.identity)
+            self.put(name, self.result(count))
+
+    def test_missing_or_invalid_receipt(self):
+        name = 'V64-preflight-validation/handoff-validation.json'
+        baseline = json.loads((self.root / name).read_text())
+        for key, value in [('receipt_verified', False), ('sandbox_lifecycle', 'ARBITRARY_ROTATION'),
+                           ('native_container_observed', 'FOREIGN'), ('native_container_observed', 'CURRENT')]:
+            data = json.loads(json.dumps(baseline))
+            data['clients'][0][key] = value
+            self.put(name, data)
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                verify(self.root, self.identity)
+        del baseline['clients'][0]['receipt_verified']
+        self.put(name, baseline)
+        with self.assertRaises(ValueError):
+            verify(self.root, self.identity)
+
+    def test_authorized_rotation(self):
+        name = 'V64-preflight-validation/handoff-validation.json'
+        data = json.loads((self.root / name).read_text())
+        data['clients'][0].update(sandbox_lifecycle='VERIFIED_OFFLINE_ROTATION', native_container_observed='CURRENT')
+        self.put(name, data)
+        self.assertFalse(verify(self.root, self.identity)['release'])
 
     def test_empty(self):
         self.denied('R80-regression-CF/IndependentServices-summary.json', 'passedTests', 0)
