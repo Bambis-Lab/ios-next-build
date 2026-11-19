@@ -102,8 +102,8 @@ def inspect_result(result,out,role,uid):
     return summary,tree
 
 def resolve_container(uid):
-    raw=run_bounded(["xcrun","simctl","get_app_container",uid,
-        "de.nicofroeba16.iosnext","data"],timeout=30,emit_output=False).strip()
+    from container_lookup import lookup_container
+    raw=lookup_container(run_bounded,uid)
     path=Path(raw)
     require(bool(raw) and path.is_absolute() and path.is_dir()
             and not path.is_symlink(),"invalid_container")
