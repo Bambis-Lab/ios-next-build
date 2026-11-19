@@ -1,0 +1,23 @@
+name: V6.4 native result contract regression
+on:
+  push:
+    branches: ['feature/ios180-v64-native-result-gate']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Test fail-closed distributed evidence validation
+        run: |
+          set -euo pipefail
+          mkdir -p build/v64
+          python3 Scripts/Acceptance/test_validate_distributed_media.py -v 2>&1 | tee build/v64/native-result-contract.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: V64-native-result-contract
+          path: build/v64/
+          retention-days: 14

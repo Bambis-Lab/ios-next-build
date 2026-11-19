@@ -223,6 +223,8 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(received,1)
         guard received>=1 else {throw FamilyAudioWireError.transportClosed}
         let start=clock.now
+        let mediaWallStarted=Date().timeIntervalSince1970
+        var renewals=0
         let target=UInt64(duration)*50
         let firstRenewal=target/3,secondRenewal=2*target/3
         var sent:UInt64=0
@@ -232,6 +234,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
                 let index=sequence==firstRenewal ? 1 : 2
                 let renewal=try await wire.send(.refresh(tokens[index]))
                 XCTAssertEqual(renewal.expiresAt,expiries[index])
+                renewals += 1
             }
             let encrypted=try codec.seal(sequence:sequence,frame:frame(sequence:sequence,marker:marker))
             guard try await wire.sendMedia(sequence:sequence,ciphertext:encrypted) else {
@@ -242,6 +245,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             try drain()
         }
         let mediaElapsed=start.duration(to:clock.now)
+        let mediaWallFinished=Date().timeIntervalSince1970
         XCTAssertGreaterThanOrEqual(mediaElapsed,.seconds(duration))
         _ = try await wire.send(.heartbeat) // ordered media acknowledgement barrier
         let finalLimit=clock.now.advanced(by:.seconds(8))
@@ -260,6 +264,12 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         let elapsed=start.duration(to:clock.now)
         XCTAssertGreaterThanOrEqual(elapsed,.seconds(duration))
         let udid=ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "unavailable"
+        if distributed {
+            let seconds=Double(mediaElapsed.components.seconds)+Double(mediaElapsed.components.attoseconds)/1e18
+            let relayDigest=SHA256.hash(data:Data(context.callID.utf8)).map{String(format:"%02x",$0)}.joined()
+            // Non-secret evidence only, never the role file, bearer or key.
+            print("V64_NATIVE_MEDIA role=\(role) sent=\(sent) received=\(received-1) renewals=\(renewals) elapsed=\(seconds) started=\(mediaWallStarted) finished=\(mediaWallFinished) relay=\(relayDigest)")
+        }
         print("IOS173_DUAL_RESULT role=\(role) udid=\(udid) pid=\(ProcessInfo.processInfo.processIdentifier) sent=\(sent) received=\(received-1) elapsed=\(mediaElapsed.components.seconds)")
     }
 }
