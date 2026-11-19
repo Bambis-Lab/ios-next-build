@@ -61,6 +61,7 @@ final class ChatModel {
     private(set) var chatOutboxBlocked=false
     private(set) var pendingChatExpiresAt:Date?
     private(set) var pendingChatAllConfirmed=false
+    private(set) var pendingChatNeverSubmitted=false
     var accessRole: ChatAccessRole?
     var lastCreatedTicketID: String?
     var memberTickets: [SupportTicket] = []
@@ -123,6 +124,7 @@ final class ChatModel {
             ISO8601DateFormatter().date(from:$0.envelope.createdAt)?.addingTimeInterval(90)
         }
         pendingChatAllConfirmed=pending?.entries.allSatisfy({$0.phase == .confirmed}) ?? false
+        pendingChatNeverSubmitted=pending?.entries.allSatisfy({$0.phase == .ready}) ?? false
     }
 
     /// Recover only the exact authenticated outgoing groups. A journal that
@@ -1175,8 +1177,8 @@ final class ChatModel {
                 handedOff=true
                 pendingChatGroupIDs.insert(groupID)
                 try reloadChatOutboxState(outbox)
-                if pendingChatSendID==groupID {
-                    try await flushChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
+                if pendingChatSendID==groupID || pendingChatNeverSubmitted {
+                    try await drainReadyChatOutbox(outbox,configuration:configuration,generation:sendGeneration)
                 } else {
                     // A new send is not authorization to replay an older
                     // ambiguous head. Explicit action is required in settings.
@@ -1248,6 +1250,7 @@ final class ChatModel {
             try reloadChatOutboxState(outbox)
             guard pendingChatSendID==expectedGroupID else {throw ChatHistoryError.busy}
             try await flushChatOutbox(outbox,configuration:configuration,generation:generation)
+            try await drainReadyChatOutbox(outbox,configuration:configuration,generation:generation)
             if generation==configurationGeneration {lastError=nil}
         } catch {
             guard generation==configurationGeneration else {return}
@@ -1255,7 +1258,20 @@ final class ChatModel {
         }
     }
 
-    private func flushChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64) async throws {
+    /// Continue only positively unsubmitted heads. Never automatically replay
+    /// an uncertain request or change the roster of a queued group.
+    private func drainReadyChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64) async throws {
+        for _ in 0..<DurableChatOutbox.maximumPendingGroups {
+            try Task.checkCancellation()
+            guard generation==configurationGeneration,self.configuration==configuration,isFamilyCredentialActive,
+                  state == .online,!historyMigrationInProgress else {throw CancellationError()}
+            guard let head=try outbox.pending(),head.entries.allSatisfy({$0.phase == .ready}) else {return}
+            try await flushChatOutbox(outbox,configuration:configuration,generation:generation,allowIdempotentReplay:false)
+        }
+    }
+
+    private func flushChatOutbox(_ outbox:DurableChatOutbox,configuration:ChatConfiguration,generation:UInt64,
+                                 allowIdempotentReplay:Bool=true) async throws {
         func requireCurrent() throws {
             try Task.checkCancellation()
             guard generation==configurationGeneration,self.configuration==configuration,
@@ -1294,9 +1310,16 @@ final class ChatModel {
                 for device in devices {try ChatDeviceKeys.pin(device)}
                 recipients+=devices
             }
+            if pending.entries.allSatisfy({$0.phase == .ready}),
+               try outbox.expiredPending()?.groupID==pending.groupID {
+                try requireCurrent()
+                guard let keys else {throw ChatHistoryError.missingKey}
+                try outbox.refreshReadyHead(groupID:pending.groupID,currentRecipients:recipients,keys:keys)
+                try reloadChatOutboxState(outbox)
+            }
             while true {
                 try requireCurrent()
-                guard let envelope=try outbox.beginNext(currentRecipients:recipients,allowIdempotentReplay:true) else {break}
+                guard let envelope=try outbox.beginNext(currentRecipients:recipients,allowIdempotentReplay:allowIdempotentReplay) else {break}
                 let receipt=try await relay.sendWithReceipt(envelope,configuration:configuration)
                 try requireCurrent()
                 try outbox.confirm(envelope,receipt:receipt)

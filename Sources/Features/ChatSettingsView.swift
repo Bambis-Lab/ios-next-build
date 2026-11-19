@@ -66,18 +66,19 @@ struct ChatSettingsView: View {
                         } else if let headID=chatModel.pendingChatSendID {
                             LabeledContent("Gesicherte Aufträge",value:"\(chatModel.pendingChatCount) / \(chatModel.chatOutboxCapacity)")
                                 .accessibilityIdentifier("chat-settings-pending-count")
-                            Text("Der erste Auftrag wird einzeln bearbeitet. Weitere bleiben gesichert; kein automatischer erneuter Versand.").font(.footnote)
+                            Text("Nur eindeutig unversendete Aufträge können automatisch folgen. Unklare Aufträge erfordern eine Bestätigung.").font(.footnote)
                             TimelineView(.periodic(from:.now,by:1)) { context in
                                 let expired = !chatModel.pendingChatAllConfirmed &&
                                     (chatModel.pendingChatExpiresAt.map{$0<=context.date} ?? false)
-                                if expired {
+                                if expired && !chatModel.pendingChatNeverSubmitted {
                                     Button("Abgelaufenen Versand abschließen",systemImage:"archivebox") {expiredGroupID=headID;confirmExpired=true}
                                         .disabled(chatModel.isSending || chatModel.historyMigrationInProgress || chatModel.state != .online)
                                         .accessibilityIdentifier("chat-settings-close-expired-send")
                                     Text("Es ist unklar, ob bereits Teile zugestellt wurden. Kein erneuter Versand.")
                                         .font(.caption).foregroundStyle(.secondary)
                                 } else {
-                                    Button(chatModel.pendingChatAllConfirmed ? "Versandstatus speichern" : "Identische Nachricht erneut prüfen und übertragen",
+                                    Button(chatModel.pendingChatAllConfirmed ? "Versandstatus speichern" :
+                                           chatModel.pendingChatNeverSubmitted ? "Gesicherten Auftrag übertragen" : "Identische Nachricht erneut prüfen und übertragen",
                                            systemImage:"arrow.clockwise") {
                                         Task {await chatModel.retryPendingChatSend(expectedGroupID:headID)}
                                     }

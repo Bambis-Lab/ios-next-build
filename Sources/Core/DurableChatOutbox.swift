@@ -227,6 +227,35 @@ final class DurableChatOutbox {
         try persist(batches+[batch],expired:old.expired)
     }
 
+    /// Only a completely unsubmitted FIFO head may receive a new timestamp.
+    /// Ciphertext, ephemeral keys, recipient bindings, IDs and every other
+    /// signed field stay unchanged. The original sender signs the replacement.
+    /// No phase may ever be reset from uncertain or confirmed to ready.
+    func refreshReadyHead(groupID:String,currentRecipients:[ChatIdentity],keys:ChatDeviceKeys,now:Date = .now) throws {
+        guard var batch=try pending(),batch.groupID==groupID,
+              batch.entries.allSatisfy({$0.phase == .ready}),
+              let first=batch.entries.first?.envelope,
+              let old=ISO8601DateFormatter().date(from:first.createdAt),
+              now.timeIntervalSince(old)>=90 else {throw ChatHistoryError.busy}
+        guard TicketIdentityBinding.matches(local,keys.publicIdentity(userID:scope.user,deviceID:scope.device)),
+              currentRecipients.count==batch.recipients.count,
+              batch.recipients.allSatisfy({old in currentRecipients.contains(where:{TicketIdentityBinding.matches(old,$0)})})
+        else {throw ChatError.identityChanged}
+        let stamp=ISO8601DateFormatter().string(from:now)
+        batch.entries=try batch.entries.map { entry in
+            let e=entry.envelope
+            var renewed=ChatEnvelope(id:e.id,groupID:e.groupID,senderUserID:e.senderUserID,
+                senderDeviceID:e.senderDeviceID,recipientUserID:e.recipientUserID,recipientDeviceID:e.recipientDeviceID,
+                ephemeralPublicKey:e.ephemeralPublicKey,ciphertext:e.ciphertext,signature:"",
+                messageType:e.messageType,contentType:e.contentType,chunkIndex:e.chunkIndex,chunkCount:e.chunkCount,
+                createdAt:stamp)
+            renewed.conversationID=e.conversationID
+            renewed.signature=try keys.signing.signature(for:renewed.signingData()).base64EncodedString()
+            return Entry(envelope:renewed,phase:.ready)
+        }
+        try save(batch)
+    }
+
     /// Caller must revalidate the entire peer roster with the authenticated
     /// server before sending, including before an explicitly negotiated replay.
     func beginNext(currentRecipients:[ChatIdentity],allowIdempotentReplay:Bool=false,now:Date = .now) throws -> ChatEnvelope? {

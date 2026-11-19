@@ -153,4 +153,38 @@ final class DurableChatOutboxTests:XCTestCase {
         XCTAssertEqual(try open().pendingGroups(),before)
         XCTAssertEqual(before.count,DurableChatOutbox.maximumPendingGroups)
     }
+
+    @MainActor
+    func testReadyTimestampRenewalPreservesCiphertextAndIDsAndRejectsUncertain() throws {
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:folder)}
+        let file=folder.appendingPathComponent("renew.enc"),aad=Data("renew-fixture".utf8),key=Data(repeating:44,count:32)
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init()),peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a"),peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        func open() throws -> DurableChatOutbox {
+            try DurableChatOutbox(scope:scope,local:local,archive:ChatHistoryArchive(file:file,scope:aad,keyData:key))
+        }
+        let now=Date(),group=UUID().uuidString.lowercased(),plain=Data("synthetic ready renewal".utf8)
+        let original=try keys.encrypt(plain,kind:.text,contentType:"text/plain",groupID:group,
+            chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:ISO8601DateFormatter().string(from:now.addingTimeInterval(-100)))
+        try open().enqueue(groupID:group,recipients:[peer],envelopes:[original])
+        XCTAssertThrowsError(try open().refreshReadyHead(groupID:group,currentRecipients:[],keys:keys,now:now))
+        XCTAssertThrowsError(try open().refreshReadyHead(groupID:group,currentRecipients:[peer],keys:peerKeys,now:now))
+        XCTAssertEqual(try open().pending()?.entries.first?.envelope,original)
+        try open().refreshReadyHead(groupID:group,currentRecipients:[peer],keys:keys,now:now)
+        let renewed=try XCTUnwrap(open().pending()?.entries.first?.envelope)
+        XCTAssertEqual(renewed.id,original.id)
+        XCTAssertEqual(renewed.groupID,original.groupID)
+        XCTAssertEqual(renewed.ciphertext,original.ciphertext)
+        XCTAssertEqual(renewed.ephemeralPublicKey,original.ephemeralPublicKey)
+        XCTAssertNotEqual(renewed.createdAt,original.createdAt)
+        XCTAssertNotEqual(renewed.signature,original.signature)
+        XCTAssertEqual(try peerKeys.decrypt(renewed,sender:local),plain)
+        XCTAssertEqual(try open().beginNext(currentRecipients:[peer],now:now),renewed)
+        XCTAssertThrowsError(try open().refreshReadyHead(groupID:group,currentRecipients:[peer],keys:keys,now:now.addingTimeInterval(100)))
+        XCTAssertEqual(try open().pending()?.entries.first?.envelope,renewed)
+        XCTAssertEqual(try open().pending()?.entries.first?.phase,.uncertain)
+    }
 }
