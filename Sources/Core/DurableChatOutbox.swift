@@ -38,12 +38,15 @@ final class DurableChatOutbox {
         let version: Int
         let pending: Pending?
         let expired:[ExpiredRecord]?
+        // Optional only for decoding the original v1 single-slot journal.
+        let queued:[Pending]?
     }
 
     private let scope: ChatOutboxScope
     private let local: ChatIdentity
     private let archive: ChatHistoryArchive
     private static let maxArchiveBytes = 128*1024*1024
+    static let maximumPendingGroups = 8
 
     convenience init(scope: ChatOutboxScope, local: ChatIdentity) throws {
         let encoder=JSONEncoder()
@@ -98,10 +101,27 @@ final class DurableChatOutbox {
 
     private func readSnapshot() throws -> Snapshot {
         guard let snapshot=try archive.load(Snapshot.self) else {
-            return Snapshot(version:1,pending:nil,expired:nil)
+            return Snapshot(version:1,pending:nil,expired:nil,queued:nil)
         }
-        guard snapshot.version==1 else {throw ChatHistoryError.invalidArchive}
-        if let batch=snapshot.pending {try validate(batch)}
+        guard snapshot.version==1 || snapshot.version==2,
+              snapshot.version != 1 || snapshot.queued == nil,
+              snapshot.version != 2 || snapshot.queued != nil else {throw ChatHistoryError.invalidArchive}
+        let queued=snapshot.queued ?? []
+        guard queued.isEmpty || snapshot.pending != nil else {throw ChatHistoryError.invalidArchive}
+        let batches=[snapshot.pending].compactMap{$0}+queued
+        guard batches.count<=Self.maximumPendingGroups,
+              Set(batches.map(\.groupID)).count==batches.count,
+              queued.allSatisfy({$0.entries.allSatisfy{$0.phase == .ready}}) else {
+            throw ChatHistoryError.invalidArchive
+        }
+        var ids=Set<String>()
+        for batch in batches {
+            try validate(batch)
+            for entry in batch.entries {
+                guard ids.insert(entry.envelope.id).inserted else {throw ChatHistoryError.invalidArchive}
+            }
+        }
+        guard try JSONEncoder().encode(batches).count<=Self.maxArchiveBytes else {throw ChatHistoryError.capacity}
         let expired=snapshot.expired ?? []
         guard expired.count<=200,
               Set(expired.map(\.groupID)).count==expired.count,
@@ -113,7 +133,8 @@ final class DurableChatOutbox {
                   record.entries.allSatisfy({EncryptedTicketMessage.validID($0.id) &&
                       $0.digest.utf8.count==64 && $0.digest.utf8.allSatisfy({(48...57).contains($0)||(97...102).contains($0)})})
               }),
-              !expired.contains(where:{$0.groupID==snapshot.pending?.groupID})
+              !expired.contains(where:{record in batches.contains(where:{$0.groupID==record.groupID}) ||
+                  record.entries.contains(where:{ids.contains($0.id)})})
         else {throw ChatHistoryError.invalidArchive}
         return snapshot
     }
@@ -121,13 +142,37 @@ final class DurableChatOutbox {
     func pending() throws -> Pending? {try readSnapshot().pending}
     func expiredRecords() throws -> [ExpiredRecord] {try readSnapshot().expired ?? []}
 
-    private func save(_ batch:Pending?) throws {
-        if let batch {try validate(batch)}
+    func pendingGroups() throws -> [Pending] {
         let old=try readSnapshot()
-        guard !(old.expired ?? []).contains(where:{$0.groupID==batch?.groupID}) else {
+        return [old.pending].compactMap{$0}+(old.queued ?? [])
+    }
+
+    private func persist(_ batches:[Pending],expired:[ExpiredRecord]?) throws {
+        let records=expired ?? []
+        guard batches.count<=Self.maximumPendingGroups else {throw ChatHistoryError.capacity}
+        guard Set(batches.map(\.groupID)).count==batches.count,
+              batches.dropFirst().allSatisfy({$0.entries.allSatisfy{$0.phase == .ready}}),
+              !records.contains(where:{record in batches.contains(where:{$0.groupID==record.groupID})})
+        else {throw ChatHistoryError.invalidArchive}
+        var ids=Set(records.flatMap{$0.entries.map(\.id)})
+        for batch in batches {
+            try validate(batch)
+            for entry in batch.entries {
+                guard ids.insert(entry.envelope.id).inserted else {throw ChatHistoryError.invalidArchive}
+            }
+        }
+        guard try JSONEncoder().encode(batches).count<=Self.maxArchiveBytes else {throw ChatHistoryError.capacity}
+        // One authenticated atomic replacement; a crash cannot orphan the tail.
+        try archive.save(Snapshot(version:2,pending:batches.first,expired:expired,
+                                  queued:Array(batches.dropFirst())))
+    }
+
+    private func save(_ batch:Pending?) throws {
+        let old=try readSnapshot()
+        if let batch,let head=old.pending,head.groupID != batch.groupID {
             throw ChatHistoryError.invalidArchive
         }
-        try archive.save(Snapshot(version:1,pending:batch,expired:old.expired))
+        try persist([batch].compactMap{$0}+(old.queued ?? []),expired:old.expired)
     }
 
     func expiredPending(now:Date = .now) throws -> Pending? {
@@ -154,7 +199,7 @@ final class DurableChatOutbox {
         }
         records.append(ExpiredRecord(groupID:groupID,closedAt:now,entries:entries))
         records=Array(records.suffix(200))
-        try archive.save(Snapshot(version:1,pending:nil,expired:records))
+        try persist(old.queued ?? [],expired:records)
     }
 
     func stage(groupID:String,recipients:[ChatIdentity],envelopes:[ChatEnvelope]) throws {
@@ -165,6 +210,21 @@ final class DurableChatOutbox {
             return
         }
         try save(batch)
+    }
+
+    /// Explicit multi-group API. The existing single-slot stage API stays
+    /// fail-closed until ChatModel and history eviction are queue-aware.
+    /// Only the FIFO head can enter the transport; staging never sends.
+    func enqueue(groupID:String,recipients:[ChatIdentity],envelopes:[ChatEnvelope]) throws {
+        let batch=Pending(scope:scope,groupID:groupID,recipients:recipients.map(TicketIdentityBinding.canonical),
+            entries:envelopes.map{Entry(envelope:$0,phase:.ready)})
+        let old=try readSnapshot()
+        let batches=[old.pending].compactMap{$0}+(old.queued ?? [])
+        if let existing=batches.first(where:{$0.groupID==groupID}) {
+            guard existing==batch else {throw ChatHistoryError.busy}
+            return
+        }
+        try persist(batches+[batch],expired:old.expired)
     }
 
     /// Caller must revalidate the entire peer roster with the authenticated

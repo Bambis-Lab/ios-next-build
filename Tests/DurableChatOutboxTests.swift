@@ -77,4 +77,80 @@ final class DurableChatOutboxTests:XCTestCase {
         XCTAssertEqual(try open().pending()?.groupID,group)
         XCTAssertEqual(try open().expiredRecords(),[closed])
     }
+
+    @MainActor
+    func testV1MigrationFIFOAndExpiredHeadPreserveTail() throws {
+        struct LegacySnapshot:Codable {
+            let version:Int
+            let pending:DurableChatOutbox.Pending?
+            let expired:[DurableChatOutbox.ExpiredRecord]?
+        }
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:folder)}
+        let file=folder.appendingPathComponent("outbox.enc"),aad=Data("fixture-queue".utf8),key=Data(repeating:42,count:32)
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init()),peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a"),peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        func archive() throws -> ChatHistoryArchive {try ChatHistoryArchive(file:file,scope:aad,keyData:key)}
+        func open() throws -> DurableChatOutbox {try DurableChatOutbox(scope:scope,local:local,archive:archive())}
+        let now=Date(),stamp=ISO8601DateFormatter().string(from:now)
+        func envelope() throws -> ChatEnvelope {
+            try keys.encrypt(Data("queue fixture".utf8),kind:.text,contentType:"text/plain",groupID:UUID().uuidString.lowercased(),
+                chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:stamp)
+        }
+        let head=try envelope(),tail=try envelope(),last=try envelope()
+        let legacy=DurableChatOutbox.Pending(scope:scope,groupID:head.groupID,recipients:[peer],
+            entries:[.init(envelope:head,phase:.uncertain)])
+        try archive().save(LegacySnapshot(version:1,pending:legacy,expired:nil))
+        XCTAssertEqual(try open().pendingGroups().map(\.groupID),[head.groupID])
+        try open().enqueue(groupID:tail.groupID,recipients:[peer],envelopes:[tail])
+        try open().enqueue(groupID:tail.groupID,recipients:[peer],envelopes:[tail])
+        try open().enqueue(groupID:last.groupID,recipients:[peer],envelopes:[last])
+        XCTAssertEqual(try open().pendingGroups().map(\.groupID),[head.groupID,tail.groupID,last.groupID])
+        XCTAssertThrowsError(try open().stage(groupID:last.groupID,recipients:[peer],envelopes:[last]))
+        XCTAssertThrowsError(try open().beginNext(currentRecipients:[peer],now:now))
+        XCTAssertEqual(try open().beginNext(currentRecipients:[peer],allowIdempotentReplay:true,now:now),head)
+        let later=now.addingTimeInterval(100)
+        XCTAssertThrowsError(try open().closeExpiredAfterHistoryCommit(groupID:tail.groupID,now:later))
+        try open().closeExpiredAfterHistoryCommit(groupID:head.groupID,now:later)
+        XCTAssertEqual(try open().pendingGroups().map(\.groupID),[tail.groupID,last.groupID])
+        XCTAssertEqual(try open().expiredRecords().first?.groupID,head.groupID)
+        XCTAssertThrowsError(try open().enqueue(groupID:head.groupID,recipients:[peer],envelopes:[head]))
+        // Use the original valid timestamp to test transport ordering independently of expiry.
+        let next=try XCTUnwrap(open().beginNext(currentRecipients:[peer],now:now))
+        XCTAssertEqual(next,tail)
+        let receipt=ChatSendReceiptV1(id:next.id,state:"queued_persistent",expiresInSeconds:120,receiptVersion:1,
+            envelopeSHA256:try ChatSendReceiptV1.digest(next),replayed:false)
+        try open().confirm(next,receipt:receipt)
+        try open().finishAfterHistoryCommit(groupID:tail.groupID)
+        XCTAssertEqual(try open().pendingGroups().map(\.groupID),[last.groupID])
+        XCTAssertEqual(try open().pending()?.entries.first?.phase,.ready)
+    }
+
+    @MainActor
+    func testQueueCapacityRejectsWithoutChangingPersistedGroups() throws {
+        let folder=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+        defer {try? FileManager.default.removeItem(at:folder)}
+        let file=folder.appendingPathComponent("queue.enc"),aad=Data("capacity-fixture".utf8),key=Data(repeating:43,count:32)
+        let keys=ChatDeviceKeys(agreement:.init(),signing:.init()),peerKeys=ChatDeviceKeys(agreement:.init(),signing:.init())
+        let local=keys.publicIdentity(userID:"fixture-a",deviceID:"ios-a"),peer=peerKeys.publicIdentity(userID:"fixture-b",deviceID:"ios-b")
+        let scope=ChatOutboxScope(endpoint:try XCTUnwrap(URL(string:"https://example.invalid")),user:local.userID,device:local.deviceID,keyFingerprint:keys.safetyNumber)
+        func open() throws -> DurableChatOutbox {
+            try DurableChatOutbox(scope:scope,local:local,archive:ChatHistoryArchive(file:file,scope:aad,keyData:key))
+        }
+        let stamp=ISO8601DateFormatter().string(from:Date())
+        func append() throws {
+            let group=UUID().uuidString.lowercased()
+            let e=try keys.encrypt(Data("bounded queue".utf8),kind:.text,contentType:"text/plain",groupID:group,
+                chunkIndex:0,chunkCount:1,sender:local,recipient:peer,createdAt:stamp)
+            try open().enqueue(groupID:group,recipients:[peer],envelopes:[e])
+        }
+        for _ in 0..<DurableChatOutbox.maximumPendingGroups {try append()}
+        let before=try open().pendingGroups()
+        XCTAssertThrowsError(try append())
+        XCTAssertEqual(try open().pendingGroups(),before)
+        XCTAssertEqual(before.count,DurableChatOutbox.maximumPendingGroups)
+    }
 }
