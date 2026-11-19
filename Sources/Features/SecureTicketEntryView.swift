@@ -50,8 +50,12 @@ private struct SecureTicketScreen: View {
     @State private var projects: [String:String] = [:]
     @State private var work: Task<Void, Never>?
     @State private var generation = UUID()
+    @State private var readExpired = false
+    @State private var didRead = false
 
     private var active: Bool { chat.secureTicketScope(app) == scope }
+    private var readable: Bool { !readExpired && chat.secureTicketCanRead(scope,app:app) }
+    private var offline: Bool { chat.secureTicketIsOffline(scope,app:app) }
     private var peer: ChatIdentity? {
         if let detail { return scope.owner ? detail.requester : detail.owner }
         return devices.first { $0.deviceID == selectedDevice }
@@ -61,12 +65,21 @@ private struct SecureTicketScreen: View {
         List {
             if let errorText { Text(errorText).foregroundStyle(.secondary).accessibilityIdentifier("secure-ticket-error") }
             if busy { ProgressView("Sicherer Zugriff …") }
+            if !readable {
+                Text("Ticketzugriff gesperrt. Erneute Online-Autorisierung erforderlich.").font(.caption)
+                Button("Sicher erneut laden",systemImage:"arrow.clockwise") { restoreAndLoad() }.disabled(busy)
+            } else {
+            if offline {
+                Label("Offline · zuletzt verifiziert · nur lesen",systemImage:"wifi.slash")
+                    .font(.caption).accessibilityIdentifier("secure-ticket-offline")
+                Button("Online erneut prüfen",systemImage:"arrow.clockwise") { restoreAndLoad() }.disabled(busy)
+            }
             if restoredPending, let pending {
                 Section("Ausstehender verschlüsselter Auftrag") {
                     Text("Ticket " + String(pending.message.ticketID.prefix(8)))
                     Text("Die bereits signierte Nachricht ist lokal gesichert. Sende exakt diesen Auftrag erneut.")
                     Button("Gesicherten Auftrag erneut senden") { send() }
-                        .disabled(busy).accessibilityIdentifier("secure-ticket-retry-persisted")
+                        .disabled(busy || offline).accessibilityIdentifier("secure-ticket-retry-persisted")
                 }
             } else if creating || detail != nil {
                 editor
@@ -76,11 +89,12 @@ private struct SecureTicketScreen: View {
                     ForEach(tickets.filter { item in
                         search.isEmpty || item.requester.userID.localizedStandardContains(search)
                             || item.ticketID.localizedStandardContains(search)
+                            || title(item.status).localizedStandardContains(search)
                             || (scope.owner && (projectTitle(item.ticketID)?.localizedStandardContains(search) == true))
                     }) { item in
                         Button {
                             launch {
-                                let loaded = try await chat.secureTicketDetail(item.id, scope: scope, app: app)
+                                let loaded = try await chat.readSecureTicketDetail(item.id, scope: scope, app: app)
                                 try requireActive()
                                 clearEditor()
                                 detail = loaded
@@ -96,7 +110,7 @@ private struct SecureTicketScreen: View {
                         }
                         .disabled(busy)
                     }
-                    if !scope.owner {
+                    if !scope.owner && !offline {
                         Button("Neues verschlüsseltes Ticket", systemImage: "square.and.pencil") { newTicket() }
                             .disabled(busy).accessibilityIdentifier("secure-ticket-new")
                     }
@@ -104,13 +118,31 @@ private struct SecureTicketScreen: View {
                 if scope.owner { TextField("Benutzer, Ticket-ID oder Projekt suchen", text: $search) }
                 Button("Aktualisieren", systemImage: "arrow.clockwise") { load() }.disabled(busy)
             }
+            }
         }
         .navigationTitle(scope.owner ? "Owner · sichere Tickets" : "Meine sicheren Tickets")
         .navigationBarTitleDisplayMode(.inline)
         .task { restoreAndLoad() }
+        .task {
+            while !Task.isCancelled {
+                do {try await Task.sleep(for:.milliseconds(250))} catch {return}
+                if didRead && !chat.secureTicketCanRead(scope,app:app) && !readExpired {
+                    readExpired=true
+                    generation=UUID()
+                    work?.cancel()
+                    work=nil
+                    busy=false
+                    clearEditor()
+                    tickets=[]
+                    projects=[:]
+                    chat.invalidateSecureTicketRead(scope)
+                }
+            }
+        }
         .onDisappear {
             generation = UUID()
             work?.cancel()
+            chat.invalidateSecureTicketRead(scope)
             clearEditor()
             tickets = []
             projects = [:]
@@ -129,7 +161,7 @@ private struct SecureTicketScreen: View {
         if let detail {
             Section("Status") {
                 Text(title(detail.status))
-                if scope.owner && verified {
+                if scope.owner && verified && !offline {
                     ForEach([EncryptedTicketStatus.open, .inProgress, .resolved], id: \.rawValue) { value in
                         Button(title(value)) {
                             launch {
@@ -142,7 +174,7 @@ private struct SecureTicketScreen: View {
                 }
             }
         }
-        if scope.owner, verified, let detail {
+        if scope.owner, verified, !offline, let detail {
             Section("Lokale Projektzuordnung") {
                 Picker("Projekt", selection: Binding(
                     get: { projects[detail.ticketID] ?? "" },
@@ -186,7 +218,7 @@ private struct SecureTicketScreen: View {
                 }
             }
         }
-        if creating || verified {
+        if (creating || verified) && !offline {
             Section("Verschlüsselte Nachricht") {
                 TextEditor(text: $draft).frame(minHeight: 100)
                     .disabled(busy || pending != nil).accessibilityIdentifier("secure-ticket-message")
@@ -234,6 +266,11 @@ private struct SecureTicketScreen: View {
             do { try requireActive(); try await operation(); try requireActive() }
             catch {
                 if generation == attempt && active && !Task.isCancelled {
+                    chat.invalidateSecureTicketRead(scope)
+                    readExpired=true
+                    clearEditor()
+                    tickets=[]
+                    projects=[:]
                     errorText = "Sicherer Ticketzugriff fehlgeschlagen. Kein Klartext-Fallback."
                 }
             }
@@ -242,6 +279,13 @@ private struct SecureTicketScreen: View {
 
     private func restoreAndLoad() {
         launch {
+            let items=try await chat.secureTicketList(scope,app:app)
+            try requireActive()
+            clearEditor()
+            tickets=items
+            didRead=true
+            readExpired=false
+            guard !offline else {projects=[:];return}
             let saved = try await chat.restoreSecureTicketPending(scope, app: app)
             try requireActive()
             try await refreshProjects()
@@ -255,10 +299,6 @@ private struct SecureTicketScreen: View {
                 try requireActive()
                 devices = options
                 creating = true
-            } else {
-                let items = try await chat.secureTicketList(scope, app: app)
-                try requireActive()
-                tickets = items
             }
         }
     }
@@ -268,7 +308,9 @@ private struct SecureTicketScreen: View {
             let items = try await chat.secureTicketList(scope, app: app)
             try requireActive()
             tickets = items
-            try await refreshProjects()
+            didRead=true
+            readExpired=false
+            if offline {projects=[:]} else {try await refreshProjects()}
         }
     }
 
@@ -293,6 +335,7 @@ private struct SecureTicketScreen: View {
     }
 
     private func send() {
+        guard readable,!offline else {return}
         launch {
             let request: TicketPendingSend
             if let existing = pending { request = existing }
