@@ -37,10 +37,9 @@ EOF
 done
 second=""
 if [ "${1:-}" = dual ]; then
-  # Resolve/create and verify both booted devices BEFORE simulator keychain
-  # initialization; the prior 600s run timed out in inventory after root import.
-  python3 Scripts/Acceptance/run_two_native_simulators.py create
+  # The workflow has already reserved and booted both exact destinations.
   second="$(cat build/ios173/dual-simulator/created-udid.txt)"
+  test -s build/ios173/dual-simulator/simulators.json
 fi
 install_test_root() {
   python3 - "$1" "$tls/ca.der" <<'PY'
@@ -59,7 +58,14 @@ proxy_pid=$!
 cleanup() {
   kill "$server_pid" "$proxy_pid" 2>/dev/null || true
   wait "$server_pid" "$proxy_pid" 2>/dev/null || true
-  if [ -n "$second" ]; then xcrun simctl shutdown "$second" || true; fi
+  if [ -n "$second" ]; then
+    python3 - "$second" <<'PY' || true
+import sys
+sys.path.insert(0, "Scripts/Acceptance")
+from boot_simulator import run_bounded
+run_bounded(["xcrun","simctl","shutdown",sys.argv[1]],timeout=30)
+PY
+  fi
 }
 trap cleanup EXIT
 for _ in $(seq 1 30); do

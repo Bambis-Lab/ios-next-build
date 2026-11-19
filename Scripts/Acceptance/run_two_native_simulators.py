@@ -14,34 +14,69 @@ from boot_simulator import run_bounded
 OUT=Path("build/ios173/dual-simulator").resolve()
 OUT.mkdir(parents=True,exist_ok=True)
 FIRST=os.environ["SIM_ID"]
-SOURCE=Path(os.environ["XCTESTRUN_PATH"]).resolve()
 ROOT=Path(os.environ["RUNNER_TEMP"])/"ios173-dual-products"
 
-def devices():
-    # Hosted CoreSimulator inventory can stall during initial trust-store
-    # setup. Allow bounded infrastructure discovery, never skip verification.
-    data=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],timeout=120,emit_output=False))
-    return [(runtime,d) for runtime,rows in data["devices"].items() for d in rows]
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
 
-def create():
-    runtime,first=next((r,d) for r,d in devices() if d["udid"]==FIRST)
-    assert "iOS-27-0" in runtime and first["name"]=="iPhone 18 Pro Max" and first["state"]=="Booted"
+def diagnostics(stage):
+    # Host resource evidence only; no environments, credentials, or app data.
+    for name, cmd in (("memory", ["vm_stat"]), ("disk", ["df", "-h", str(ROOT.parent)]),
+                      ("cpu", ["sysctl", "-n", "hw.ncpu"]), ("load", ["sysctl", "-n", "vm.loadavg"])):
+        try:
+            result=run_bounded(cmd,timeout=10,emit_output=False)
+            (OUT/f"{stage}-{name}.txt").write_text(result)
+        except RuntimeError as exc:
+            (OUT/f"{stage}-{name}.txt").write_text(str(exc))
+
+def reserve():
+    # Global inventory is allowed only before booting either test device.
+    data=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],timeout=45,emit_output=False))
+    matches=[(r,d) for r,rows in data["devices"].items() for d in rows if d["udid"]==FIRST]
+    require(len(matches)==1,"missing or ambiguous first simulator")
+    runtime,first=matches[0]
+    require("iOS-27-0" in runtime and first["name"]=="iPhone 18 Pro Max" and first["state"]=="Shutdown",
+            "first simulator must be the selected cold iPhone 18 Pro Max")
     kind=first["deviceTypeIdentifier"]
-    second=run_bounded(["xcrun","simctl","create","IOSNext isolated B",kind,runtime],timeout=45,emit_output=False).strip()
-    assert re.fullmatch(r"[0-9A-Fa-f-]{36}",second) and first["udid"]!=second
-    (OUT/"created-udid.txt").write_text(second+"\n")
-    run_bounded(["xcrun","simctl","boot",second],timeout=60)
-    run_bounded(["xcrun","simctl","bootstatus",second,"-b"],timeout=240)
-    current={d["udid"]:(r,d) for r,d in devices()}
+    second=run_bounded(["xcrun","simctl","create","IOSNext isolated B",kind,runtime],timeout=60,emit_output=False).strip()
+    require(re.fullmatch(r"[0-9A-Fa-f-]{36}",second) is not None and FIRST.lower()!=second.lower(),
+            "second simulator identity invalid")
+    data=json.loads(run_bounded(["xcrun","simctl","list","devices","available","-j"],timeout=45,emit_output=False))
+    current={d["udid"]:(r,d) for r,rows in data["devices"].items() for d in rows}
     for uid in (FIRST,second):
         r,d=current[uid]
-        assert r==runtime and d["deviceTypeIdentifier"]==kind and d["state"]=="Booted"
-    (OUT/"simulators.json").write_text(json.dumps({"runtime":runtime,"device_type":kind,"A":FIRST,"B":second,"both_booted":True},indent=2)+"\n")
+        require(r==runtime and d["deviceTypeIdentifier"]==kind and d["state"]=="Shutdown",
+                "cold reservation does not match requested device/runtime")
+    (OUT/"reservation.json").write_text(json.dumps({"runtime":runtime,"device_type":kind,"A":FIRST,"B":second},indent=2)+"\n")
+    (OUT/"created-udid.txt").write_text(second+"\n")
+    diagnostics("reserved")
+    print("IOS180_TWO_DISTINCT_COLD_SIMULATORS_RESERVED",flush=True)
+
+def boot_reserved():
+    reservation=json.loads((OUT/"reservation.json").read_text())
+    second=reservation["B"]
+    require(reservation["A"]==FIRST and FIRST.lower()!=second.lower(),"reservation mismatch")
+    timings={}
+    for role,uid in (("A",FIRST),("B",second)):
+        started=time.monotonic()
+        run_bounded(["xcrun","simctl","boot",uid],timeout=60)
+        run_bounded(["xcrun","simctl","bootstatus",uid,"-b"],timeout=240)
+        timings[role]=round(time.monotonic()-started,3)
+        diagnostics(f"boot-{role}")
+    # Verify both targeted UDIDs again after the second boot. Do not ask
+    # CoreSimulator for global inventory here. XCResult independently
+    # verifies both actual destinations after the native tests.
+    for uid in (FIRST,second):
+        run_bounded(["xcrun","simctl","bootstatus",uid,"-b"],timeout=60)
+    (OUT/"simulators.json").write_text(json.dumps({**reservation,"both_booted":True,"boot_seconds":timings,
+        "verification":"targeted bootstatus on both reserved UDIDs"},indent=2)+"\n")
     print("IOS173_TWO_DISTINCT_BOOTED_SIMULATORS",flush=True)
-    return second
 
 def run(second):
-    assert second!=FIRST
+    verified=json.loads((OUT/"simulators.json").read_text())
+    require(verified["both_booted"] is True and verified["A"]==FIRST and verified["B"]==second and second!=FIRST,"unverified simulator pair")
+    SOURCE=Path(os.environ["XCTESTRUN_PATH"]).resolve()
     processes=[]
     streams=[]
     try:
@@ -104,9 +139,11 @@ def run(second):
         for stream in streams: stream.close()
 
 if __name__=="__main__":
-    if sys.argv[1:]==["create"]:
-        create()
+    if sys.argv[1:]==["reserve"]:
+        reserve()
+    elif sys.argv[1:]==["boot"]:
+        boot_reserved()
     elif len(sys.argv)==3 and sys.argv[1]=="run":
         run(sys.argv[2])
     else:
-        raise SystemExit("create or run SECOND_UDID")
+        raise SystemExit("reserve, boot or run SECOND_UDID")
