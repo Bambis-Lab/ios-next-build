@@ -90,6 +90,39 @@ private struct DistributedAudioRole:Decodable {
     }
 }
 
+// Test-only enqueue cadence policy. It bounds local producer timing, not
+// playback timing, socket delivery latency, or microphone continuity.
+private struct AudioCadenceGuard {
+    private(set) var count:UInt64=0
+    private(set) var minGap:Duration = .milliseconds(250)
+    private(set) var maxGap:Duration = .zero
+    private(set) var maxLateness:Duration = .zero
+    private var previous:Duration = .zero
+
+    enum Failure:Error { case sequence, early, burst, stall, late }
+
+    mutating func observe(sequence:UInt64,elapsed:Duration) throws {
+        guard sequence==count+1,sequence<=15_000 else {throw Failure.sequence}
+        let expected:Duration = .milliseconds(Int64(sequence)*20)
+        guard elapsed>=expected else {throw Failure.early}
+        let gap=elapsed-previous
+        let lateness=elapsed-expected
+        guard gap >= .milliseconds(5) else {throw Failure.burst}
+        guard gap <= .milliseconds(250) else {throw Failure.stall}
+        guard lateness <= .milliseconds(250) else {throw Failure.late}
+        count=sequence
+        minGap=min(minGap,gap)
+        maxGap=max(maxGap,gap)
+        maxLateness=max(maxLateness,lateness)
+        previous=elapsed
+    }
+
+    static func microseconds(_ value:Duration) -> Int64 {
+        let parts=value.components
+        return parts.seconds*1_000_000+parts.attoseconds/1_000_000_000_000
+    }
+}
+
 // Only copied into a disposable hosted-runner checkout. Each test is executed
 // in a distinct booted simulator, with independent ephemeral keys and socket.
 final class FamilyAudioIndependentSimulatorTests: XCTestCase {
@@ -171,6 +204,25 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             }
             XCTAssertThrowsError(try DistributedAudioRole.parse(data,role:"B",duration:duration,now:now))
         }
+        // Deterministic cadence checks are part of the existing native
+        // prerequisite, so the established test selector/count is retained.
+        for duration:Int64 in [30,120,300] {
+            var cadence=AudioCadenceGuard()
+            for n in UInt64(1)...UInt64(duration*50) {
+                try cadence.observe(sequence:n,elapsed:.milliseconds(Int64(n)*20))
+            }
+            XCTAssertEqual(cadence.count,UInt64(duration*50))
+            XCTAssertEqual(cadence.minGap,.milliseconds(20))
+            XCTAssertEqual(cadence.maxGap,.milliseconds(20))
+            XCTAssertEqual(cadence.maxLateness,.zero)
+        }
+        var cadence=AudioCadenceGuard()
+        XCTAssertThrowsError(try cadence.observe(sequence:2,elapsed:.milliseconds(40)))
+        XCTAssertThrowsError(try cadence.observe(sequence:1,elapsed:.milliseconds(19)))
+        XCTAssertThrowsError(try cadence.observe(sequence:1,elapsed:.milliseconds(251)))
+        try cadence.observe(sequence:1,elapsed:.milliseconds(80))
+        XCTAssertThrowsError(try cadence.observe(sequence:2,elapsed:.milliseconds(83)))
+        XCTAssertEqual(cadence.count,1)
         print("V64_NATIVE_EXECUTION_PREREQUISITE=PASS")
         #else
         XCTFail("Simulator prerequisite requires an iOS simulator")
@@ -299,6 +351,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         let target=UInt64(duration)*50
         let firstRenewal=target/3,secondRenewal=2*target/3
         var sent:UInt64=0
+        var cadence=AudioCadenceGuard()
         for sequence in UInt64(1)...target {
             try await clock.sleep(until:start.advanced(by:.milliseconds(Int64(sequence)*20)))
             if sequence==firstRenewal || sequence==secondRenewal {
@@ -311,6 +364,9 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             guard try await wire.sendMedia(sequence:sequence,ciphertext:encrypted) else {
                 XCTFail("Media send-window saturated")
                 throw FamilyAudioWireError.queueFull
+            }
+            if distributed {
+                try cadence.observe(sequence:sequence,elapsed:start.duration(to:clock.now))
             }
             sent += 1
             try drain()
@@ -325,6 +381,8 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             if received<target+1 {try await Task.sleep(for:.milliseconds(5))}
         }
         XCTAssertEqual(sent,target)
+        XCTAssertEqual(renewals,2)
+        if distributed {XCTAssertEqual(cadence.count,target)}
         XCTAssertEqual(received,target+1)
         XCTAssertTrue(wire.isConnected)
         // Stay alive while the peer finishes its barrier. No extra audio,
@@ -339,6 +397,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             let seconds=Double(mediaElapsed.components.seconds)+Double(mediaElapsed.components.attoseconds)/1e18
             let relayDigest=SHA256.hash(data:Data(context.callID.utf8)).map{String(format:"%02x",$0)}.joined()
             // Non-secret evidence only, never the role file, bearer or key.
+            print("SRV3_ENQUEUE_CADENCE role=\(role) duration=\(duration) frames=\(cadence.count) minGapUs=\(AudioCadenceGuard.microseconds(cadence.minGap)) maxGapUs=\(AudioCadenceGuard.microseconds(cadence.maxGap)) maxLatenessUs=\(AudioCadenceGuard.microseconds(cadence.maxLateness))")
             print("V64_NATIVE_MEDIA role=\(role) sent=\(sent) received=\(received-1) renewals=\(renewals) elapsed=\(seconds) started=\(mediaWallStarted) finished=\(mediaWallFinished) relay=\(relayDigest)")
         }
         print("IOS173_DUAL_RESULT role=\(role) udid=\(udid) pid=\(ProcessInfo.processInfo.processIdentifier) sent=\(sent) received=\(received-1) elapsed=\(mediaElapsed.components.seconds)")
