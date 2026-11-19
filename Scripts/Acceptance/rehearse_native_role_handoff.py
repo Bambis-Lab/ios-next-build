@@ -1,6 +1,7 @@
 """Rehearse role-file handoff on hosted iOS simulator; no relay or sockets."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -18,6 +19,8 @@ _SAFE_REASONS=frozenset({
     "xcresult_missing","xcresult_wrong_test","xcresult_test_not_passed",
     "native_command_failed","native_marker_missing","xcresult_invalid_schema",
     "invalid_simulator_id","invalid_role_result_directory",
+    "invalid_pair_identity","invalid_pair_preflight","invalid_pair_result",
+    "conflicting_failure_evidence","missing_pair_record",
 })
 
 class HandoffError(RuntimeError):
@@ -234,23 +237,83 @@ def self_test():
         def test_invalid_schema(self):
             with self.assertRaises(HandoffError):
                 native_result_status({},"A")
+        def records(self):
+            identity={"source":"a"*40,"run":"123","attempt":"1"}
+            common={"role":"A",**identity}
+            uid="12345678-1234-1234-1234-123456789abc"
+            pre={**common,"simulator":uid,"build_sha256":"b"*64,"boot_session_sha256":"c"*64,
+                 "native_test_pass":True,"media_tested":False,"relay_reachable":False}
+            result={**common,"test_status":"PASS","destination_matches":True}
+            item={**common,"simulator":uid,"build_sha256":"b"*64,"host_boot_sha256":"c"*64,
+                  "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
+                  "transient_file_removed":True,"network_used":False,"media_tested":False}
+            return identity,pre,result,item
+        def test_pair_consistent_and_projection(self):
+            identity,pre,result,item=self.records()
+            item["unexpected"]="not exported"
+            self.assertNotIn("unexpected",validate_client_records("A",identity,pre,result,item))
+        def test_pair_rejects_mismatch(self):
+            for index,key,value in ((1,"attempt","2"),(2,"role","B"),(2,"destination_matches",1),
+                (2,"test_status","NOT_PASSED"),(3,"host_boot_sha256","d"*64),
+                (3,"build_sha256","invalid"),(3,"simulator","different"),(1,"native_test_pass",False),
+                (3,"transient_file_removed",False)):
+                records=self.records()
+                records[index][key]=value
+                with self.assertRaises(HandoffError):
+                    validate_client_records("A",*records)
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(ResultValidation)
     if not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful():
         raise SystemExit(1)
 
+def pair_record(directory,name):
+    matches=list(directory.rglob(name))
+    require(len(matches)==1 and matches[0].is_file() and not matches[0].is_symlink(),
+            "missing_pair_record")
+    record=json.loads(matches[0].read_text())
+    require(isinstance(record,dict),"invalid_handoff_evidence")
+    return record
+
+def validate_client_records(role,identity,pre,result,item):
+    """Bind handoff, structured XCTest result and native preflight to one run."""
+    require(role in ("A","B") and all(
+        isinstance(record,dict) and record.get("role")==role and
+        all(record.get(k)==v for k,v in identity.items())
+        for record in (pre,result,item)),"invalid_pair_identity")
+    require(pre.get("native_test_pass") is True and pre.get("media_tested") is False
+            and pre.get("relay_reachable") is False,"invalid_pair_preflight")
+    require(result.get("test_status")=="PASS" and result.get("destination_matches") is True,
+            "invalid_pair_result")
+    require(all(item.get(k) is True for k in ("native_role_read","wrong_role_rejected",
+        "wrong_duration_rejected","transient_file_removed"))
+        and item.get("network_used") is False and item.get("media_tested") is False,
+        "invalid_handoff_evidence")
+    uid=item.get("simulator")
+    require(isinstance(uid,str) and re.fullmatch(
+        r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}",uid) is not None
+        and pre.get("simulator")==uid,"invalid_pair_identity")
+    for k,pk in (("build_sha256","build_sha256"),("host_boot_sha256","boot_session_sha256")):
+        value=item.get(k)
+        require(isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value) is not None
+                and pre.get(pk)==value,"invalid_pair_identity")
+    # Project only fixed fields; never re-export arbitrary artifact keys.
+    return {"role":role,**identity,"simulator":uid,
+        "build_sha256":item["build_sha256"],"host_boot_sha256":item["host_boot_sha256"],
+        "native_role_read":True,"wrong_role_rejected":True,"wrong_duration_rejected":True,
+        "transient_file_removed":True,"network_used":False,"media_tested":False}
+
 def validate():
     stage("validate_pair")
     root=Path("build/preflight")
+    identity={"source":os.environ["GITHUB_SHA"],"run":os.environ["GITHUB_RUN_ID"],
+              "attempt":os.environ["GITHUB_RUN_ATTEMPT"]}
     data=[]
     for role in ("A","B"):
-        matches=list((root/("V64-preflight-"+role)).rglob("handoff-evidence.json"))
-        require(len(matches)==1,"missing_handoff_evidence")
-        item=json.loads(matches[0].read_text())
-        require(item["role"]==role and item["source"]==os.environ["GITHUB_SHA"]
-            and item["run"]==os.environ["GITHUB_RUN_ID"] and item["attempt"]==os.environ["GITHUB_RUN_ATTEMPT"]
-            and all(item[k] is True for k in ("native_role_read","wrong_role_rejected","wrong_duration_rejected","transient_file_removed"))
-            and item["network_used"] is False and item["media_tested"] is False,"invalid_handoff_evidence")
-        data.append(item)
+        directory=root/("V64-preflight-"+role)
+        require(not list(directory.rglob("handoff-failure.json")),"conflicting_failure_evidence")
+        pre=pair_record(directory,"preflight.json")
+        result=pair_record(directory,"handoff-result-status.json")
+        item=pair_record(directory,"handoff-evidence.json")
+        data.append(validate_client_records(role,identity,pre,result,item))
     require(data[0]["host_boot_sha256"]!=data[1]["host_boot_sha256"] and
         data[0]["build_sha256"]==data[1]["build_sha256"],"wrong_runner_pair")
     (root/"handoff-validation.json").write_text(json.dumps({"status":"PASS_OFFLINE_NATIVE_ROLE_HANDOFF_ONLY",
