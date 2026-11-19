@@ -108,11 +108,28 @@ final class ChatModel {
         historyArchive = archive
     }
 
+    private func historySnapshot() -> HistorySnapshot {
+        HistorySnapshot(version: 1, messages: messages, partials: partialMessages, seen: seenEnvelopeIDs)
+    }
+
+    private func restoreCheckpoint(_ snapshot: HistorySnapshot) {
+        messages = snapshot.messages
+        partialMessages = snapshot.partials
+        seenEnvelopeIDs = snapshot.seen
+    }
+
     private func persistFamilyHistory() throws {
         guard isFamilyCredentialActive else { return }
         guard let historyArchive else { throw ChatHistoryError.missingKey }
-        try historyArchive.save(HistorySnapshot(version: 1, messages: messages,
-            partials: partialMessages, seen: seenEnvelopeIDs))
+        try historyArchive.save(historySnapshot())
+    }
+
+    // Mutations and persistence are synchronous on the main actor. A failed
+    // write must not leave replay IDs or message buffers claiming durability.
+    private func commitVerifiedReceive(_ mutation: () throws -> Void) throws {
+        try ChatHistoryCheckpoint.commit(previous: historySnapshot(),
+            mutate: mutation, persist: { try persistFamilyHistory() },
+            restore: { restoreCheckpoint($0) })
     }
     private var seenEnvelopeIDs: [String: Date] = [:]
     private let endpointKey = "chatRelayEndpoint"
@@ -603,6 +620,7 @@ final class ChatModel {
 
     func stop() {
         resetCalls()
+        configurationGeneration &+= 1
         historyArchive = nil
         startupEpoch &+= 1
         startupTask?.cancel()
@@ -886,6 +904,8 @@ final class ChatModel {
                         createdAt: createdAt,
                         conversationID: selectedGroup ? "family" : nil
                     )
+                    try Task.checkCancellation()
+                    guard sendGeneration == configurationGeneration else { return false }
                     _ = try await relay.send(envelope, configuration: configuration)
                     guard sendGeneration == configurationGeneration else { return false }
                 }
@@ -1048,16 +1068,15 @@ final class ChatModel {
                 try Task.checkCancellation()
                 guard self.configuration == configuration else { return }
                 if ackMode && !envelopes.isEmpty {
-                    // The atomic authenticated archive includes partial media,
-                    // complete messages and replay IDs before any ACK.
-                    try persistFamilyHistory()
-                    // ACK only after the entire dequeued batch is handled,
-                    // including explicitly rejected/untrusted ciphertext.
-                    // Transport/auth errors before this point do not ACK,
-                    // allowing backend replay while its volatile TTL remains.
+                    // Verified envelopes are individually checkpointed before
+                    // returning from accept(). Previously committed replays
+                    // and explicitly rejected ciphertext need no new write.
+                    guard historyArchive != nil else { throw ChatHistoryError.missingKey }
                     try await relay.acknowledge(
                         envelopes.map(\.id), configuration: configuration
                     )
+                    try Task.checkCancellation()
+                    guard self.configuration == configuration else { return }
                 }
                 if invalidCount > 0 {
                     // Do not report or persist attacker-controlled ciphertext,
@@ -1081,18 +1100,19 @@ final class ChatModel {
 
     private func accept(_ envelope: ChatEnvelope, configuration: ChatConfiguration) async throws {
         let now = Date.now
-        seenEnvelopeIDs = seenEnvelopeIDs.filter { now.timeIntervalSince($0.value) < 600 }
-        guard seenEnvelopeIDs[envelope.id] == nil,
-              let envelopeDate = ISO8601DateFormatter().date(from: envelope.createdAt),
+        guard let envelopeDate = ISO8601DateFormatter().date(from: envelope.createdAt),
               abs(now.timeIntervalSince(envelopeDate)) < 600 else {
             throw ChatError.invalidEnvelope
         }
         guard envelope.recipientUserID == configuration.userID,
               envelope.recipientDeviceID == configuration.deviceID,
-              envelope.chunkCount <= 256,
+              (1...256).contains(envelope.chunkCount),
               envelope.chunkIndex >= 0,
               envelope.chunkIndex < envelope.chunkCount,
               let keys else { throw ChatError.invalidEnvelope }
+        // A replay of a checkpointed ID is idempotent. Never infer durability
+        // merely from a partially mutated in-memory assembly.
+        if let seen = seenEnvelopeIDs[envelope.id], now.timeIntervalSince(seen) < 600 { return }
         let identities = try await relay.identities(for: envelope.senderUserID, configuration: configuration)
         try Task.checkCancellation()
         guard self.configuration == configuration else { throw CancellationError() }
@@ -1119,6 +1139,16 @@ final class ChatModel {
             // relay availability failures.
             throw ChatError.invalidEnvelope
         }
+        try commitVerifiedReceive {
+            try storeVerifiedFragment(envelope, plaintext: plaintext, configuration: configuration,
+                                     envelopeDate: envelopeDate, now: now)
+        }
+    }
+
+    private func storeVerifiedFragment(_ envelope: ChatEnvelope, plaintext: Data,
+                                       configuration: ChatConfiguration, envelopeDate: Date, now: Date) throws {
+        seenEnvelopeIDs = seenEnvelopeIDs.filter { now.timeIntervalSince($0.value) < 600 }
+        if seenEnvelopeIDs[envelope.id] != nil { return }
         if !isFamilyCredentialActive {
             partialMessages = partialMessages.filter { now.timeIntervalSince($0.value.lastUpdated) < 120 }
         }
@@ -1126,9 +1156,8 @@ final class ChatModel {
         let bufferedBytes = partialMessages.values.reduce(0) { total, partial in
             total + partial.chunks.values.reduce(0) { $0 + $1.count }
         }
-        guard bufferedBytes + plaintext.count < 96 * 1024 * 1024,
-              seenEnvelopeIDs.count < 20_000 else {
-            if isFamilyCredentialActive { throw ChatHistoryError.capacity }
+        guard plaintext.count <= Self.chunkSize,
+              plaintext.count <= (Self.maximumBytes[envelope.messageType] ?? 0) else {
             throw ChatError.contentTooLarge
         }
         let assemblyID = "\(envelope.senderUserID)|\(envelope.senderDeviceID)|\(envelope.groupID)"
@@ -1150,8 +1179,20 @@ final class ChatModel {
               partial.conversationID == envelope.conversationID,
               partial.kind == envelope.messageType,
               partial.contentType == envelope.contentType,
+              partial.createdAt == envelopeDate,
               partial.chunkCount == envelope.chunkCount else { throw ChatError.invalidEnvelope }
-        if let previous = partial.chunks[envelope.chunkIndex], previous != plaintext { throw ChatError.invalidEnvelope }
+        let previous = partial.chunks[envelope.chunkIndex]
+        if let previous, previous != plaintext { throw ChatError.invalidEnvelope }
+        let additional = previous == nil ? plaintext.count : 0
+        let assemblyBytes = partial.chunks.values.reduce(0) { $0 + $1.count }
+        guard assemblyBytes + additional <= (Self.maximumBytes[partial.kind] ?? 0) else {
+            throw ChatError.contentTooLarge
+        }
+        guard bufferedBytes + additional < 96 * 1024 * 1024,
+              seenEnvelopeIDs.count < 20_000 else {
+            if isFamilyCredentialActive { throw ChatHistoryError.capacity }
+            throw ChatError.contentTooLarge
+        }
         partial.chunks[envelope.chunkIndex] = plaintext
         partial.lastUpdated = now
         partialMessages[assemblyID] = partial

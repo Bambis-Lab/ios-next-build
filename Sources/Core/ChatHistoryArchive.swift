@@ -81,3 +81,19 @@ final class ChatHistoryArchive {
         try (Self.magic + combined).write(to: url, options: [.atomic, .completeFileProtection])
     }
 }
+
+/// Synchronous transaction boundary for a verified received fragment. The
+/// previous state must be a value snapshot, not a mutable shared reference.
+@MainActor
+enum ChatHistoryCheckpoint {
+    static func commit<State>(previous: State, mutate: () throws -> Void,
+                              persist: () throws -> Void, restore: (State) -> Void) throws {
+        do {
+            try mutate()
+            try persist()
+        } catch {
+            restore(previous)
+            throw error
+        }
+    }
+}
