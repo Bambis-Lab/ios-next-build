@@ -14,6 +14,9 @@ from boot_simulator import run_bounded
 OUT=Path("build/ios173/dual-simulator").resolve()
 OUT.mkdir(parents=True,exist_ok=True)
 FIRST=os.environ["SIM_ID"]
+DURATION=int(os.environ.get("IOSNEXT_NATIVE_AUDIO_DURATION","600"))
+if DURATION not in (30,120,600,1800):
+    raise ValueError("invalid native audio duration")
 ROOT=Path(os.environ["RUNNER_TEMP"])/"ios173-dual-products"
 
 def require(condition, message):
@@ -109,7 +112,7 @@ def run(second):
                  "CODE_SIGNING_ALLOWED=YES","CODE_SIGNING_REQUIRED=YES","CODE_SIGN_IDENTITY=-"]
             p=subprocess.Popen(cmd,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
             processes.append((role,uid,p,log))
-        deadline=time.monotonic()+1100
+        deadline=time.monotonic()+DURATION+500
         while any(p.poll() is None for _,_,p,_ in processes):
             if any(p.poll() not in (None,0) for _,_,p,_ in processes):
                 raise RuntimeError("one native client exited unsuccessfully")
@@ -126,7 +129,7 @@ def run(second):
             assert match, "missing native client evidence"
             observed,pid,sent,received,elapsed=match.groups()
             assert observed in (uid,"unavailable"),"wrong simulator process"
-            assert int(sent)==int(received)==30000 and int(elapsed)>=600
+            assert int(sent)==int(received)==DURATION*50 and int(elapsed)>=DURATION
             result=run_bounded(["xcrun","xcresulttool","get","test-results","summary","--path",str(OUT/f"{role}.xcresult")],timeout=30,emit_output=False)
             parsed=json.loads(result)
             (OUT/f"{role}-summary.json").write_text(json.dumps(parsed,indent=2)+"\n")
@@ -135,7 +138,7 @@ def run(second):
             evidence.append({"role":role,"destination":uid,"reported_udid":observed,"pid":int(pid),"sent":int(sent),"received":int(received),"elapsed_seconds":int(elapsed)})
         assert evidence[0]["destination"]!=evidence[1]["destination"]
         assert evidence[0]["pid"]!=evidence[1]["pid"],"not independent native processes"
-        (OUT/"result.json").write_text(json.dumps({"status":"PASS","scope":"two independent iOS simulators, synthetic 600-second WSS only","real_ha":False,"physical_audio":False,"clients":evidence},indent=2)+"\n")
+        (OUT/"result.json").write_text(json.dumps({"status":"PASS","scope":"two independent iOS simulators, synthetic WSS only","duration_seconds":DURATION,"real_ha":False,"physical_audio":False,"clients":evidence},indent=2)+"\n")
         print("IOS173_TWO_INDEPENDENT_NATIVE_SIMULATORS=PASS",flush=True)
     finally:
         for _,_,p,_ in processes:

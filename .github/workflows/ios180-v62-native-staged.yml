@@ -1,0 +1,27 @@
+name: V6.2 staged native independent WSS acceptance
+on:
+  push:
+    branches: ['feature/ios180-v62-native-staged-call']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native30:
+    uses: ./.github/workflows/ios180-v62-native-stage.yml
+    with:
+      duration: 30
+  native120:
+    needs: native30
+    uses: ./.github/workflows/ios180-v62-native-stage.yml
+    with:
+      duration: 120
+  native600:
+    needs: native120
+    uses: ./.github/workflows/ios180-v62-native-stage.yml
+    with:
+      duration: 600
+  native1800:
+    needs: native600
+    uses: ./.github/workflows/ios180-v62-native-stage.yml
+    with:
+      duration: 1800

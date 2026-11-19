@@ -1,0 +1,124 @@
+name: V6.2 native independent WSS stage
+on:
+  workflow_call:
+    inputs:
+      duration:
+        required: true
+        type: number
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: xcode-27
+    timeout-minutes: 70
+    env:
+      IOSNEXT_NATIVE_AUDIO_DURATION: ${{ inputs.duration }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Resolve simulator and generate project without cold boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios173
+          {
+            sw_vers
+            for app in /Applications/Xcode*.app; do
+              test -d "$app" || continue
+              echo "Candidate: $app"
+              DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version || true
+            done
+          } | tee build/ios173/xcode-inventory.log
+          # Stable Xcode 27.0 matches the selected iOS 27.0 simulator.
+          selected=""
+          for app in /Applications/Xcode_27.0.app /Applications/Xcode_27.0.0.app /Applications/Xcode_27.app; do
+            test -d "$app" || continue
+            candidate_output="$(DEVELOPER_DIR="$app/Contents/Developer" xcodebuild -version)"
+            candidate_version="${candidate_output%%$'\n'*}"
+            case "$candidate_version" in
+              "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0")
+                selected="$app/Contents/Developer"
+                break ;;
+            esac
+          done
+          if test -z "$selected"; then
+            echo "::error::Required stable Xcode 27.0 toolchain not found"
+            exit 1
+          fi
+          export DEVELOPER_DIR="$selected"
+          echo "DEVELOPER_DIR=$selected" >> "$GITHUB_ENV"
+          {
+            xcodebuild -version
+            xcodebuild -showsdks
+            xcrun simctl list runtimes
+            xcrun simctl list devices available
+          } | tee build/ios173/selected-toolchain.log
+          selected_version="$(xcodebuild -version)"
+          printf '%s\n' "$selected_version"
+          case "${selected_version%%$'\n'*}" in
+            "Xcode 27"|"Xcode 27.0"|"Xcode 27.0.0") ;;
+            *) exit 1 ;;
+          esac
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version | cut -d. -f1)" = 27
+          if ! command -v xcodegen >/dev/null 2>&1; then HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen; fi
+          python3 -m venv "$RUNNER_TEMP/ios173-wss-venv"
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" -m pip install cryptography==46.0.5 websockets==15.0.1
+          "$RUNNER_TEMP/ios173-wss-venv/bin/python" Scripts/Acceptance/audio_network_fixture.py generate-wss Tests/FamilyAudioNetworkTests.swift
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          duration=int(os.environ["IOSNEXT_NATIVE_AUDIO_DURATION"])
+          assert duration in (30,120,600,1800)
+          source=Path("Scripts/Acceptance/FamilyAudioIndependentSimulatorTests.swift.in").read_text()
+          assert source.count("@DURATION_SECONDS@")==1
+          Path("Tests/FamilyAudioIndependentSimulatorTests.swift").write_text(source.replace("@DURATION_SECONDS@",str(duration)))
+          PY
+          xcodegen generate --spec project.yml --project .
+          mkdir -p build/ios173
+          python3 Scripts/Acceptance/boot_simulator.py "iPhone 18 Pro Max" "iOS-27-0" --resolve-only 2>&1 | tee build/ios173/resolve.log
+          printf 'src=%s\nrunner=%s\n' "$GITHUB_SHA" "$RUNNER_NAME" > build/ios173/environment.txt
+      - name: Reserve both cold iPhone simulators
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile Scripts/Acceptance/run_two_native_simulators.py
+          bash -n Scripts/Acceptance/run_native_wss_smoke.sh
+          python3 Scripts/Acceptance/run_two_native_simulators.py reserve 2>&1 | tee build/ios173/dual-reserve.log
+      - name: Build targeted XCTest bundle before cold simulator startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -collect-test-diagnostics never \
+            -project IOSNext.xcodeproj -scheme IOSNext -configuration Debug -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -parallel-testing-enabled NO -disable-concurrent-destination-testing \
+            -derivedDataPath build/ios173/DerivedData \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES CODE_SIGN_IDENTITY="-" \
+            2>&1 | tee build/ios173/BuildForTesting.log
+          XCTESTRUN_PATH="$(find build/ios173/DerivedData/Build/Products -maxdepth 1 -type f -name '*.xctestrun' -print -quit)"
+          test -s "$XCTESTRUN_PATH"
+          echo "XCTESTRUN_PATH=$XCTESTRUN_PATH" >> "$GITHUB_ENV"
+          echo "IOS173_INTEGRATION_BUILD=PASS"
+      - name: Boot both pre-reserved iPhones and verify exact destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Scripts/Acceptance/run_two_native_simulators.py boot 2>&1 | tee build/ios173/boot.log
+      - name: Two independently booted native iPhone simulators WSS
+        shell: bash
+        run: bash Scripts/Acceptance/run_native_wss_smoke.sh dual
+      - name: Preserve original stage evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: V62-native-dual-${{ inputs.duration }}s
+          path: |
+            build/ios173/dual-simulator/
+            build/ios173/BuildForTesting.log
+            build/ios173/resolve.log
+            build/ios173/boot.log
+            build/ios173/dual-reserve.log
+            build/ios173/environment.txt
+            build/ios173/xcode-inventory.log
+            build/ios173/selected-toolchain.log
+          retention-days: 14
+          if-no-files-found: error

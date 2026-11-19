@@ -70,13 +70,15 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(received,1)
         guard received>=1 else {throw FamilyAudioWireError.transportClosed}
         let start=clock.now
-        let target:UInt64=30_000
+        let duration:Int64 = @DURATION_SECONDS@
+        let target=UInt64(duration)*50
+        let firstRenewal=target/3,secondRenewal=2*target/3
         var sent:UInt64=0
         for sequence in UInt64(1)...target {
             try await clock.sleep(until:start.advanced(by:.milliseconds(Int64(sequence)*20)))
-            if sequence==10_000 || sequence==20_000 {
-                let renewal=try await wire.send(.refresh(sequence==10_000 ? (roleA ? "fixture-a-renewed" : "fixture-b-renewed") : (roleA ? "fixture-a-renewed2" : "fixture-b-renewed2")))
-                XCTAssertEqual(renewal.expiresAt,sequence==10_000 ? 200 : 300)
+            if sequence==firstRenewal || sequence==secondRenewal {
+                let renewal=try await wire.send(.refresh(sequence==firstRenewal ? (roleA ? "fixture-a-renewed" : "fixture-b-renewed") : (roleA ? "fixture-a-renewed2" : "fixture-b-renewed2")))
+                XCTAssertEqual(renewal.expiresAt,sequence==firstRenewal ? 200 : 300)
             }
             let encrypted=try codec.seal(sequence:sequence,frame:frame(sequence:sequence,marker:marker))
             guard try await wire.sendMedia(sequence:sequence,ciphertext:encrypted) else {
@@ -87,7 +89,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
             try drain()
         }
         let mediaElapsed=start.duration(to:clock.now)
-        XCTAssertGreaterThanOrEqual(mediaElapsed,.seconds(600))
+        XCTAssertGreaterThanOrEqual(mediaElapsed,.seconds(duration))
         _ = try await wire.send(.heartbeat) // ordered media acknowledgement barrier
         let finalLimit=clock.now.advanced(by:.seconds(8))
         while received<target+1 && clock.now<finalLimit {
@@ -103,7 +105,7 @@ final class FamilyAudioIndependentSimulatorTests: XCTestCase {
         try drain()
         XCTAssertEqual(received,target+1)
         let elapsed=start.duration(to:clock.now)
-        XCTAssertGreaterThanOrEqual(elapsed,.seconds(600))
+        XCTAssertGreaterThanOrEqual(elapsed,.seconds(duration))
         let udid=ProcessInfo.processInfo.environment["SIMULATOR_UDID"] ?? "unavailable"
         print("IOS173_DUAL_RESULT role=\(role) udid=\(udid) pid=\(ProcessInfo.processInfo.processIdentifier) sent=\(sent) received=\(received-1) elapsed=\(mediaElapsed.components.seconds)")
     }
