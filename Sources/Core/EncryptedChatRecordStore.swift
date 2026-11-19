@@ -22,7 +22,7 @@ actor EncryptedChatRecordStore {
         case remove(Key)
     }
     enum Failure: Error, Equatable {
-        case invalidScope, unsafeFile, invalidSchema, corrupt, capacity, database, alreadyImported
+        case invalidScope, unsafeFile, invalidSchema, corrupt, capacity, database, alreadyImported, staleCheckpoint
     }
     private struct Entry: Codable, Equatable {
         let digest: Data
@@ -287,7 +287,13 @@ actor EncryptedChatRecordStore {
         try apply(records.map { .put($0) }, initialImport: true)
     }
 
-    private func apply(_ changes: [Change], initialImport: Bool) throws {
+    /// Atomic compare-and-swap. A stale receiver cannot overwrite a newer
+    /// checkpoint, even if a second SQLite handle opened the same scope.
+    func commitCheckpoint(expected: [Record], changes: [Change]) throws {
+        try apply(changes, initialImport: false, expected: expected)
+    }
+
+    private func apply(_ changes: [Change], initialImport: Bool, expected: [Record]? = nil) throws {
         guard changes.count <= Self.maxRecords else { throw Failure.capacity }
         try db.transaction {
             try Task.checkCancellation()
@@ -295,6 +301,18 @@ actor EncryptedChatRecordStore {
             try Self.checkInventory(db, manifest)
             if initialImport {
                 guard !manifest.imported, manifest.entries.isEmpty else { throw Failure.alreadyImported }
+            }
+            if let expected {
+                guard manifest.imported, expected.count == manifest.entries.count,
+                      expected.count <= Self.maxRecords else { throw Failure.staleCheckpoint }
+                var checked = Set<String>()
+                for record in expected {
+                    try Task.checkCancellation()
+                    let id = try opaqueID(record.key)
+                    guard checked.insert(id).inserted,
+                          let entry = manifest.entries[id],
+                          try read(id, entry: entry) == record else { throw Failure.staleCheckpoint }
+                }
             }
             var touched = Set<String>()
             var total = manifest.entries.values.reduce(0, { $0 + $1.bytes })

@@ -113,6 +113,17 @@ enum ChatHistoryRecordMigration {
         try validate(s)
         return s
     }
+    /// Build only the changed record operations; deletions precede additions
+    /// so replacement at the configured capacity is safe.
+    static func delta(from old: [Store.Record], to new: [Store.Record]) throws -> [Store.Change] {
+        var before: [Store.Key:Data] = [:], after: [Store.Key:Data] = [:]
+        for r in old { guard before.updateValue(r.bytes, forKey:r.key) == nil else { throw ChatHistoryError.invalidArchive } }
+        for r in new { guard after.updateValue(r.bytes, forKey:r.key) == nil else { throw ChatHistoryError.invalidArchive } }
+        let removed: [Store.Change] = old.filter { after[$0.key] == nil }.map { .remove($0.key) }
+        let changed: [Store.Change] = new.filter { before[$0.key] != $0.bytes }.map { .put($0) }
+        return removed + changed
+    }
+
     static func rehearse(_ snapshot: ChatPersistentSnapshot,into candidate: Store) async throws {
         try await candidate.importInitial(split(snapshot))
         let records = try await candidate.records()
